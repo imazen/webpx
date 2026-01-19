@@ -1,0 +1,330 @@
+//! WebP decoding functionality.
+
+use crate::config::DecoderConfig;
+use crate::error::{DecodingError, Error, Result};
+use crate::types::{ImageInfo, YuvPlanes};
+use alloc::vec::Vec;
+use imgref::ImgVec;
+use rgb::{RGB8, RGBA8};
+
+/// Decode WebP data to RGBA pixels.
+///
+/// Returns the decoded pixels and dimensions.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let webp_data: &[u8] = &[/* ... */];
+/// let (pixels, width, height) = webpx::decode_rgba(webp_data)?;
+/// # Ok::<(), webpx::Error>(())
+/// ```
+pub fn decode_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+
+    let ptr =
+        unsafe { libwebp_sys::WebPDecodeRGBA(data.as_ptr(), data.len(), &mut width, &mut height) };
+
+    if ptr.is_null() {
+        return Err(Error::DecodeFailed(DecodingError::BitstreamError));
+    }
+
+    let size = (width as usize) * (height as usize) * 4;
+    let pixels = unsafe {
+        let slice = core::slice::from_raw_parts(ptr, size);
+        let vec = slice.to_vec();
+        libwebp_sys::WebPFree(ptr as *mut _);
+        vec
+    };
+
+    Ok((pixels, width as u32, height as u32))
+}
+
+/// Decode WebP data to RGB pixels (no alpha).
+///
+/// Returns the decoded pixels and dimensions.
+pub fn decode_rgb(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+
+    let ptr =
+        unsafe { libwebp_sys::WebPDecodeRGB(data.as_ptr(), data.len(), &mut width, &mut height) };
+
+    if ptr.is_null() {
+        return Err(Error::DecodeFailed(DecodingError::BitstreamError));
+    }
+
+    let size = (width as usize) * (height as usize) * 3;
+    let pixels = unsafe {
+        let slice = core::slice::from_raw_parts(ptr, size);
+        let vec = slice.to_vec();
+        libwebp_sys::WebPFree(ptr as *mut _);
+        vec
+    };
+
+    Ok((pixels, width as u32, height as u32))
+}
+
+/// Decode WebP data to YUV planes.
+///
+/// Returns YUV420 planar data.
+pub fn decode_yuv(data: &[u8]) -> Result<YuvPlanes> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+    let mut u_ptr: *mut u8 = core::ptr::null_mut();
+    let mut v_ptr: *mut u8 = core::ptr::null_mut();
+    let mut y_stride: i32 = 0;
+    let mut uv_stride: i32 = 0;
+
+    let y_ptr = unsafe {
+        libwebp_sys::WebPDecodeYUV(
+            data.as_ptr(),
+            data.len(),
+            &mut width,
+            &mut height,
+            &mut u_ptr,
+            &mut v_ptr,
+            &mut y_stride,
+            &mut uv_stride,
+        )
+    };
+
+    if y_ptr.is_null() {
+        return Err(Error::DecodeFailed(DecodingError::BitstreamError));
+    }
+
+    let _uv_width = (width + 1) / 2;
+    let uv_height = (height + 1) / 2;
+
+    let y_size = (y_stride as usize) * (height as usize);
+    let uv_size = (uv_stride as usize) * (uv_height as usize);
+
+    let (y, u, v) = unsafe {
+        let y = core::slice::from_raw_parts(y_ptr, y_size).to_vec();
+        let u = core::slice::from_raw_parts(u_ptr, uv_size).to_vec();
+        let v = core::slice::from_raw_parts(v_ptr, uv_size).to_vec();
+        libwebp_sys::WebPFree(y_ptr as *mut _);
+        // u and v are part of the same allocation as y, don't free separately
+        (y, u, v)
+    };
+
+    Ok(YuvPlanes {
+        y,
+        y_stride: y_stride as usize,
+        u,
+        u_stride: uv_stride as usize,
+        v,
+        v_stride: uv_stride as usize,
+        a: None,
+        a_stride: 0,
+        width: width as u32,
+        height: height as u32,
+    })
+}
+
+/// WebP decoder with advanced options.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use webpx::Decoder;
+///
+/// let webp_data: &[u8] = &[/* ... */];
+/// let decoder = Decoder::new(webp_data)?;
+/// let info = decoder.info();
+/// println!("Image: {}x{}, alpha: {}", info.width, info.height, info.has_alpha);
+///
+/// let img: imgref::ImgVec<rgb::RGBA8> = decoder.decode_rgba()?;
+/// # Ok::<(), webpx::Error>(())
+/// ```
+pub struct Decoder<'a> {
+    data: &'a [u8],
+    info: ImageInfo,
+    config: DecoderConfig,
+}
+
+impl<'a> Decoder<'a> {
+    /// Create a new decoder for the given WebP data.
+    pub fn new(data: &'a [u8]) -> Result<Self> {
+        let info = ImageInfo::from_webp(data)?;
+        Ok(Self {
+            data,
+            info,
+            config: DecoderConfig::default(),
+        })
+    }
+
+    /// Get image information.
+    pub fn info(&self) -> &ImageInfo {
+        &self.info
+    }
+
+    /// Set decoder configuration.
+    pub fn config(mut self, config: DecoderConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Enable cropping.
+    pub fn crop(mut self, left: u32, top: u32, width: u32, height: u32) -> Self {
+        self.config.use_cropping = true;
+        self.config.crop_left = left;
+        self.config.crop_top = top;
+        self.config.crop_width = width;
+        self.config.crop_height = height;
+        self
+    }
+
+    /// Enable scaling.
+    pub fn scale(mut self, width: u32, height: u32) -> Self {
+        self.config.use_scaling = true;
+        self.config.scaled_width = width;
+        self.config.scaled_height = height;
+        self
+    }
+
+    /// Decode to RGBA ImgVec.
+    pub fn decode_rgba(self) -> Result<ImgVec<RGBA8>> {
+        let (pixels, width, height) = self.decode_rgba_raw()?;
+
+        // Convert &[u8] to Vec<RGBA8>
+        let rgba_pixels: Vec<RGBA8> = pixels
+            .chunks_exact(4)
+            .map(|c| RGBA8::new(c[0], c[1], c[2], c[3]))
+            .collect();
+
+        Ok(ImgVec::new(rgba_pixels, width as usize, height as usize))
+    }
+
+    /// Decode to RGB ImgVec (no alpha).
+    pub fn decode_rgb(self) -> Result<ImgVec<RGB8>> {
+        let (pixels, width, height) = self.decode_rgb_raw()?;
+
+        // Convert &[u8] to Vec<RGB8>
+        let rgb_pixels: Vec<RGB8> = pixels
+            .chunks_exact(3)
+            .map(|c| RGB8::new(c[0], c[1], c[2]))
+            .collect();
+
+        Ok(ImgVec::new(rgb_pixels, width as usize, height as usize))
+    }
+
+    /// Decode to raw RGBA bytes.
+    pub fn decode_rgba_raw(self) -> Result<(Vec<u8>, u32, u32)> {
+        if self.config.use_cropping || self.config.use_scaling {
+            self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGBA)
+        } else {
+            decode_rgba(self.data)
+        }
+    }
+
+    /// Decode to raw RGB bytes.
+    pub fn decode_rgb_raw(self) -> Result<(Vec<u8>, u32, u32)> {
+        if self.config.use_cropping || self.config.use_scaling {
+            self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGB)
+        } else {
+            decode_rgb(self.data)
+        }
+    }
+
+    /// Decode to YUV planes.
+    pub fn decode_yuv(self) -> Result<YuvPlanes> {
+        // For YUV, we use the simple API since advanced YUV decoding
+        // requires more complex buffer management
+        decode_yuv(self.data)
+    }
+
+    /// Advanced decode with cropping/scaling support.
+    fn decode_advanced(self, mode: libwebp_sys::WEBP_CSP_MODE) -> Result<(Vec<u8>, u32, u32)> {
+        let mut dec_config = libwebp_sys::WebPDecoderConfig::new()
+            .map_err(|_| Error::InvalidConfig("failed to init decoder config".into()))?;
+
+        // Get features
+        let status = unsafe {
+            libwebp_sys::WebPGetFeatures(self.data.as_ptr(), self.data.len(), &mut dec_config.input)
+        };
+        if status != libwebp_sys::VP8StatusCode::VP8_STATUS_OK {
+            return Err(Error::DecodeFailed(DecodingError::from(status as i32)));
+        }
+
+        // Configure output
+        dec_config.output.colorspace = mode;
+
+        // Configure options
+        if self.config.use_cropping {
+            dec_config.options.use_cropping = 1;
+            dec_config.options.crop_left = self.config.crop_left as i32;
+            dec_config.options.crop_top = self.config.crop_top as i32;
+            dec_config.options.crop_width = self.config.crop_width as i32;
+            dec_config.options.crop_height = self.config.crop_height as i32;
+        }
+
+        if self.config.use_scaling {
+            dec_config.options.use_scaling = 1;
+            dec_config.options.scaled_width = self.config.scaled_width as i32;
+            dec_config.options.scaled_height = self.config.scaled_height as i32;
+        }
+
+        dec_config.options.bypass_filtering = self.config.bypass_filtering as i32;
+        dec_config.options.no_fancy_upsampling = self.config.no_fancy_upsampling as i32;
+        dec_config.options.use_threads = self.config.use_threads as i32;
+        dec_config.options.flip = self.config.flip as i32;
+        dec_config.options.alpha_dithering_strength = self.config.alpha_dithering as i32;
+
+        // Decode
+        let status = unsafe {
+            libwebp_sys::WebPDecode(self.data.as_ptr(), self.data.len(), &mut dec_config)
+        };
+
+        if status != libwebp_sys::VP8StatusCode::VP8_STATUS_OK {
+            return Err(Error::DecodeFailed(DecodingError::from(status as i32)));
+        }
+
+        // Get output dimensions
+        let width = if self.config.use_scaling {
+            self.config.scaled_width
+        } else if self.config.use_cropping {
+            self.config.crop_width
+        } else {
+            dec_config.input.width as u32
+        };
+
+        let height = if self.config.use_scaling {
+            self.config.scaled_height
+        } else if self.config.use_cropping {
+            self.config.crop_height
+        } else {
+            dec_config.input.height as u32
+        };
+
+        let bpp = match mode {
+            libwebp_sys::WEBP_CSP_MODE::MODE_RGB | libwebp_sys::WEBP_CSP_MODE::MODE_BGR => 3,
+            _ => 4,
+        };
+
+        let size = (width as usize) * (height as usize) * bpp;
+        let pixels = unsafe {
+            if dec_config.output.u.RGBA.rgba.is_null() {
+                return Err(Error::DecodeFailed(DecodingError::OutOfMemory));
+            }
+            let slice = core::slice::from_raw_parts(dec_config.output.u.RGBA.rgba, size);
+            let vec = slice.to_vec();
+            libwebp_sys::WebPFreeDecBuffer(&mut dec_config.output);
+            vec
+        };
+
+        Ok((pixels, width, height))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Test with a minimal valid WebP (would need actual test data)
+    #[test]
+    fn test_image_info_invalid() {
+        let invalid_data = b"not a webp";
+        assert!(ImageInfo::from_webp(invalid_data).is_err());
+    }
+}

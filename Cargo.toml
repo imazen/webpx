@@ -1,0 +1,27 @@
+[package]
+name = "webpx"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+description = "Complete WebP encoding/decoding with ICC profiles, streaming, and animation support"
+repository = "https://github.com/imazen/webpx"
+keywords = ["webp", "image", "codec", "icc", "animation"]
+categories = ["multimedia::images", "multimedia::encoding"]
+
+[features]
+default = ["decode", "encode", "std"]
+std = ["libwebp-sys/std"]
+decode = []
+encode = []
+animation = []
+icc = []              # ICC profile support (requires mux)
+streaming = []        # Incremental decode/encode
+
+[dependencies]
+libwebp-sys = "0.14.1"
+rgb = "0.8.52"
+imgref = "1.12.0"
+
+[dev-dependencies]
+criterion = "0.6"
