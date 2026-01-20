@@ -254,7 +254,7 @@ pub struct Encoder<'a> {
 
 /// Input pixel format for the encoder.
 ///
-/// All formats store stride in bytes. For contiguous data, stride = width * bpp.
+/// All formats store stride in bytes, except ARGB which stores stride in pixels.
 enum EncoderInput<'a> {
     /// RGBA 4-channel data with stride in bytes.
     Rgba { data: &'a [u8], stride_bytes: u32 },
@@ -264,6 +264,8 @@ enum EncoderInput<'a> {
     Rgb { data: &'a [u8], stride_bytes: u32 },
     /// BGR 3-channel data with stride in bytes.
     Bgr { data: &'a [u8], stride_bytes: u32 },
+    /// Native ARGB as u32 (zero-copy fast path). Stride is in pixels.
+    Argb { data: &'a [u32], stride_pixels: u32 },
     /// YUV planar data.
     Yuv(YuvPlanesRef<'a>),
 }
@@ -424,13 +426,81 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    /// Create a new encoder for YUV planar data.
+    /// Create a new encoder for YUV planar data (zero-copy).
+    ///
+    /// The YUV planes are borrowed directly without copying.
     #[must_use]
     pub fn new_yuv(planes: YuvPlanesRef<'a>) -> Self {
         let width = planes.width;
         let height = planes.height;
         Self {
             data: EncoderInput::Yuv(planes),
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
+    /// Create a new encoder for native ARGB data (zero-copy fast path).
+    ///
+    /// This is the fastest encoding path - data is passed directly to libwebp
+    /// without any pixel format conversion or memory copying.
+    ///
+    /// # Format
+    ///
+    /// Each `u32` is a pixel in `0xAARRGGBB` format (native endian):
+    /// - Bits 24-31: Alpha
+    /// - Bits 16-23: Red
+    /// - Bits 8-15: Green
+    /// - Bits 0-7: Blue
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use webpx::{Encoder, Unstoppable};
+    ///
+    /// // Pack ARGB pixels: alpha=255, red=255, green=0, blue=0
+    /// let red_pixel: u32 = 0xFF_FF_00_00;
+    /// let argb_data: Vec<u32> = vec![red_pixel; 100 * 100];
+    ///
+    /// let webp = Encoder::new_argb(&argb_data, 100, 100)
+    ///     .quality(85.0)
+    ///     .encode(Unstoppable)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn new_argb(data: &'a [u32], width: u32, height: u32) -> Self {
+        Self {
+            data: EncoderInput::Argb {
+                data,
+                stride_pixels: width,
+            },
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
+    /// Create a new encoder for native ARGB data with explicit stride (zero-copy fast path).
+    ///
+    /// See [`Self::new_argb`] for format details.
+    ///
+    /// # Arguments
+    /// * `data` - ARGB pixel data as u32 values
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `stride_pixels` - Row stride in pixels (must be >= width)
+    #[must_use]
+    pub fn new_argb_stride(data: &'a [u32], width: u32, height: u32, stride_pixels: u32) -> Self {
+        Self {
+            data: EncoderInput::Argb {
+                data,
+                stride_pixels,
+            },
             width,
             height,
             config: EncoderConfig::default(),
@@ -466,7 +536,13 @@ impl<'a> Encoder<'a> {
         };
         // imgref stride() returns stride in pixels, we need bytes
         let stride_bytes = (img.stride() * bpp) as u32;
-        Self::from_pixels_internal(data, img.width() as u32, img.height() as u32, stride_bytes, P::LAYOUT)
+        Self::from_pixels_internal(
+            data,
+            img.width() as u32,
+            img.height() as u32,
+            stride_bytes,
+            P::LAYOUT,
+        )
     }
 
     /// Alias for [`Self::from_img`] for backwards compatibility.
@@ -728,6 +804,31 @@ impl<'a> Encoder<'a> {
                         *stride_bytes as i32,
                     )
                 }
+            }
+            EncoderInput::Argb {
+                data,
+                stride_pixels,
+            } => {
+                // Zero-copy fast path: set argb pointer directly without Import
+                let min_len = (*stride_pixels as usize) * (self.height as usize);
+                if data.len() < min_len {
+                    return Err(at!(Error::InvalidInput(alloc::format!(
+                        "ARGB buffer too small: got {} pixels, expected {}",
+                        data.len(),
+                        min_len
+                    ))));
+                }
+                if *stride_pixels < self.width {
+                    return Err(at!(Error::InvalidInput(alloc::format!(
+                        "ARGB stride too small: got {}, minimum {}",
+                        stride_pixels,
+                        self.width
+                    ))));
+                }
+                picture.use_argb = 1;
+                picture.argb = data.as_ptr() as *mut u32;
+                picture.argb_stride = *stride_pixels as i32;
+                1 // Success - no import function needed (zero-copy)
             }
             EncoderInput::Yuv(planes) => {
                 picture.use_argb = 0;

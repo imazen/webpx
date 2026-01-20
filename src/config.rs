@@ -760,7 +760,9 @@ impl EncoderConfig {
         img: imgref::ImgRef<'_, P>,
         stop: impl Stop,
     ) -> Result<Vec<u8>> {
-        crate::Encoder::from_img(img).config(self.clone()).encode(stop)
+        crate::Encoder::from_img(img)
+            .config(self.clone())
+            .encode(stop)
     }
 
     /// Encode RGBA byte data to WebP.

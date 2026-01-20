@@ -1840,6 +1840,86 @@ mod encoder_advanced_tests {
     }
 
     #[test]
+    fn test_encoder_new_argb_zero_copy() {
+        // Test the zero-copy ARGB fast path
+        let width = 32u32;
+        let height = 32u32;
+
+        // Create ARGB data as u32 values: 0xAARRGGBB
+        // Red pixels: alpha=255, red=255, green=0, blue=0
+        let red_pixel: u32 = 0xFF_FF_00_00;
+        let argb_data: Vec<u32> = vec![red_pixel; (width * height) as usize];
+
+        let webp = Encoder::new_argb(&argb_data, width, height)
+            .quality(85.0)
+            .encode(Unstoppable)
+            .expect("encode");
+
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+
+        // Decode and verify the pixels are red
+        let (decoded, dec_w, dec_h) = decode_rgba(&webp).expect("decode");
+        assert_eq!(dec_w, width);
+        assert_eq!(dec_h, height);
+
+        // Check first pixel is roughly red (allowing for lossy compression)
+        let r = decoded[0];
+        let g = decoded[1];
+        let b = decoded[2];
+        assert!(r > 200, "expected red > 200, got {}", r);
+        assert!(g < 50, "expected green < 50, got {}", g);
+        assert!(b < 50, "expected blue < 50, got {}", b);
+    }
+
+    #[test]
+    fn test_encoder_new_argb_with_stride() {
+        // Test ARGB with non-contiguous stride
+        let width = 16u32;
+        let height = 16u32;
+        let stride = 32u32; // Larger than width
+
+        // Create ARGB data with stride padding
+        // Green pixels: alpha=255, red=0, green=255, blue=0
+        let green_pixel: u32 = 0xFF_00_FF_00;
+        let argb_data: Vec<u32> = vec![green_pixel; (stride * height) as usize];
+
+        let webp = Encoder::new_argb_stride(&argb_data, width, height, stride)
+            .quality(85.0)
+            .encode(Unstoppable)
+            .expect("encode");
+
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+    }
+
+    #[test]
+    fn test_encoder_new_argb_lossless() {
+        // Test lossless encoding with ARGB zero-copy path
+        let width = 8u32;
+        let height = 8u32;
+
+        // Blue pixel: alpha=255, red=0, green=0, blue=255
+        let blue_pixel: u32 = 0xFF_00_00_FF;
+        let argb_data: Vec<u32> = vec![blue_pixel; (width * height) as usize];
+
+        let webp = Encoder::new_argb(&argb_data, width, height)
+            .lossless(true)
+            .encode(Unstoppable)
+            .expect("encode");
+
+        // Decode and verify exact pixel values (lossless)
+        let (decoded, _, _) = decode_rgba(&webp).expect("decode");
+        // ARGB 0xFF_00_00_FF -> RGBA should be R=0, G=0, B=255, A=255
+        assert_eq!(decoded[0], 0, "red should be 0");
+        assert_eq!(decoded[1], 0, "green should be 0");
+        assert_eq!(decoded[2], 255, "blue should be 255");
+        assert_eq!(decoded[3], 255, "alpha should be 255");
+    }
+
+    #[test]
     fn test_encoder_from_rgba() {
         use imgref::ImgVec;
         use rgb::RGBA8;

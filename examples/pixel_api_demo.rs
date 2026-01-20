@@ -6,15 +6,16 @@
 //!
 //! ## Quick Reference
 //!
-//! | Input Format        | Recommended Method                           |
-//! |---------------------|----------------------------------------------|
-//! | `&[u8]` RGBA        | `Encoder::new_rgba(data, w, h).encode()`     |
-//! | `&[u8]` RGB         | `Encoder::new_rgb(data, w, h).encode()`      |
-//! | `&[u8]` BGRA        | `Encoder::new_bgra(data, w, h).encode()`     |
-//! | `&[u8]` BGR         | `Encoder::new_bgr(data, w, h).encode()`      |
-//! | `&[RGBA8]` etc      | `Encoder::from_pixels(pixels, w, h).encode()`|
-//! | `ImgRef<RGBA8>` etc | `Encoder::from_img(img).encode()`            |
-//! | `YuvPlanesRef`      | `Encoder::new_yuv(planes).encode()`          |
+//! | Input Format        | Recommended Method                           | Zero-copy? |
+//! |---------------------|----------------------------------------------|------------|
+//! | `&[u32]` ARGB       | `Encoder::new_argb(data, w, h).encode()`     | ✅ Yes     |
+//! | `YuvPlanesRef`      | `Encoder::new_yuv(planes).encode()`          | ✅ Yes     |
+//! | `&[u8]` RGBA        | `Encoder::new_rgba(data, w, h).encode()`     | ❌ No      |
+//! | `&[u8]` RGB         | `Encoder::new_rgb(data, w, h).encode()`      | ❌ No      |
+//! | `&[u8]` BGRA        | `Encoder::new_bgra(data, w, h).encode()`     | ❌ No      |
+//! | `&[u8]` BGR         | `Encoder::new_bgr(data, w, h).encode()`      | ❌ No      |
+//! | `&[RGBA8]` etc      | `Encoder::from_pixels(pixels, w, h).encode()`| ❌ No      |
+//! | `ImgRef<RGBA8>` etc | `Encoder::from_img(img).encode()`            | ❌ No      |
 //!
 //! For reusable config across multiple images, use `EncoderConfig`:
 //! - `config.encode_rgba(data, w, h, stop)` for raw bytes
@@ -63,6 +64,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Encoder::new_bgr: {} bytes", webp.len());
 
     // =========================================================================
+    // ZERO-COPY FAST PATHS - data passed directly to libwebp without copying
+    // =========================================================================
+
+    println!("\n--- Zero-copy fast paths ---");
+
+    // ARGB as u32 (native libwebp format, zero-copy)
+    // Format: 0xAARRGGBB (alpha in high byte)
+    let red_argb: u32 = 0xFF_FF_00_00; // alpha=255, red=255, green=0, blue=0
+    let argb_data: Vec<u32> = vec![red_argb; 100 * 100];
+    let webp = Encoder::new_argb(&argb_data, 100, 100)
+        .quality(85.0)
+        .encode(Unstoppable)?;
+    println!("  Encoder::new_argb (zero-copy): {} bytes", webp.len());
+
+    // YUV planes are also zero-copy (shown later with YuvPlanesRef)
+
+    // =========================================================================
     // TYPED PIXELS - format inferred from type
     // =========================================================================
 
@@ -83,7 +101,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Encoder::from_pixels (RGB8): {} bytes", webp.len());
 
     // Vec<BGRA8>
-    let bgra_pixels: Vec<BGRA8> = vec![BGRA8 { b: 0, g: 0, r: 255, a: 255 }; 100 * 100];
+    let bgra_pixels: Vec<BGRA8> = vec![
+        BGRA8 {
+            b: 0,
+            g: 0,
+            r: 255,
+            a: 255
+        };
+        100 * 100
+    ];
     let webp = Encoder::from_pixels(&bgra_pixels, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
@@ -98,9 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Contiguous imgref
     let pixels: Vec<RGBA8> = vec![RGBA8::new(0, 0, 255, 255); 100 * 100];
     let img = imgref::Img::new(pixels.as_slice(), 100, 100);
-    let webp = Encoder::from_img(img)
-        .quality(85.0)
-        .encode(Unstoppable)?;
+    let webp = Encoder::from_img(img).quality(85.0).encode(Unstoppable)?;
     println!("  Encoder::from_img (contiguous): {} bytes", webp.len());
 
     // imgref with stride (e.g., cropped region)
@@ -164,13 +188,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  add_frame_rgba: {} bytes, 2 frames", webp.len());
 
     println!("\n=== SUMMARY ===");
-    println!("
+    println!(
+        "
 The 'one right way' for each input format:
 
-  &[u8] with known format  →  Encoder::new_rgba/rgb/bgra/bgr()
-  &[P] typed pixels        →  Encoder::from_pixels()
-  ImgRef<P>                →  Encoder::from_img()
-  YuvPlanesRef             →  Encoder::new_yuv()
+  ZERO-COPY (fastest):
+    &[u32] ARGB (0xAARRGGBB) →  Encoder::new_argb()
+    YuvPlanesRef             →  Encoder::new_yuv()
+
+  WITH COPY (convenient):
+    &[u8] with known format  →  Encoder::new_rgba/rgb/bgra/bgr()
+    &[P] typed pixels        →  Encoder::from_pixels()
+    ImgRef<P>                →  Encoder::from_img()
 
 For reusable config:
 
@@ -182,7 +211,8 @@ For animation:
 
   &[P]        →  encoder.add_frame()
   &[u8]       →  encoder.add_frame_rgba/rgb/bgra/bgr()
-");
+"
+    );
 
     Ok(())
 }
