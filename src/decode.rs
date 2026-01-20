@@ -6,6 +6,7 @@ use crate::error::{DecodingError, Error, Result};
 use crate::types::{ImageInfo, YuvPlanes};
 use alloc::vec::Vec;
 use imgref::ImgVec;
+use rgb::alt::{BGR8, BGRA8};
 use rgb::{RGB8, RGBA8};
 
 /// Decode WebP data to RGBA pixels.
@@ -64,6 +65,291 @@ pub fn decode_rgb(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     };
 
     Ok((pixels, width as u32, height as u32))
+}
+
+/// Decode WebP data to BGRA pixels.
+///
+/// BGRA is the native format on Windows and some GPU APIs.
+/// Returns the decoded pixels and dimensions.
+pub fn decode_bgra(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+
+    let ptr =
+        unsafe { libwebp_sys::WebPDecodeBGRA(data.as_ptr(), data.len(), &mut width, &mut height) };
+
+    if ptr.is_null() {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    let size = (width as usize) * (height as usize) * 4;
+    let pixels = unsafe {
+        let slice = core::slice::from_raw_parts(ptr, size);
+        let vec = slice.to_vec();
+        libwebp_sys::WebPFree(ptr as *mut _);
+        vec
+    };
+
+    Ok((pixels, width as u32, height as u32))
+}
+
+/// Decode WebP data to BGR pixels (no alpha).
+///
+/// BGR is common in OpenCV and some image libraries.
+/// Returns the decoded pixels and dimensions.
+pub fn decode_bgr(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+
+    let ptr =
+        unsafe { libwebp_sys::WebPDecodeBGR(data.as_ptr(), data.len(), &mut width, &mut height) };
+
+    if ptr.is_null() {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    let size = (width as usize) * (height as usize) * 3;
+    let pixels = unsafe {
+        let slice = core::slice::from_raw_parts(ptr, size);
+        let vec = slice.to_vec();
+        libwebp_sys::WebPFree(ptr as *mut _);
+        vec
+    };
+
+    Ok((pixels, width as u32, height as u32))
+}
+
+/// Decode WebP data directly into a pre-allocated RGBA buffer (zero-copy).
+///
+/// This function decodes directly into the provided buffer, avoiding
+/// allocation and copy overhead.
+///
+/// # Arguments
+/// * `data` - WebP encoded data
+/// * `output` - Pre-allocated output buffer (must be at least stride * height bytes)
+/// * `stride_bytes` - Row stride in bytes (must be >= width * 4)
+///
+/// # Returns
+/// Width and height of the decoded image.
+///
+/// # Example
+/// ```rust,no_run
+/// let webp_data: &[u8] = &[]; // placeholder
+/// let info = webpx::ImageInfo::from_webp(&webp_data)?;
+/// let stride = info.width as usize * 4;
+/// let mut buffer = vec![0u8; stride * info.height as usize];
+/// let (w, h) = webpx::decode_rgba_into(&webp_data, &mut buffer, stride as u32)?;
+/// # Ok::<(), webpx::At<webpx::Error>>(())
+/// ```
+pub fn decode_rgba_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+
+    // Get dimensions first
+    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0 {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    // Validate buffer
+    let required = (stride_bytes as usize).saturating_mul(height as usize);
+    if output.len() < required {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "output buffer too small: got {}, need {} (stride {} × height {})",
+            output.len(),
+            required,
+            stride_bytes,
+            height
+        ))));
+    }
+    if (stride_bytes as i32) < width * 4 {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "stride too small: got {}, minimum {}",
+            stride_bytes,
+            width * 4
+        ))));
+    }
+
+    let result = unsafe {
+        libwebp_sys::WebPDecodeRGBAInto(
+            data.as_ptr(),
+            data.len(),
+            output.as_mut_ptr(),
+            output.len(),
+            stride_bytes as i32,
+        )
+    };
+
+    if result.is_null() {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    Ok((width as u32, height as u32))
+}
+
+/// Decode WebP data directly into a pre-allocated BGRA buffer (zero-copy).
+///
+/// BGRA is the native format on Windows and some GPU APIs.
+///
+/// # Arguments
+/// * `data` - WebP encoded data
+/// * `output` - Pre-allocated output buffer (must be at least stride * height bytes)
+/// * `stride_bytes` - Row stride in bytes (must be >= width * 4)
+///
+/// # Returns
+/// Width and height of the decoded image.
+pub fn decode_bgra_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+
+    // Get dimensions first
+    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0 {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    // Validate buffer
+    let required = (stride_bytes as usize).saturating_mul(height as usize);
+    if output.len() < required {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "output buffer too small: got {}, need {} (stride {} × height {})",
+            output.len(),
+            required,
+            stride_bytes,
+            height
+        ))));
+    }
+    if (stride_bytes as i32) < width * 4 {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "stride too small: got {}, minimum {}",
+            stride_bytes,
+            width * 4
+        ))));
+    }
+
+    let result = unsafe {
+        libwebp_sys::WebPDecodeBGRAInto(
+            data.as_ptr(),
+            data.len(),
+            output.as_mut_ptr(),
+            output.len(),
+            stride_bytes as i32,
+        )
+    };
+
+    if result.is_null() {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    Ok((width as u32, height as u32))
+}
+
+/// Decode WebP data directly into a pre-allocated RGB buffer (zero-copy).
+///
+/// # Arguments
+/// * `data` - WebP encoded data
+/// * `output` - Pre-allocated output buffer (must be at least stride * height bytes)
+/// * `stride_bytes` - Row stride in bytes (must be >= width * 3)
+///
+/// # Returns
+/// Width and height of the decoded image.
+pub fn decode_rgb_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+
+    // Get dimensions first
+    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0 {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    // Validate buffer
+    let required = (stride_bytes as usize).saturating_mul(height as usize);
+    if output.len() < required {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "output buffer too small: got {}, need {} (stride {} × height {})",
+            output.len(),
+            required,
+            stride_bytes,
+            height
+        ))));
+    }
+    if (stride_bytes as i32) < width * 3 {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "stride too small: got {}, minimum {}",
+            stride_bytes,
+            width * 3
+        ))));
+    }
+
+    let result = unsafe {
+        libwebp_sys::WebPDecodeRGBInto(
+            data.as_ptr(),
+            data.len(),
+            output.as_mut_ptr(),
+            output.len(),
+            stride_bytes as i32,
+        )
+    };
+
+    if result.is_null() {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    Ok((width as u32, height as u32))
+}
+
+/// Decode WebP data directly into a pre-allocated BGR buffer (zero-copy).
+///
+/// BGR is common in OpenCV and some image libraries.
+///
+/// # Arguments
+/// * `data` - WebP encoded data
+/// * `output` - Pre-allocated output buffer (must be at least stride * height bytes)
+/// * `stride_bytes` - Row stride in bytes (must be >= width * 3)
+///
+/// # Returns
+/// Width and height of the decoded image.
+pub fn decode_bgr_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+
+    // Get dimensions first
+    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0 {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    // Validate buffer
+    let required = (stride_bytes as usize).saturating_mul(height as usize);
+    if output.len() < required {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "output buffer too small: got {}, need {} (stride {} × height {})",
+            output.len(),
+            required,
+            stride_bytes,
+            height
+        ))));
+    }
+    if (stride_bytes as i32) < width * 3 {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "stride too small: got {}, minimum {}",
+            stride_bytes,
+            width * 3
+        ))));
+    }
+
+    let result = unsafe {
+        libwebp_sys::WebPDecodeBGRInto(
+            data.as_ptr(),
+            data.len(),
+            output.as_mut_ptr(),
+            output.len(),
+            stride_bytes as i32,
+        )
+    };
+
+    if result.is_null() {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    Ok((width as u32, height as u32))
 }
 
 /// Decode WebP data to YUV planes.
@@ -225,6 +511,63 @@ impl<'a> Decoder<'a> {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGB)
         } else {
             decode_rgb(self.data)
+        }
+    }
+
+    /// Decode to BGRA ImgVec.
+    ///
+    /// BGRA is the native format on Windows and some GPU APIs.
+    pub fn decode_bgra(self) -> Result<ImgVec<BGRA8>> {
+        let (pixels, width, height) = self.decode_bgra_raw()?;
+
+        // Convert &[u8] to Vec<BGRA8>
+        let bgra_pixels: Vec<BGRA8> = pixels
+            .chunks_exact(4)
+            .map(|c| BGRA8 {
+                b: c[0],
+                g: c[1],
+                r: c[2],
+                a: c[3],
+            })
+            .collect();
+
+        Ok(ImgVec::new(bgra_pixels, width as usize, height as usize))
+    }
+
+    /// Decode to BGR ImgVec (no alpha).
+    ///
+    /// BGR is common in OpenCV and some image libraries.
+    pub fn decode_bgr(self) -> Result<ImgVec<BGR8>> {
+        let (pixels, width, height) = self.decode_bgr_raw()?;
+
+        // Convert &[u8] to Vec<BGR8>
+        let bgr_pixels: Vec<BGR8> = pixels
+            .chunks_exact(3)
+            .map(|c| BGR8 {
+                b: c[0],
+                g: c[1],
+                r: c[2],
+            })
+            .collect();
+
+        Ok(ImgVec::new(bgr_pixels, width as usize, height as usize))
+    }
+
+    /// Decode to raw BGRA bytes.
+    pub fn decode_bgra_raw(self) -> Result<(Vec<u8>, u32, u32)> {
+        if self.config.use_cropping || self.config.use_scaling {
+            self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGRA)
+        } else {
+            decode_bgra(self.data)
+        }
+    }
+
+    /// Decode to raw BGR bytes.
+    pub fn decode_bgr_raw(self) -> Result<(Vec<u8>, u32, u32)> {
+        if self.config.use_cropping || self.config.use_scaling {
+            self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGR)
+        } else {
+            decode_bgr(self.data)
         }
     }
 

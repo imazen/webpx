@@ -7,6 +7,7 @@ use crate::types::YuvPlanesRef;
 use alloc::vec::Vec;
 use enough::Stop;
 use imgref::ImgRef;
+use rgb::alt::{BGR8, BGRA8};
 use rgb::{RGB8, RGBA8};
 
 /// Context for progress hook callback.
@@ -80,6 +81,52 @@ pub fn encode_rgb(
     EncoderConfig::new()
         .quality(quality)
         .encode_rgb_stoppable(data, width, height, &stop)
+}
+
+/// Encode BGRA pixels to WebP.
+///
+/// BGRA is the native format on Windows and some GPU APIs.
+///
+/// # Arguments
+///
+/// * `data` - BGRA pixel data (4 bytes per pixel)
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `quality` - Quality factor (0.0 = smallest, 100.0 = best)
+/// * `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
+pub fn encode_bgra(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: f32,
+    stop: impl Stop,
+) -> Result<Vec<u8>> {
+    Encoder::new_bgra(data, width, height)
+        .quality(quality)
+        .encode(stop)
+}
+
+/// Encode BGR pixels to WebP (no alpha).
+///
+/// BGR is common in OpenCV and some image libraries.
+///
+/// # Arguments
+///
+/// * `data` - BGR pixel data (3 bytes per pixel)
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `quality` - Quality factor (0.0 = smallest, 100.0 = best)
+/// * `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
+pub fn encode_bgr(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: f32,
+    stop: impl Stop,
+) -> Result<Vec<u8>> {
+    Encoder::new_bgr(data, width, height)
+        .quality(quality)
+        .encode(stop)
 }
 
 /// Encode to lossless WebP.
@@ -405,18 +452,45 @@ pub struct Encoder<'a> {
     icc_profile: Option<&'a [u8]>,
 }
 
+/// Input pixel format for the encoder.
+///
+/// All formats store stride in bytes. For contiguous data, stride = width * bpp.
 enum EncoderInput<'a> {
-    Rgba(&'a [u8]),
-    Rgb(&'a [u8]),
+    /// RGBA 4-channel data with stride in bytes.
+    Rgba {
+        data: &'a [u8],
+        stride_bytes: u32,
+    },
+    /// BGRA 4-channel data with stride in bytes.
+    Bgra {
+        data: &'a [u8],
+        stride_bytes: u32,
+    },
+    /// RGB 3-channel data with stride in bytes.
+    Rgb {
+        data: &'a [u8],
+        stride_bytes: u32,
+    },
+    /// BGR 3-channel data with stride in bytes.
+    Bgr {
+        data: &'a [u8],
+        stride_bytes: u32,
+    },
+    /// YUV planar data.
     Yuv(YuvPlanesRef<'a>),
 }
 
 impl<'a> Encoder<'a> {
-    /// Create a new encoder for RGBA data.
+    /// Create a new encoder for contiguous RGBA data.
+    ///
+    /// For non-contiguous data with stride, use [`Self::new_rgba_stride`].
     #[must_use]
     pub fn new(data: &'a [u8], width: u32, height: u32) -> Self {
         Self {
-            data: EncoderInput::Rgba(data),
+            data: EncoderInput::Rgba {
+                data,
+                stride_bytes: width * 4,
+            },
             width,
             height,
             config: EncoderConfig::default(),
@@ -425,11 +499,128 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    /// Create a new encoder for RGB data (no alpha).
+    /// Create a new encoder for RGBA data with explicit stride.
+    ///
+    /// # Arguments
+    /// * `data` - RGBA pixel data
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `stride_bytes` - Row stride in bytes (must be >= width * 4)
+    #[must_use]
+    pub fn new_rgba_stride(data: &'a [u8], width: u32, height: u32, stride_bytes: u32) -> Self {
+        Self {
+            data: EncoderInput::Rgba { data, stride_bytes },
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
+    /// Create a new encoder for contiguous BGRA data.
+    ///
+    /// For non-contiguous data with stride, use [`Self::new_bgra_stride`].
+    #[must_use]
+    pub fn new_bgra(data: &'a [u8], width: u32, height: u32) -> Self {
+        Self {
+            data: EncoderInput::Bgra {
+                data,
+                stride_bytes: width * 4,
+            },
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
+    /// Create a new encoder for BGRA data with explicit stride.
+    ///
+    /// # Arguments
+    /// * `data` - BGRA pixel data
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `stride_bytes` - Row stride in bytes (must be >= width * 4)
+    #[must_use]
+    pub fn new_bgra_stride(data: &'a [u8], width: u32, height: u32, stride_bytes: u32) -> Self {
+        Self {
+            data: EncoderInput::Bgra { data, stride_bytes },
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
+    /// Create a new encoder for contiguous RGB data (no alpha).
+    ///
+    /// For non-contiguous data with stride, use [`Self::new_rgb_stride`].
     #[must_use]
     pub fn new_rgb(data: &'a [u8], width: u32, height: u32) -> Self {
         Self {
-            data: EncoderInput::Rgb(data),
+            data: EncoderInput::Rgb {
+                data,
+                stride_bytes: width * 3,
+            },
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
+    /// Create a new encoder for RGB data with explicit stride.
+    ///
+    /// # Arguments
+    /// * `data` - RGB pixel data
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `stride_bytes` - Row stride in bytes (must be >= width * 3)
+    #[must_use]
+    pub fn new_rgb_stride(data: &'a [u8], width: u32, height: u32, stride_bytes: u32) -> Self {
+        Self {
+            data: EncoderInput::Rgb { data, stride_bytes },
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
+    /// Create a new encoder for contiguous BGR data (no alpha).
+    ///
+    /// For non-contiguous data with stride, use [`Self::new_bgr_stride`].
+    #[must_use]
+    pub fn new_bgr(data: &'a [u8], width: u32, height: u32) -> Self {
+        Self {
+            data: EncoderInput::Bgr {
+                data,
+                stride_bytes: width * 3,
+            },
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
+    /// Create a new encoder for BGR data with explicit stride.
+    ///
+    /// # Arguments
+    /// * `data` - BGR pixel data
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `stride_bytes` - Row stride in bytes (must be >= width * 3)
+    #[must_use]
+    pub fn new_bgr_stride(data: &'a [u8], width: u32, height: u32, stride_bytes: u32) -> Self {
+        Self {
+            data: EncoderInput::Bgr { data, stride_bytes },
             width,
             height,
             config: EncoderConfig::default(),
@@ -454,23 +645,59 @@ impl<'a> Encoder<'a> {
     }
 
     /// Create encoder from an imgref `ImgRef<RGBA8>`.
+    ///
+    /// Properly handles non-contiguous stride from imgref.
     #[must_use]
     pub fn from_rgba(img: ImgRef<'a, RGBA8>) -> Self {
         // SAFETY: RGBA8 is repr(C) and has the same layout as [u8; 4]
         let data = unsafe {
             core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * 4)
         };
-        Self::new(data, img.width() as u32, img.height() as u32)
+        // imgref stride() returns stride in pixels, we need bytes
+        let stride_bytes = (img.stride() * 4) as u32;
+        Self::new_rgba_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
+    }
+
+    /// Create encoder from an imgref `ImgRef<BGRA8>`.
+    ///
+    /// Properly handles non-contiguous stride from imgref.
+    #[must_use]
+    pub fn from_bgra(img: ImgRef<'a, BGRA8>) -> Self {
+        // SAFETY: BGRA8 is repr(C) and has the same layout as [u8; 4]
+        let data = unsafe {
+            core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * 4)
+        };
+        // imgref stride() returns stride in pixels, we need bytes
+        let stride_bytes = (img.stride() * 4) as u32;
+        Self::new_bgra_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
     }
 
     /// Create encoder from an imgref `ImgRef<RGB8>`.
+    ///
+    /// Properly handles non-contiguous stride from imgref.
     #[must_use]
     pub fn from_rgb(img: ImgRef<'a, RGB8>) -> Self {
         // SAFETY: RGB8 is repr(C) and has the same layout as [u8; 3]
         let data = unsafe {
             core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * 3)
         };
-        Self::new_rgb(data, img.width() as u32, img.height() as u32)
+        // imgref stride() returns stride in pixels, we need bytes
+        let stride_bytes = (img.stride() * 3) as u32;
+        Self::new_rgb_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
+    }
+
+    /// Create encoder from an imgref `ImgRef<BGR8>`.
+    ///
+    /// Properly handles non-contiguous stride from imgref.
+    #[must_use]
+    pub fn from_bgr(img: ImgRef<'a, BGR8>) -> Self {
+        // SAFETY: BGR8 is repr(C) and has the same layout as [u8; 3]
+        let data = unsafe {
+            core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * 3)
+        };
+        // imgref stride() returns stride in pixels, we need bytes
+        let stride_bytes = (img.stride() * 3) as u32;
+        Self::new_bgr_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
     }
 
     /// Set encoding quality (0.0 = smallest, 100.0 = best).
@@ -573,25 +800,47 @@ impl<'a> Encoder<'a> {
 
         // Import pixel data
         let import_ok = match &self.data {
-            EncoderInput::Rgba(data) => {
-                validate_buffer_size(data.len(), self.width, self.height, 4)?;
+            EncoderInput::Rgba { data, stride_bytes } => {
+                validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
                 picture.use_argb = 1;
                 unsafe {
                     libwebp_sys::WebPPictureImportRGBA(
                         &mut picture,
                         data.as_ptr(),
-                        (self.width * 4) as i32,
+                        *stride_bytes as i32,
                     )
                 }
             }
-            EncoderInput::Rgb(data) => {
-                validate_buffer_size(data.len(), self.width, self.height, 3)?;
+            EncoderInput::Bgra { data, stride_bytes } => {
+                validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
+                picture.use_argb = 1;
+                unsafe {
+                    libwebp_sys::WebPPictureImportBGRA(
+                        &mut picture,
+                        data.as_ptr(),
+                        *stride_bytes as i32,
+                    )
+                }
+            }
+            EncoderInput::Rgb { data, stride_bytes } => {
+                validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 3)?;
                 picture.use_argb = 1;
                 unsafe {
                     libwebp_sys::WebPPictureImportRGB(
                         &mut picture,
                         data.as_ptr(),
-                        (self.width * 3) as i32,
+                        *stride_bytes as i32,
+                    )
+                }
+            }
+            EncoderInput::Bgr { data, stride_bytes } => {
+                validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 3)?;
+                picture.use_argb = 1;
+                unsafe {
+                    libwebp_sys::WebPPictureImportBGR(
+                        &mut picture,
+                        data.as_ptr(),
+                        *stride_bytes as i32,
                     )
                 }
             }
@@ -702,6 +951,39 @@ pub(crate) fn validate_buffer_size(size: usize, width: u32, height: u32, bpp: u3
             "buffer too small: got {}, expected {}",
             size,
             expected
+        ))));
+    }
+    Ok(())
+}
+
+/// Validate buffer size with stride support.
+///
+/// The buffer must have at least `stride_bytes * height` bytes,
+/// and stride must be at least `width * bpp`.
+pub(crate) fn validate_buffer_size_stride(
+    size: usize,
+    width: u32,
+    height: u32,
+    stride_bytes: u32,
+    bpp: u32,
+) -> Result<()> {
+    let min_stride = (width as usize).saturating_mul(bpp as usize);
+    if (stride_bytes as usize) < min_stride {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "stride too small: got {}, minimum {}",
+            stride_bytes,
+            min_stride
+        ))));
+    }
+
+    let expected = (stride_bytes as usize).saturating_mul(height as usize);
+    if size < expected {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "buffer too small: got {}, expected {} (stride {} × height {})",
+            size,
+            expected,
+            stride_bytes,
+            height
         ))));
     }
     Ok(())
