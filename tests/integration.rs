@@ -1577,22 +1577,20 @@ mod streaming_advanced_tests {
         assert!(decoder.dimensions().is_none());
         assert_eq!(decoder.decoded_rows(), 0);
 
-        // Feed data in chunks to see partial progress
+        // Feed data in chunks
         let chunk_size = 100;
         for chunk in webp.chunks(chunk_size) {
             let status = decoder.append(chunk);
-            if status.is_ok() {
-                // Once we have some data, dimensions might be available
-                if decoder.dimensions().is_some() {
-                    break;
-                }
+            if matches!(status, Ok(DecodeStatus::Complete)) {
+                break;
             }
         }
 
-        // Dimensions may or may not be available depending on when header is parsed
-        // This tests the API works, not specific behavior
-        let _ = decoder.dimensions();
-        let _ = decoder.decoded_rows();
+        // After decode completes, dimensions MUST be available
+        let (w, h) = decoder.dimensions().expect("dimensions should be available after decode");
+        assert_eq!(w, width);
+        assert_eq!(h, height);
+        assert_eq!(decoder.decoded_rows(), height);
     }
 
     #[test]

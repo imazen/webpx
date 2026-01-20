@@ -153,31 +153,26 @@ impl StreamingDecoder {
     /// or decoding is complete.
     pub fn append(&mut self, data: &[u8]) -> Result<DecodeStatus> {
         let status = unsafe { libwebp_sys::WebPIAppend(self.decoder, data.as_ptr(), data.len()) };
+        self.process_status(status)
+    }
 
+    /// Process the VP8 status code and update internal state.
+    fn process_status(
+        &mut self,
+        status: libwebp_sys::VP8StatusCode,
+    ) -> Result<DecodeStatus> {
         match status {
-            libwebp_sys::VP8StatusCode::VP8_STATUS_OK => Ok(DecodeStatus::Complete),
+            libwebp_sys::VP8StatusCode::VP8_STATUS_OK => {
+                // Decode complete - update dimensions
+                self.update_dimensions();
+                Ok(DecodeStatus::Complete)
+            }
             libwebp_sys::VP8StatusCode::VP8_STATUS_SUSPENDED => {
-                // Get progress
-                let mut last_y = 0i32;
-                let mut width = 0i32;
-                let mut height = 0i32;
+                // In progress - update dimensions and check rows
+                self.update_dimensions();
 
-                unsafe {
-                    libwebp_sys::WebPIDecGetRGB(
-                        self.decoder,
-                        &mut last_y,
-                        &mut width,
-                        &mut height,
-                        ptr::null_mut(),
-                    );
-                }
-
-                self.width = width;
-                self.height = height;
-                self.last_y = last_y;
-
-                if last_y > 0 {
-                    Ok(DecodeStatus::Partial(last_y as u32))
+                if self.last_y > 0 {
+                    Ok(DecodeStatus::Partial(self.last_y as u32))
                 } else {
                     Ok(DecodeStatus::NeedMoreData)
                 }
@@ -186,42 +181,34 @@ impl StreamingDecoder {
         }
     }
 
+    /// Update cached dimensions from the decoder.
+    fn update_dimensions(&mut self) {
+        let mut last_y = 0i32;
+        let mut width = 0i32;
+        let mut height = 0i32;
+
+        unsafe {
+            libwebp_sys::WebPIDecGetRGB(
+                self.decoder,
+                &mut last_y,
+                &mut width,
+                &mut height,
+                ptr::null_mut(),
+            );
+        }
+
+        self.width = width;
+        self.height = height;
+        self.last_y = last_y;
+    }
+
     /// Update decoder with complete data (alternative to append for non-streaming).
     ///
     /// Unlike `append`, this expects the data to be the complete input or
     /// a complete prefix of it (not just a new chunk).
     pub fn update(&mut self, data: &[u8]) -> Result<DecodeStatus> {
         let status = unsafe { libwebp_sys::WebPIUpdate(self.decoder, data.as_ptr(), data.len()) };
-
-        match status {
-            libwebp_sys::VP8StatusCode::VP8_STATUS_OK => Ok(DecodeStatus::Complete),
-            libwebp_sys::VP8StatusCode::VP8_STATUS_SUSPENDED => {
-                let mut last_y = 0i32;
-                let mut width = 0i32;
-                let mut height = 0i32;
-
-                unsafe {
-                    libwebp_sys::WebPIDecGetRGB(
-                        self.decoder,
-                        &mut last_y,
-                        &mut width,
-                        &mut height,
-                        ptr::null_mut(),
-                    );
-                }
-
-                self.width = width;
-                self.height = height;
-                self.last_y = last_y;
-
-                if last_y > 0 {
-                    Ok(DecodeStatus::Partial(last_y as u32))
-                } else {
-                    Ok(DecodeStatus::NeedMoreData)
-                }
-            }
-            _ => Err(at!(Error::DecodeFailed(DecodingError::from(status as i32)))),
-        }
+        self.process_status(status)
     }
 
     /// Get the current image dimensions (available after some data is decoded).
