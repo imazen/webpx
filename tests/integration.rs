@@ -1987,7 +1987,9 @@ mod animation_tests {
 
         let width = 16;
         let height = 16;
-        let frame = generate_rgba(width, height, 100, 150, 200, 255);
+        // Use different frames to avoid libwebp frame deduplication
+        let frame1 = generate_rgba(width, height, 100, 150, 200, 255);
+        let frame2 = generate_rgba(width, height, 200, 100, 50, 255);
 
         // Create with options: allow mixed, loop 3 times
         let mut encoder =
@@ -1996,8 +1998,9 @@ mod animation_tests {
         encoder.set_preset(webpx::Preset::Picture);
         encoder.set_lossless(true);
 
-        encoder.add_frame(&frame, 0).expect("add frame");
-        let webp = encoder.finish(100).expect("finish");
+        encoder.add_frame(&frame1, 0).expect("add frame 1");
+        encoder.add_frame(&frame2, 100).expect("add frame 2");
+        let webp = encoder.finish(200).expect("finish");
 
         // Decode with options
         let decoder =
@@ -2005,8 +2008,8 @@ mod animation_tests {
         let info = decoder.info();
         assert_eq!(info.width, width);
         assert_eq!(info.height, height);
-        // Loop count may be different depending on libwebp behavior
-        assert!(info.loop_count <= 3);
+        assert_eq!(info.frame_count, 2);
+        assert_eq!(info.loop_count, 3);
     }
 
     #[test]
