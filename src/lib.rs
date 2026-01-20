@@ -75,7 +75,7 @@
 //! ## Error Handling
 //!
 //! All functions return `Result<T, At<Error>>` where [`At`] provides lightweight error
-//! location tracking. See the [`error`] module documentation for how to:
+//! location tracking. See the [error module](crate::error) documentation for how to:
 //! - Propagate traces with `.at()`
 //! - Add your crate's info to traces with `at_crate!`
 //! - Convert to plain errors with `.into_inner()`
@@ -90,7 +90,7 @@ extern crate alloc;
 whereat::define_at_crate_info!();
 
 mod config;
-mod error;
+pub mod error;
 mod types;
 
 #[cfg(feature = "decode")]
@@ -137,7 +137,7 @@ pub use mux::{
 pub use streaming::{DecodeStatus, StreamingDecoder, StreamingEncoder};
 
 #[cfg(feature = "animation")]
-pub use animation::{AnimationDecoder, AnimationEncoder, Frame};
+pub use animation::{AnimationDecoder, AnimationEncoder, AnimationInfo, Frame};
 
 /// Library version information.
 pub fn version() -> (u32, u32, u32) {

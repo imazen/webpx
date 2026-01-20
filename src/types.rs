@@ -66,6 +66,7 @@ impl ImageInfo {
 
 /// Bitstream format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum BitstreamFormat {
     /// Format not determined.
     #[default]
@@ -78,6 +79,7 @@ pub enum BitstreamFormat {
 
 /// Color mode for output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ColorMode {
     /// RGBA (8 bits per channel, 32 bits per pixel).
     #[default]

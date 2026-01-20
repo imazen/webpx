@@ -65,7 +65,7 @@ use whereat::At;
 /// Result type for webpx operations.
 ///
 /// Errors include source location traces via [`At<Error>`](whereat::At).
-/// See the [module documentation](self) for how to work with traced errors.
+/// See the module-level documentation for how to work with traced errors.
 pub type Result<T> = core::result::Result<T, At<Error>>;
 
 /// Error type for webpx operations.

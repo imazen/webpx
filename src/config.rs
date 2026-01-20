@@ -10,6 +10,7 @@ use enough::Stop;
 /// These presets configure the encoder for different types of content,
 /// optimizing the balance between file size and visual quality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 #[repr(i32)]
 pub enum Preset {
     /// Default preset, balanced for general use.
@@ -37,6 +38,7 @@ pub enum Preset {
 /// Unlike [`Preset`], which configures initial encoding parameters,
 /// hints guide the encoder's internal decisions during compression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 #[repr(u32)]
 pub enum ImageHint {
     /// No specific hint, use default heuristics.
@@ -65,6 +67,7 @@ impl ImageHint {
 ///
 /// Controls how the alpha plane is filtered during compression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 #[repr(i32)]
 pub enum AlphaFilter {
     /// No filtering.
@@ -81,6 +84,7 @@ pub enum AlphaFilter {
 /// Provides detailed information about the encoding process,
 /// useful for analysis, debugging, and optimization.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct EncodeStats {
     /// Encoded file size in bytes.
     pub coded_size: u32,

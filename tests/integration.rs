@@ -1251,6 +1251,7 @@ mod streaming_tests {
                 Ok(DecodeStatus::Complete) => break,
                 Ok(DecodeStatus::NeedMoreData) => continue,
                 Ok(DecodeStatus::Partial(_rows)) => continue,
+                Ok(_) => continue, // future variants
                 Err(e) => panic!("decode error: {}", e),
             }
         }
@@ -1617,6 +1618,7 @@ mod streaming_advanced_tests {
                     }
                 }
                 Ok(DecodeStatus::NeedMoreData) => continue,
+                Ok(_) => continue, // future variants
                 Err(e) => panic!("decode error: {}", e),
             }
         }

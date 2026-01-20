@@ -8,6 +8,7 @@ use core::ptr;
 
 /// Status of a streaming decode operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DecodeStatus {
     /// Decoding completed successfully.
     Complete,
@@ -42,6 +43,7 @@ pub enum DecodeStatus {
 ///                 process_rows(data, w, h);
 ///             }
 ///         }
+///         _ => {} // future variants
 ///     }
 /// }
 ///

@@ -9,6 +9,7 @@ use core::ptr;
 
 /// A single frame in an animation.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Frame {
     /// Frame pixel data (RGBA).
     pub data: Vec<u8>,
@@ -24,6 +25,7 @@ pub struct Frame {
 
 /// Animation metadata.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AnimationInfo {
     /// Canvas width.
     pub width: u32,
@@ -245,9 +247,9 @@ impl Drop for AnimationDecoder {
 /// let frame2_rgba = vec![0u8; 640 * 480 * 4];
 /// let frame3_rgba = vec![0u8; 640 * 480 * 4];
 ///
-/// let mut encoder = AnimationEncoder::new(640, 480)?;
+/// // Use with_options for loop count (0 = infinite)
+/// let mut encoder = AnimationEncoder::with_options(640, 480, false, 0)?;
 /// encoder.set_quality(85.0);
-/// encoder.set_loop_count(0); // infinite loop
 ///
 /// encoder.add_frame(&frame1_rgba, 0)?;      // First frame at t=0
 /// encoder.add_frame(&frame2_rgba, 100)?;    // Second frame at t=100ms
@@ -345,14 +347,6 @@ impl AnimationEncoder {
     /// Enable lossless compression for all frames.
     pub fn set_lossless(&mut self, lossless: bool) {
         self.config.lossless = lossless;
-    }
-
-    /// Set loop count (0 = infinite).
-    ///
-    /// Note: This only affects new encoders. For existing encoder,
-    /// the loop count was set at creation time.
-    pub fn set_loop_count(&mut self, _count: u32) {
-        // Loop count is set at encoder creation time
     }
 
     /// Set ICC profile to embed.

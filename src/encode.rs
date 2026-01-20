@@ -453,7 +453,7 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    /// Create encoder from an imgref ImgRef<RGBA8>.
+    /// Create encoder from an imgref `ImgRef<RGBA8>`.
     #[must_use]
     pub fn from_rgba(img: ImgRef<'a, RGBA8>) -> Self {
         // SAFETY: RGBA8 is repr(C) and has the same layout as [u8; 4]
@@ -463,7 +463,7 @@ impl<'a> Encoder<'a> {
         Self::new(data, img.width() as u32, img.height() as u32)
     }
 
-    /// Create encoder from an imgref ImgRef<RGB8>.
+    /// Create encoder from an imgref `ImgRef<RGB8>`.
     #[must_use]
     pub fn from_rgb(img: ImgRef<'a, RGB8>) -> Self {
         // SAFETY: RGB8 is repr(C) and has the same layout as [u8; 3]
