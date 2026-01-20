@@ -1036,7 +1036,7 @@ mod stop_tests {
         let result = encode_rgba(&data, 32, 32, 85.0, ImmediateCanceller);
 
         match result {
-            Err(Error::Stopped(StopReason::Cancelled)) => {} // expected
+            Err(ref e) if matches!(e.error(), Error::Stopped(StopReason::Cancelled)) => {} // expected
             other => panic!("expected Stopped(Cancelled), got {:?}", other),
         }
     }
@@ -1049,7 +1049,7 @@ mod stop_tests {
         let result = encode_rgba(&data, 256, 256, 85.0, &stopper);
 
         match result {
-            Err(Error::Stopped(StopReason::Cancelled)) => {} // expected
+            Err(ref e) if matches!(e.error(), Error::Stopped(StopReason::Cancelled)) => {} // expected
             other => panic!("expected Stopped(Cancelled), got {:?}", other),
         }
     }
@@ -1705,7 +1705,7 @@ mod streaming_advanced_tests {
 
         // Callback returns error
         let result = encoder.encode_rgba_with_callback(&data, |_| {
-            Err(webpx::Error::InvalidInput("test error".into()))
+            Err(webpx::at(webpx::Error::InvalidInput("test error".into())))
         });
 
         assert!(result.is_err());

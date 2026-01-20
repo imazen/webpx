@@ -1,5 +1,6 @@
 //! Animated WebP encoding and decoding.
 
+use whereat::*;
 use crate::config::{EncoderConfig, Preset};
 use crate::error::{Error, Result};
 use crate::types::ColorMode;
@@ -54,7 +55,7 @@ pub struct AnimationInfo {
 /// while let Some(frame) = decoder.next_frame()? {
 ///     process_frame(&frame.data, frame.timestamp_ms);
 /// }
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub struct AnimationDecoder {
     decoder: *mut libwebp_sys::WebPAnimDecoder,
@@ -86,9 +87,9 @@ impl AnimationDecoder {
             ColorMode::Rgb => libwebp_sys::WEBP_CSP_MODE::MODE_RGB,
             ColorMode::Bgr => libwebp_sys::WEBP_CSP_MODE::MODE_BGR,
             _ => {
-                return Err(Error::InvalidInput(
+                return Err(at!(Error::InvalidInput(
                     "animation decoder only supports RGB modes".into(),
-                ))
+                )))
             }
         };
 
@@ -98,9 +99,9 @@ impl AnimationDecoder {
         let mut options = core::mem::MaybeUninit::<libwebp_sys::WebPAnimDecoderOptions>::uninit();
         let ok = unsafe { libwebp_sys::WebPAnimDecoderOptionsInit(options.as_mut_ptr()) };
         if ok == 0 {
-            return Err(Error::InvalidConfig(
+            return Err(at!(Error::InvalidConfig(
                 "failed to init decoder options".into(),
-            ));
+            )));
         }
         let mut options = unsafe { options.assume_init() };
 
@@ -115,7 +116,7 @@ impl AnimationDecoder {
         let decoder = unsafe { libwebp_sys::WebPAnimDecoderNew(&webp_data, &options) };
 
         if decoder.is_null() {
-            return Err(Error::InvalidWebP);
+            return Err(at!(Error::InvalidWebP));
         }
 
         // Get animation info
@@ -124,7 +125,7 @@ impl AnimationDecoder {
 
         if ok == 0 {
             unsafe { libwebp_sys::WebPAnimDecoderDelete(decoder) };
-            return Err(Error::InvalidWebP);
+            return Err(at!(Error::InvalidWebP));
         }
 
         Ok(Self {
@@ -165,9 +166,9 @@ impl AnimationDecoder {
             unsafe { libwebp_sys::WebPAnimDecoderGetNext(self.decoder, &mut buf, &mut timestamp) };
 
         if ok == 0 {
-            return Err(Error::DecodeFailed(
+            return Err(at!(Error::DecodeFailed(
                 crate::error::DecodingError::BitstreamError,
-            ));
+            )));
         }
 
         // Copy the frame data (buffer is owned by decoder)
@@ -253,7 +254,7 @@ impl Drop for AnimationDecoder {
 /// encoder.add_frame(&frame3_rgba, 200)?;    // Third frame at t=200ms
 ///
 /// let webp_data = encoder.finish(300)?;     // Total duration 300ms
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub struct AnimationEncoder {
     encoder: *mut libwebp_sys::WebPAnimEncoder,
@@ -288,7 +289,7 @@ impl AnimationEncoder {
         loop_count: u32,
     ) -> Result<Self> {
         if width == 0 || height == 0 || width > 16383 || height > 16383 {
-            return Err(Error::InvalidInput("invalid dimensions".into()));
+            return Err(at!(Error::InvalidInput("invalid dimensions".into())));
         }
 
         let mut options = core::mem::MaybeUninit::<libwebp_sys::WebPAnimEncoderOptions>::uninit();
@@ -299,9 +300,9 @@ impl AnimationEncoder {
             )
         };
         if ok == 0 {
-            return Err(Error::InvalidConfig(
+            return Err(at!(Error::InvalidConfig(
                 "failed to init encoder options".into(),
-            ));
+            )));
         }
         let mut options = unsafe { options.assume_init() };
 
@@ -318,7 +319,7 @@ impl AnimationEncoder {
         };
 
         if encoder.is_null() {
-            return Err(Error::OutOfMemory);
+            return Err(at!(Error::OutOfMemory));
         }
 
         Ok(Self {
@@ -369,13 +370,13 @@ impl AnimationEncoder {
     pub fn add_frame(&mut self, rgba: &[u8], timestamp_ms: i32) -> Result<()> {
         let expected = (self.width as usize) * (self.height as usize) * 4;
         if rgba.len() < expected {
-            return Err(Error::InvalidInput("buffer too small".into()));
+            return Err(at!(Error::InvalidInput("buffer too small".into())));
         }
 
         let webp_config = self.config.to_libwebp()?;
 
         let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
 
         picture.width = self.width as i32;
         picture.height = self.height as i32;
@@ -387,7 +388,7 @@ impl AnimationEncoder {
 
         if import_ok == 0 {
             unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-            return Err(Error::OutOfMemory);
+            return Err(at!(Error::OutOfMemory));
         }
 
         let ok = unsafe {
@@ -407,7 +408,7 @@ impl AnimationEncoder {
                         .unwrap_or("unknown error")
                 }
             };
-            return Err(Error::AnimationError(error_msg.into()));
+            return Err(at!(Error::AnimationError(error_msg.into())));
         }
 
         Ok(())
@@ -417,13 +418,13 @@ impl AnimationEncoder {
     pub fn add_frame_rgb(&mut self, rgb: &[u8], timestamp_ms: i32) -> Result<()> {
         let expected = (self.width as usize) * (self.height as usize) * 3;
         if rgb.len() < expected {
-            return Err(Error::InvalidInput("buffer too small".into()));
+            return Err(at!(Error::InvalidInput("buffer too small".into())));
         }
 
         let webp_config = self.config.to_libwebp()?;
 
         let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
 
         picture.width = self.width as i32;
         picture.height = self.height as i32;
@@ -435,7 +436,7 @@ impl AnimationEncoder {
 
         if import_ok == 0 {
             unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-            return Err(Error::OutOfMemory);
+            return Err(at!(Error::OutOfMemory));
         }
 
         let ok = unsafe {
@@ -445,7 +446,7 @@ impl AnimationEncoder {
         unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
 
         if ok == 0 {
-            return Err(Error::AnimationError("failed to add frame".into()));
+            return Err(at!(Error::AnimationError("failed to add frame".into())));
         }
 
         Ok(())
@@ -468,7 +469,7 @@ impl AnimationEncoder {
         };
 
         if ok == 0 {
-            return Err(Error::AnimationError("failed to finalize animation".into()));
+            return Err(at!(Error::AnimationError("failed to finalize animation".into())));
         }
 
         // Assemble the animation
@@ -476,12 +477,12 @@ impl AnimationEncoder {
         let ok = unsafe { libwebp_sys::WebPAnimEncoderAssemble(self.encoder, &mut webp_data) };
 
         if ok == 0 {
-            return Err(Error::AnimationError("failed to assemble animation".into()));
+            return Err(at!(Error::AnimationError("failed to assemble animation".into())));
         }
 
         let result = unsafe {
             if webp_data.bytes.is_null() || webp_data.size == 0 {
-                return Err(Error::AnimationError("empty output".into()));
+                return Err(at!(Error::AnimationError("empty output".into())));
             }
             let slice = core::slice::from_raw_parts(webp_data.bytes, webp_data.size);
             let vec = slice.to_vec();

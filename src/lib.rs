@@ -30,7 +30,7 @@
 //! // Decode back to RGBA
 //! let (pixels, width, height) = webpx::decode_rgba(&webp_bytes)?;
 //! assert_eq!((width, height), (2, 2));
-//! # Ok::<(), webpx::Error>(())
+//! # Ok::<(), webpx::At<webpx::Error>>(())
 //! ```
 //!
 //! ## Builder API
@@ -46,7 +46,7 @@
 //!     .quality(85.0)          // 0-100, higher = better quality
 //!     .method(4)              // 0-6, higher = slower but smaller
 //!     .encode(Unstoppable)?;
-//! # Ok::<(), webpx::Error>(())
+//! # Ok::<(), webpx::At<webpx::Error>>(())
 //! ```
 //!
 //! ## Feature Flags
@@ -71,12 +71,23 @@
 //! ## Compatibility Shims
 //!
 //! For easy migration from other WebP crates, see [`compat::webp`] and [`compat::webp_animation`].
+//!
+//! ## Error Handling
+//!
+//! All functions return `Result<T, At<Error>>` where [`At`] provides lightweight error
+//! location tracking. See the [`error`] module documentation for how to:
+//! - Propagate traces with `.at()`
+//! - Add your crate's info to traces with `at_crate!`
+//! - Convert to plain errors with `.into_inner()`
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(missing_docs)]
 
 extern crate alloc;
+
+// Define crate info for whereat traces (enables GitHub links)
+whereat::define_at_crate_info!();
 
 mod config;
 mod error;
@@ -106,6 +117,9 @@ pub use types::{BitstreamFormat, ColorMode, ImageInfo, YuvPlanes, YuvPlanesRef};
 
 // Re-export enough crate types for cooperative cancellation
 pub use enough::{Stop, StopReason, Unstoppable};
+
+// Re-export whereat types for error location tracking
+pub use whereat::{at, at_crate, At, ResultAtExt};
 
 #[cfg(feature = "decode")]
 pub use decode::{decode_rgb, decode_rgba, decode_yuv, Decoder};

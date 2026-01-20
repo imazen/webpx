@@ -1,5 +1,6 @@
 //! WebP decoding functionality.
 
+use whereat::*;
 use crate::config::DecoderConfig;
 use crate::error::{DecodingError, Error, Result};
 use crate::types::{ImageInfo, YuvPlanes};
@@ -16,7 +17,7 @@ use rgb::{RGB8, RGBA8};
 /// ```rust,no_run
 /// let webp_data: &[u8] = &[0u8; 100]; // placeholder
 /// let (pixels, width, height) = webpx::decode_rgba(webp_data)?;
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn decode_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     let mut width: i32 = 0;
@@ -26,7 +27,7 @@ pub fn decode_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
         unsafe { libwebp_sys::WebPDecodeRGBA(data.as_ptr(), data.len(), &mut width, &mut height) };
 
     if ptr.is_null() {
-        return Err(Error::DecodeFailed(DecodingError::BitstreamError));
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
     let size = (width as usize) * (height as usize) * 4;
@@ -51,7 +52,7 @@ pub fn decode_rgb(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
         unsafe { libwebp_sys::WebPDecodeRGB(data.as_ptr(), data.len(), &mut width, &mut height) };
 
     if ptr.is_null() {
-        return Err(Error::DecodeFailed(DecodingError::BitstreamError));
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
     let size = (width as usize) * (height as usize) * 3;
@@ -90,7 +91,7 @@ pub fn decode_yuv(data: &[u8]) -> Result<YuvPlanes> {
     };
 
     if y_ptr.is_null() {
-        return Err(Error::DecodeFailed(DecodingError::BitstreamError));
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
     let _uv_width = (width + 1) / 2;
@@ -135,7 +136,7 @@ pub fn decode_yuv(data: &[u8]) -> Result<YuvPlanes> {
 /// println!("Image: {}x{}, alpha: {}", info.width, info.height, info.has_alpha);
 ///
 /// let img: imgref::ImgVec<rgb::RGBA8> = decoder.decode_rgba()?;
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub struct Decoder<'a> {
     data: &'a [u8],
@@ -237,14 +238,14 @@ impl<'a> Decoder<'a> {
     /// Advanced decode with cropping/scaling support.
     fn decode_advanced(self, mode: libwebp_sys::WEBP_CSP_MODE) -> Result<(Vec<u8>, u32, u32)> {
         let mut dec_config = libwebp_sys::WebPDecoderConfig::new()
-            .map_err(|_| Error::InvalidConfig("failed to init decoder config".into()))?;
+            .map_err(|_| at!(Error::InvalidConfig("failed to init decoder config".into())))?;
 
         // Get features
         let status = unsafe {
             libwebp_sys::WebPGetFeatures(self.data.as_ptr(), self.data.len(), &mut dec_config.input)
         };
         if status != libwebp_sys::VP8StatusCode::VP8_STATUS_OK {
-            return Err(Error::DecodeFailed(DecodingError::from(status as i32)));
+            return Err(at!(Error::DecodeFailed(DecodingError::from(status as i32))));
         }
 
         // Configure output
@@ -277,7 +278,7 @@ impl<'a> Decoder<'a> {
         };
 
         if status != libwebp_sys::VP8StatusCode::VP8_STATUS_OK {
-            return Err(Error::DecodeFailed(DecodingError::from(status as i32)));
+            return Err(at!(Error::DecodeFailed(DecodingError::from(status as i32))));
         }
 
         // Get output dimensions
@@ -305,7 +306,7 @@ impl<'a> Decoder<'a> {
         let size = (width as usize) * (height as usize) * bpp;
         let pixels = unsafe {
             if dec_config.output.u.RGBA.rgba.is_null() {
-                return Err(Error::DecodeFailed(DecodingError::OutOfMemory));
+                return Err(at!(Error::DecodeFailed(DecodingError::OutOfMemory)));
             }
             let slice = core::slice::from_raw_parts(dec_config.output.u.RGBA.rgba, size);
             let vec = slice.to_vec();

@@ -1,5 +1,6 @@
 //! WebP encoding functionality.
 
+use whereat::*;
 use crate::config::{EncodeStats, EncoderConfig, Preset};
 use crate::error::{EncodingError, Error, Result};
 use crate::types::YuvPlanesRef;
@@ -46,7 +47,7 @@ extern "C" fn progress_hook<S: Stop>(
 ///
 /// let rgba: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
 /// let webp = webpx::encode_rgba(rgba, 640, 480, 85.0, Unstoppable)?;
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn encode_rgba(
     data: &[u8],
@@ -112,7 +113,7 @@ pub(crate) fn encode_with_config(
 
     // Initialize picture
     let mut picture = libwebp_sys::WebPPicture::new()
-        .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+        .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
 
     picture.width = width as i32;
     picture.height = height as i32;
@@ -131,7 +132,7 @@ pub(crate) fn encode_with_config(
 
     if import_ok == 0 {
         unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-        return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
+        return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
     }
 
     // Setup memory writer
@@ -151,7 +152,7 @@ pub(crate) fn encode_with_config(
             libwebp_sys::WebPPictureFree(&mut picture);
             libwebp_sys::WebPMemoryWriterClear(&mut writer);
         }
-        Err(Error::EncodeFailed(error))
+        Err(at!(Error::EncodeFailed(error)))
     } else {
         let webp_data = unsafe {
             let slice = core::slice::from_raw_parts(writer.mem, writer.size);
@@ -197,7 +198,7 @@ pub(crate) fn encode_with_config_stats(
 
     // Initialize picture
     let mut picture = libwebp_sys::WebPPicture::new()
-        .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+        .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
 
     picture.width = width as i32;
     picture.height = height as i32;
@@ -220,7 +221,7 @@ pub(crate) fn encode_with_config_stats(
 
     if import_ok == 0 {
         unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-        return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
+        return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
     }
 
     // Setup memory writer
@@ -240,7 +241,7 @@ pub(crate) fn encode_with_config_stats(
             libwebp_sys::WebPPictureFree(&mut picture);
             libwebp_sys::WebPMemoryWriterClear(&mut writer);
         }
-        Err(Error::EncodeFailed(error))
+        Err(at!(Error::EncodeFailed(error)))
     } else {
         let webp_data = unsafe {
             let slice = core::slice::from_raw_parts(writer.mem, writer.size);
@@ -285,13 +286,14 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
     validate_buffer_size(data.len(), width, height, bpp as u32)?;
 
     // Check for early cancellation
-    stop.check()?;
+    stop.check()
+        .map_err(|reason| at!(Error::Stopped(reason)))?;
 
     let webp_config = config.to_libwebp()?;
 
     // Initialize picture
     let mut picture = libwebp_sys::WebPPicture::new()
-        .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+        .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
 
     picture.width = width as i32;
     picture.height = height as i32;
@@ -310,7 +312,7 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
 
     if import_ok == 0 {
         unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-        return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
+        return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
     }
 
     // Setup memory writer
@@ -340,12 +342,12 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
             // VP8_ENC_ERROR_USER_ABORT
             // Get the actual stop reason
             if let Err(reason) = stop.check() {
-                return Err(Error::Stopped(reason));
+                return Err(at!(Error::Stopped(reason)));
             }
             // Fallback if stop doesn't report stopped (shouldn't happen)
-            Err(Error::EncodeFailed(EncodingError::UserAbort))
+            Err(at!(Error::EncodeFailed(EncodingError::UserAbort)))
         } else {
-            Err(Error::EncodeFailed(EncodingError::from(error_code)))
+            Err(at!(Error::EncodeFailed(EncodingError::from(error_code))))
         }
     } else {
         let webp_data = unsafe {
@@ -392,7 +394,7 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
 ///     .preset(Preset::Photo)
 ///     .quality(85.0)
 ///     .encode(Unstoppable)?;
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub struct Encoder<'a> {
     data: EncoderInput<'a>,
@@ -557,13 +559,14 @@ impl<'a> Encoder<'a> {
         validate_dimensions(self.width, self.height)?;
 
         // Check for early cancellation
-        stop.check()?;
+        stop.check()
+            .map_err(|reason| at!(Error::Stopped(reason)))?;
 
         let webp_config = self.config.to_libwebp()?;
 
         // Initialize picture
         let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
 
         picture.width = self.width as i32;
         picture.height = self.height as i32;
@@ -614,7 +617,7 @@ impl<'a> Encoder<'a> {
 
         if import_ok == 0 {
             unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-            return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
+            return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
         }
 
         // Setup memory writer
@@ -643,11 +646,11 @@ impl<'a> Encoder<'a> {
             if error_code == 10 {
                 // VP8_ENC_ERROR_USER_ABORT
                 if let Err(reason) = stop.check() {
-                    return Err(Error::Stopped(reason));
+                    return Err(at!(Error::Stopped(reason)));
                 }
-                Err(Error::EncodeFailed(EncodingError::UserAbort))
+                Err(at!(Error::EncodeFailed(EncodingError::UserAbort)))
             } else {
-                Err(Error::EncodeFailed(EncodingError::from(error_code)))
+                Err(at!(Error::EncodeFailed(EncodingError::from(error_code))))
             }
         } else {
             let webp_data = unsafe {
@@ -675,16 +678,16 @@ pub(crate) fn validate_dimensions(width: u32, height: u32) -> Result<()> {
     const MAX_DIMENSION: u32 = 16383;
 
     if width == 0 || height == 0 {
-        return Err(Error::InvalidInput(
+        return Err(at!(Error::InvalidInput(
             "width and height must be non-zero".into(),
-        ));
+        )));
     }
     if width > MAX_DIMENSION || height > MAX_DIMENSION {
-        return Err(Error::InvalidInput(alloc::format!(
+        return Err(at!(Error::InvalidInput(alloc::format!(
             "dimensions exceed maximum ({} x {})",
             MAX_DIMENSION,
             MAX_DIMENSION
-        )));
+        ))));
     }
     Ok(())
 }
@@ -695,11 +698,11 @@ pub(crate) fn validate_buffer_size(size: usize, width: u32, height: u32, bpp: u3
         .saturating_mul(bpp as usize);
 
     if size < expected {
-        return Err(Error::InvalidInput(alloc::format!(
+        return Err(at!(Error::InvalidInput(alloc::format!(
             "buffer too small: got {}, expected {}",
             size,
             expected
-        )));
+        ))));
     }
     Ok(())
 }

@@ -1,5 +1,6 @@
 //! Streaming/incremental WebP decode and encode.
 
+use whereat::*;
 use crate::error::{DecodingError, Error, Result};
 use crate::types::ColorMode;
 use alloc::vec::Vec;
@@ -45,7 +46,7 @@ pub enum DecodeStatus {
 /// }
 ///
 /// let (pixels, width, height) = decoder.finish()?;
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub struct StreamingDecoder {
     decoder: *mut libwebp_sys::WebPIDecoder,
@@ -85,7 +86,7 @@ impl StreamingDecoder {
         };
 
         if decoder.is_null() {
-            return Err(Error::OutOfMemory);
+            return Err(at!(Error::OutOfMemory));
         }
 
         Ok(Self {
@@ -116,9 +117,9 @@ impl StreamingDecoder {
             ColorMode::Rgb => libwebp_sys::WEBP_CSP_MODE::MODE_RGB,
             ColorMode::Bgr => libwebp_sys::WEBP_CSP_MODE::MODE_BGR,
             _ => {
-                return Err(Error::InvalidInput(
+                return Err(at!(Error::InvalidInput(
                     "YUV requires separate plane buffers".into(),
-                ))
+                )))
             }
         };
 
@@ -132,7 +133,7 @@ impl StreamingDecoder {
         };
 
         if decoder.is_null() {
-            return Err(Error::OutOfMemory);
+            return Err(at!(Error::OutOfMemory));
         }
 
         Ok(Self {
@@ -179,7 +180,7 @@ impl StreamingDecoder {
                     Ok(DecodeStatus::NeedMoreData)
                 }
             }
-            _ => Err(Error::DecodeFailed(DecodingError::from(status as i32))),
+            _ => Err(at!(Error::DecodeFailed(DecodingError::from(status as i32)))),
         }
     }
 
@@ -217,7 +218,7 @@ impl StreamingDecoder {
                     Ok(DecodeStatus::NeedMoreData)
                 }
             }
-            _ => Err(Error::DecodeFailed(DecodingError::from(status as i32))),
+            _ => Err(at!(Error::DecodeFailed(DecodingError::from(status as i32)))),
         }
     }
 
@@ -290,7 +291,7 @@ impl StreamingDecoder {
         };
 
         if ptr.is_null() || last_y < height {
-            return Err(Error::NeedMoreData);
+            return Err(at!(Error::NeedMoreData));
         }
 
         let bpp = self.color_mode.bytes_per_pixel().unwrap_or(4);
@@ -341,7 +342,7 @@ impl Drop for StreamingDecoder {
 ///     output.extend_from_slice(chunk);
 ///     Ok(())
 /// })?;
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub struct StreamingEncoder {
     width: u32,
@@ -353,7 +354,7 @@ impl StreamingEncoder {
     /// Create a new streaming encoder.
     pub fn new(width: u32, height: u32) -> Result<Self> {
         if width == 0 || height == 0 || width > 16383 || height > 16383 {
-            return Err(Error::InvalidInput("invalid dimensions".into()));
+            return Err(at!(Error::InvalidInput("invalid dimensions".into())));
         }
 
         Ok(Self {
@@ -387,13 +388,13 @@ impl StreamingEncoder {
     {
         let expected = (self.width as usize) * (self.height as usize) * 4;
         if data.len() < expected {
-            return Err(Error::InvalidInput("buffer too small".into()));
+            return Err(at!(Error::InvalidInput("buffer too small".into())));
         }
 
         let webp_config = self.config.to_libwebp()?;
 
         let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
 
         picture.width = self.width as i32;
         picture.height = self.height as i32;
@@ -405,13 +406,13 @@ impl StreamingEncoder {
 
         if import_ok == 0 {
             unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-            return Err(Error::OutOfMemory);
+            return Err(at!(Error::OutOfMemory));
         }
 
         // Use a custom writer that calls our callback
         struct CallbackContext<'a, F: FnMut(&[u8]) -> Result<()>> {
             callback: &'a mut F,
-            error: Option<Error>,
+            error: Option<whereat::At<Error>>,
         }
 
         extern "C" fn write_callback<F: FnMut(&[u8]) -> Result<()>>(
@@ -449,9 +450,9 @@ impl StreamingEncoder {
         }
 
         if ok == 0 {
-            return Err(Error::EncodeFailed(crate::error::EncodingError::from(
+            return Err(at!(Error::EncodeFailed(crate::error::EncodingError::from(
                 picture.error_code as i32,
-            )));
+            ))));
         }
 
         Ok(())
@@ -464,13 +465,13 @@ impl StreamingEncoder {
     {
         let expected = (self.width as usize) * (self.height as usize) * 3;
         if data.len() < expected {
-            return Err(Error::InvalidInput("buffer too small".into()));
+            return Err(at!(Error::InvalidInput("buffer too small".into())));
         }
 
         let webp_config = self.config.to_libwebp()?;
 
         let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
 
         picture.width = self.width as i32;
         picture.height = self.height as i32;
@@ -482,7 +483,7 @@ impl StreamingEncoder {
 
         if import_ok == 0 {
             unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-            return Err(Error::OutOfMemory);
+            return Err(at!(Error::OutOfMemory));
         }
 
         // Use memory writer and send all at once for simplicity
@@ -502,7 +503,7 @@ impl StreamingEncoder {
                 libwebp_sys::WebPPictureFree(&mut picture);
                 libwebp_sys::WebPMemoryWriterClear(&mut writer);
             }
-            return Err(Error::EncodeFailed(error));
+            return Err(at!(Error::EncodeFailed(error)));
         }
 
         let result = unsafe {

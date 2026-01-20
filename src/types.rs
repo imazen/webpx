@@ -1,5 +1,6 @@
 //! Core types for image data representation.
 
+use whereat::*;
 use alloc::vec::Vec;
 
 /// Information about a WebP image.
@@ -29,7 +30,7 @@ impl ImageInfo {
             unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) };
 
         if result == 0 {
-            return Err(crate::Error::InvalidWebP);
+            return Err(at!(crate::Error::InvalidWebP));
         }
 
         // Get more detailed features
@@ -40,9 +41,9 @@ impl ImageInfo {
         let features = unsafe { features.assume_init() };
 
         if status != libwebp_sys::VP8StatusCode::VP8_STATUS_OK {
-            return Err(crate::Error::DecodeFailed(
+            return Err(at!(crate::Error::DecodeFailed(
                 crate::error::DecodingError::from(status as i32),
-            ));
+            )));
         }
 
         let format = match features.format {

@@ -1,5 +1,6 @@
 //! WebP mux/demux operations for metadata (ICC, EXIF, XMP).
 
+use whereat::*;
 use crate::error::{Error, MuxError, Result};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
@@ -15,7 +16,7 @@ use core::mem::MaybeUninit;
 /// if let Some(icc) = webpx::get_icc_profile(webp_data)? {
 ///     println!("Found ICC profile: {} bytes", icc.len());
 /// }
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn get_icc_profile(webp_data: &[u8]) -> Result<Option<Vec<u8>>> {
     get_chunk(webp_data, b"ICCP")
@@ -73,7 +74,7 @@ fn get_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Option<Vec<u8>>> {
     let demux = unsafe { create_demux(webp_data) };
 
     if demux.is_null() {
-        return Err(Error::InvalidWebP);
+        return Err(at!(Error::InvalidWebP));
     }
 
     let mut chunk_iter = MaybeUninit::<libwebp_sys::WebPChunkIterator>::zeroed();
@@ -135,7 +136,7 @@ fn embed_chunk(webp_data: &[u8], fourcc: &[u8; 4], chunk_data: &[u8]) -> Result<
     let mux = unsafe { create_mux_from_data(webp_data, true) };
 
     if mux.is_null() {
-        return Err(Error::MuxError(MuxError::BadData));
+        return Err(at!(Error::MuxError(MuxError::BadData)));
     }
 
     // Set the chunk
@@ -155,7 +156,7 @@ fn embed_chunk(webp_data: &[u8], fourcc: &[u8; 4], chunk_data: &[u8]) -> Result<
 
     if err != libwebp_sys::WebPMuxError::WEBP_MUX_OK {
         unsafe { libwebp_sys::WebPMuxDelete(mux) };
-        return Err(Error::MuxError(MuxError::from(err as i32)));
+        return Err(at!(Error::MuxError(MuxError::from(err as i32))));
     }
 
     // Assemble the output
@@ -164,13 +165,13 @@ fn embed_chunk(webp_data: &[u8], fourcc: &[u8; 4], chunk_data: &[u8]) -> Result<
 
     if err != libwebp_sys::WebPMuxError::WEBP_MUX_OK {
         unsafe { libwebp_sys::WebPMuxDelete(mux) };
-        return Err(Error::MuxError(MuxError::from(err as i32)));
+        return Err(at!(Error::MuxError(MuxError::from(err as i32))));
     }
 
     let result = unsafe {
         if output_data.bytes.is_null() || output_data.size == 0 {
             libwebp_sys::WebPMuxDelete(mux);
-            return Err(Error::MuxError(MuxError::MemoryError));
+            return Err(at!(Error::MuxError(MuxError::MemoryError)));
         }
         let slice = core::slice::from_raw_parts(output_data.bytes, output_data.size);
         let vec = slice.to_vec();
@@ -202,7 +203,7 @@ fn remove_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Vec<u8>> {
     let mux = unsafe { create_mux_from_data(webp_data, true) };
 
     if mux.is_null() {
-        return Err(Error::MuxError(MuxError::BadData));
+        return Err(at!(Error::MuxError(MuxError::BadData)));
     }
 
     // Delete the chunk (ignore NotFound error)
@@ -212,7 +213,7 @@ fn remove_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Vec<u8>> {
         && err != libwebp_sys::WebPMuxError::WEBP_MUX_NOT_FOUND
     {
         unsafe { libwebp_sys::WebPMuxDelete(mux) };
-        return Err(Error::MuxError(MuxError::from(err as i32)));
+        return Err(at!(Error::MuxError(MuxError::from(err as i32))));
     }
 
     // Assemble output
@@ -221,13 +222,13 @@ fn remove_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Vec<u8>> {
 
     if err != libwebp_sys::WebPMuxError::WEBP_MUX_OK {
         unsafe { libwebp_sys::WebPMuxDelete(mux) };
-        return Err(Error::MuxError(MuxError::from(err as i32)));
+        return Err(at!(Error::MuxError(MuxError::from(err as i32))));
     }
 
     let result = unsafe {
         if output_data.bytes.is_null() || output_data.size == 0 {
             libwebp_sys::WebPMuxDelete(mux);
-            return Err(Error::MuxError(MuxError::MemoryError));
+            return Err(at!(Error::MuxError(MuxError::MemoryError)));
         }
         let slice = core::slice::from_raw_parts(output_data.bytes, output_data.size);
         let vec = slice.to_vec();

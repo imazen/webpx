@@ -1,11 +1,72 @@
 //! Error types for webpx operations.
+//!
+//! This module uses the [`whereat`] crate for lightweight error location tracking.
+//!
+//! # For Callers
+//!
+//! `webpx` functions return `Result<T, At<Error>>`, where [`At`] wraps the error
+//! with source location traces. You have several options:
+//!
+//! ## Option 1: Propagate traces with `.at()`
+//!
+//! Use [`ResultAtExt::at()`] to add your call site to the trace:
+//!
+//! ```rust,ignore
+//! use webpx::{ResultAtExt, encode_rgba, Unstoppable};
+//!
+//! fn my_encode(data: &[u8]) -> webpx::Result<Vec<u8>> {
+//!     encode_rgba(data, 100, 100, 85.0, Unstoppable).at()?  // Adds location
+//! }
+//! ```
+//!
+//! ## Option 2: Add your crate's info to the trace
+//!
+//! For traces with your crate's GitHub links, define crate info and use `at_crate!`:
+//!
+//! ```rust,ignore
+//! whereat::define_at_crate_info!();  // In your lib.rs
+//!
+//! fn my_encode(data: &[u8]) -> webpx::Result<Vec<u8>> {
+//!     webpx::at_crate!(webpx::encode_rgba(data, 100, 100, 85.0, Unstoppable))?
+//! }
+//! ```
+//!
+//! ## Option 3: Convert to plain errors
+//!
+//! Use `.into_inner()` to discard traces and get the plain [`Error`]:
+//!
+//! ```rust,ignore
+//! let result = encode_rgba(data, 100, 100, 85.0, Unstoppable);
+//! let plain_result: Result<Vec<u8>, Error> = result.map_err(|e| e.into_inner());
+//! ```
+//!
+//! ## Option 4: Inspect errors without traces
+//!
+//! Use `.error()` to get a reference to the underlying error:
+//!
+//! ```rust,ignore
+//! if let Err(at_err) = encode_rgba(data, 100, 100, 85.0, Unstoppable) {
+//!     match at_err.error() {
+//!         Error::InvalidInput(msg) => println!("Bad input: {}", msg),
+//!         _ => println!("{:?}", at_err),  // Print with trace
+//!     }
+//! }
+//! ```
+//!
+//! [`whereat`]: https://docs.rs/whereat
+//! [`At`]: whereat::At
+//! [`ResultAtExt::at()`]: whereat::ResultAtExt::at
 
 use alloc::string::String;
 use core::fmt;
 use enough::StopReason;
+use whereat::At;
 
 /// Result type for webpx operations.
-pub type Result<T> = core::result::Result<T, Error>;
+///
+/// Errors include source location traces via [`At<Error>`](whereat::At).
+/// See the [module documentation](self) for how to work with traced errors.
+pub type Result<T> = core::result::Result<T, At<Error>>;
 
 /// Error type for webpx operations.
 #[derive(Debug, Clone, PartialEq, Eq)]

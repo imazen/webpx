@@ -1,5 +1,6 @@
 //! Encoder and decoder configuration types.
 
+use whereat::*;
 use crate::error::{Error, Result};
 use alloc::vec::Vec;
 use enough::Stop;
@@ -189,7 +190,7 @@ impl Preset {
 /// let image2 = vec![0u8; 8 * 6 * 4]; // 8x6 RGBA
 /// let webp1 = config.encode_rgba(&image1, 4, 4)?;
 /// let webp2 = config.encode_rgba(&image2, 8, 6)?;
-/// # Ok::<(), webpx::Error>(())
+/// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct EncoderConfig {
@@ -706,7 +707,7 @@ impl EncoderConfig {
     /// let rgba_data = vec![0u8; 4 * 4 * 4]; // 4x4 RGBA
     /// let config = EncoderConfig::new().quality(85.0);
     /// let webp = config.encode_rgba(&rgba_data, 4, 4)?;
-    /// # Ok::<(), webpx::Error>(())
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
     /// ```
     pub fn encode_rgba(&self, data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
         crate::encode::encode_with_config(data, width, height, 4, self)
@@ -789,7 +790,7 @@ impl EncoderConfig {
     pub(crate) fn to_libwebp(&self) -> Result<libwebp_sys::WebPConfig> {
         let mut config =
             libwebp_sys::WebPConfig::new_with_preset(self.preset.to_libwebp(), self.quality)
-                .map_err(|_| Error::InvalidConfig("failed to initialize config".into()))?;
+                .map_err(|_| at!(Error::InvalidConfig("failed to initialize config".into())))?;
 
         config.lossless = self.lossless as i32;
         config.method = self.method as i32;
@@ -821,7 +822,7 @@ impl EncoderConfig {
 
         // Validate the config
         if unsafe { libwebp_sys::WebPValidateConfig(&config) } == 0 {
-            return Err(Error::InvalidConfig("config validation failed".into()));
+            return Err(at!(Error::InvalidConfig("config validation failed".into())));
         }
 
         Ok(config)
