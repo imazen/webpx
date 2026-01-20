@@ -92,7 +92,9 @@ pub fn encode_rgb(data: &[u8], width: u32, height: u32, quality: f32) -> Result<
     Ok(result)
 }
 
-/// Encode RGBA pixels to lossless WebP.
+/// Encode to lossless WebP.
+///
+/// Lossless encoding preserves all pixel values exactly.
 ///
 /// # Arguments
 ///
@@ -109,7 +111,7 @@ pub fn encode_lossless(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> 
             data.as_ptr(),
             width as i32,
             height as i32,
-            (width * 4) as i32, // stride
+            (width * 4) as i32,
             &mut output,
         )
     };
@@ -128,7 +130,95 @@ pub fn encode_lossless(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> 
     Ok(result)
 }
 
+/// Internal: Encode with full config (called by EncoderConfig).
+pub(crate) fn encode_with_config(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    bpp: u8,
+    config: &EncoderConfig,
+) -> Result<Vec<u8>> {
+    validate_dimensions(width, height)?;
+    validate_buffer_size(data.len(), width, height, bpp as u32)?;
+
+    let webp_config = config.to_libwebp()?;
+
+    // Initialize picture
+    let mut picture = libwebp_sys::WebPPicture::new()
+        .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+
+    picture.width = width as i32;
+    picture.height = height as i32;
+    picture.use_argb = 1;
+
+    // Import pixel data
+    let import_ok = if bpp == 4 {
+        unsafe {
+            libwebp_sys::WebPPictureImportRGBA(&mut picture, data.as_ptr(), (width * 4) as i32)
+        }
+    } else {
+        unsafe {
+            libwebp_sys::WebPPictureImportRGB(&mut picture, data.as_ptr(), (width * 3) as i32)
+        }
+    };
+
+    if import_ok == 0 {
+        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
+        return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
+    }
+
+    // Setup memory writer
+    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
+    unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
+    let mut writer = unsafe { writer.assume_init() };
+
+    picture.writer = Some(libwebp_sys::WebPMemoryWrite);
+    picture.custom_ptr = &mut writer as *mut _ as *mut _;
+
+    // Encode
+    let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
+
+    let result = if ok == 0 {
+        let error = EncodingError::from(picture.error_code as i32);
+        unsafe {
+            libwebp_sys::WebPPictureFree(&mut picture);
+            libwebp_sys::WebPMemoryWriterClear(&mut writer);
+        }
+        Err(Error::EncodeFailed(error))
+    } else {
+        let webp_data = unsafe {
+            let slice = core::slice::from_raw_parts(writer.mem, writer.size);
+            slice.to_vec()
+        };
+        unsafe {
+            libwebp_sys::WebPPictureFree(&mut picture);
+            libwebp_sys::WebPMemoryWriterClear(&mut writer);
+        }
+        Ok(webp_data)
+    };
+
+    // Embed metadata if present
+    #[cfg(feature = "icc")]
+    if let Ok(mut webp_data) = result {
+        if let Some(ref icc) = config.icc_profile {
+            webp_data = crate::mux::embed_icc(&webp_data, icc)?;
+        }
+        if let Some(ref exif) = config.exif_data {
+            webp_data = crate::mux::embed_exif(&webp_data, exif)?;
+        }
+        if let Some(ref xmp) = config.xmp_data {
+            webp_data = crate::mux::embed_xmp(&webp_data, xmp)?;
+        }
+        return Ok(webp_data);
+    }
+
+    result
+}
+
 /// WebP encoder with full configuration options.
+///
+/// This is a convenience wrapper around [`EncoderConfig`]. For new code,
+/// prefer using `EncoderConfig` directly for its cleaner API.
 ///
 /// # Example
 ///
@@ -159,6 +249,7 @@ enum EncoderInput<'a> {
 
 impl<'a> Encoder<'a> {
     /// Create a new encoder for RGBA data.
+    #[must_use]
     pub fn new(data: &'a [u8], width: u32, height: u32) -> Self {
         Self {
             data: EncoderInput::Rgba(data),
@@ -171,6 +262,7 @@ impl<'a> Encoder<'a> {
     }
 
     /// Create a new encoder for RGB data (no alpha).
+    #[must_use]
     pub fn new_rgb(data: &'a [u8], width: u32, height: u32) -> Self {
         Self {
             data: EncoderInput::Rgb(data),
@@ -183,6 +275,7 @@ impl<'a> Encoder<'a> {
     }
 
     /// Create a new encoder for YUV planar data.
+    #[must_use]
     pub fn new_yuv(planes: YuvPlanesRef<'a>) -> Self {
         let width = planes.width;
         let height = planes.height;
@@ -197,6 +290,7 @@ impl<'a> Encoder<'a> {
     }
 
     /// Create encoder from an imgref ImgRef<RGBA8>.
+    #[must_use]
     pub fn from_rgba(img: ImgRef<'a, RGBA8>) -> Self {
         // SAFETY: RGBA8 is repr(C) and has the same layout as [u8; 4]
         let data = unsafe {
@@ -206,6 +300,7 @@ impl<'a> Encoder<'a> {
     }
 
     /// Create encoder from an imgref ImgRef<RGB8>.
+    #[must_use]
     pub fn from_rgb(img: ImgRef<'a, RGB8>) -> Self {
         // SAFETY: RGB8 is repr(C) and has the same layout as [u8; 3]
         let data = unsafe {
@@ -215,60 +310,70 @@ impl<'a> Encoder<'a> {
     }
 
     /// Set encoding quality (0.0 = smallest, 100.0 = best).
+    #[must_use]
     pub fn quality(mut self, quality: f32) -> Self {
-        self.config.quality = quality;
+        self.config = self.config.quality(quality);
         self
     }
 
     /// Set content-aware preset.
+    #[must_use]
     pub fn preset(mut self, preset: Preset) -> Self {
-        self.config.preset = preset;
+        self.config = self.config.preset(preset);
         self
     }
 
     /// Enable lossless compression.
+    #[must_use]
     pub fn lossless(mut self, lossless: bool) -> Self {
-        self.config.lossless = lossless;
+        self.config = self.config.lossless(lossless);
         self
     }
 
     /// Set quality/speed tradeoff (0 = fast, 6 = slower but better).
+    #[must_use]
     pub fn method(mut self, method: u8) -> Self {
-        self.config.method = method.min(6);
+        self.config = self.config.method(method);
         self
     }
 
     /// Set near-lossless preprocessing (0 = max, 100 = off).
+    #[must_use]
     pub fn near_lossless(mut self, value: u8) -> Self {
-        self.config.near_lossless = value.min(100);
+        self.config = self.config.near_lossless(value);
         self
     }
 
     /// Set alpha quality (0-100).
+    #[must_use]
     pub fn alpha_quality(mut self, quality: u8) -> Self {
-        self.config.alpha_quality = quality.min(100);
+        self.config = self.config.alpha_quality(quality);
         self
     }
 
     /// Preserve exact RGB values under transparent areas.
+    #[must_use]
     pub fn exact(mut self, exact: bool) -> Self {
-        self.config.exact = exact;
+        self.config = self.config.exact(exact);
         self
     }
 
     /// Set target file size in bytes (0 = disabled).
+    #[must_use]
     pub fn target_size(mut self, size: u32) -> Self {
-        self.config.target_size = size;
+        self.config = self.config.target_size(size);
         self
     }
 
     /// Use sharp YUV conversion (slower but better).
+    #[must_use]
     pub fn sharp_yuv(mut self, enable: bool) -> Self {
-        self.config.use_sharp_yuv = enable;
+        self.config = self.config.sharp_yuv(enable);
         self
     }
 
     /// Set full encoder configuration.
+    #[must_use]
     pub fn config(mut self, config: EncoderConfig) -> Self {
         self.config = config;
         self
@@ -276,6 +381,7 @@ impl<'a> Encoder<'a> {
 
     /// Set ICC profile to embed.
     #[cfg(feature = "icc")]
+    #[must_use]
     pub fn icc_profile(mut self, profile: &'a [u8]) -> Self {
         self.icc_profile = Some(profile);
         self
@@ -383,7 +489,7 @@ impl<'a> Encoder<'a> {
     }
 }
 
-fn validate_dimensions(width: u32, height: u32) -> Result<()> {
+pub(crate) fn validate_dimensions(width: u32, height: u32) -> Result<()> {
     const MAX_DIMENSION: u32 = 16383;
 
     if width == 0 || height == 0 {
@@ -401,7 +507,7 @@ fn validate_dimensions(width: u32, height: u32) -> Result<()> {
     Ok(())
 }
 
-fn validate_buffer_size(size: usize, width: u32, height: u32, bpp: u32) -> Result<()> {
+pub(crate) fn validate_buffer_size(size: usize, width: u32, height: u32, bpp: u32) -> Result<()> {
     let expected = (width as usize)
         .saturating_mul(height as usize)
         .saturating_mul(bpp as usize);

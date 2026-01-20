@@ -67,6 +67,8 @@ mod streaming;
 #[cfg(feature = "animation")]
 mod animation;
 
+pub mod compat;
+
 // Re-exports
 pub use config::{DecoderConfig, EncoderConfig, Preset};
 pub use error::{Error, Result};
