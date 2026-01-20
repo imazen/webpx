@@ -24,10 +24,10 @@ webpx = "0.1"
 ```
 
 ```rust
-use webpx::{encode_rgba, decode_rgba};
+use webpx::{encode_rgba, decode_rgba, Unstoppable};
 
 // Encode RGBA pixels to WebP
-let webp = encode_rgba(&pixels, width, height, 85.0)?;
+let webp = encode_rgba(&pixels, width, height, 85.0, Unstoppable)?;
 
 // Decode WebP back to RGBA
 let (pixels, w, h) = decode_rgba(&webp)?;
@@ -47,28 +47,29 @@ let (pixels, w, h) = decode_rgba(&webp)?;
 | **Cropping/Scaling** | Decode to any size |
 | **YUV Support** | Direct YUV420 input/output |
 | **Content Presets** | Optimized settings for photos, drawings, icons, text |
+| **Cancellation** | Cooperative cancellation via [`enough`](https://docs.rs/enough) crate |
 
 ## Examples
 
 ### Basic Encoding
 
 ```rust
-use webpx::{encode_rgba, encode_lossless, encode_rgb};
+use webpx::{encode_rgba, encode_lossless, encode_rgb, Unstoppable};
 
 // Lossy encoding (quality 0-100)
-let webp = encode_rgba(&rgba_data, 640, 480, 85.0)?;
+let webp = encode_rgba(&rgba_data, 640, 480, 85.0, Unstoppable)?;
 
 // Lossless encoding (exact pixels)
-let webp = encode_lossless(&rgba_data, 640, 480)?;
+let webp = encode_lossless(&rgba_data, 640, 480, Unstoppable)?;
 
 // RGB without alpha
-let webp = encode_rgb(&rgb_data, 640, 480, 85.0)?;
+let webp = encode_rgb(&rgb_data, 640, 480, 85.0, Unstoppable)?;
 ```
 
 ### Builder API with Options
 
 ```rust
-use webpx::{Encoder, Preset};
+use webpx::{Encoder, Preset, Unstoppable};
 
 let webp = Encoder::new(&rgba_data, 640, 480)
     .preset(Preset::Photo)    // Content-aware optimization
@@ -76,7 +77,7 @@ let webp = Encoder::new(&rgba_data, 640, 480)
     .method(5)                // Better compression (slower)
     .alpha_quality(95)        // High-quality alpha
     .sharp_yuv(true)          // Better color accuracy
-    .encode()?;
+    .encode(Unstoppable)?;
 ```
 
 ### Advanced Configuration
@@ -196,6 +197,42 @@ for chunk in network_stream {
 
 let (pixels, width, height) = decoder.finish()?;
 ```
+
+### Cooperative Cancellation
+
+Encoding can be cancelled cooperatively using the [`enough`](https://docs.rs/enough) crate:
+
+```rust
+use webpx::{encode_rgba, Error, StopReason};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+// Create a cancellation flag
+let cancelled = Arc::new(AtomicBool::new(false));
+let flag = cancelled.clone();
+
+// Custom Stop implementation
+struct MyCanceller(Arc<AtomicBool>);
+impl enough::Stop for MyCanceller {
+    fn check(&self) -> Result<(), enough::StopReason> {
+        if self.0.load(Ordering::Relaxed) {
+            Err(enough::StopReason::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+// In another thread: flag.store(true, Ordering::Relaxed);
+
+match encode_rgba(&data, width, height, 85.0, MyCanceller(cancelled)) {
+    Ok(webp) => { /* success */ },
+    Err(Error::Stopped(StopReason::Cancelled)) => { /* cancelled */ },
+    Err(e) => { /* other error */ },
+}
+```
+
+For ready-to-use cancellation primitives (timeouts, channels, etc.), see the [`almost-enough`](https://docs.rs/almost-enough) crate.
 
 ## Feature Flags
 
