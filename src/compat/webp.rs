@@ -201,13 +201,19 @@ impl<'a> Encoder<'a> {
 
     /// Encode with simple options.
     pub fn encode_simple(&self, lossless: bool, quality: f32) -> crate::Result<WebPMemory> {
+        use crate::Unstoppable;
+
         let config = crate::EncoderConfig::new()
             .quality(quality)
             .lossless(lossless);
 
         let data = match self.layout {
-            PixelLayout::Rgba => config.encode_rgba(self.image, self.width, self.height)?,
-            PixelLayout::Rgb => config.encode_rgb(self.image, self.width, self.height)?,
+            PixelLayout::Rgba => {
+                config.encode_rgba(self.image, self.width, self.height, Unstoppable)?
+            }
+            PixelLayout::Rgb => {
+                config.encode_rgb(self.image, self.width, self.height, Unstoppable)?
+            }
         };
 
         Ok(WebPMemory(data))

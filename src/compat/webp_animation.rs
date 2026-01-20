@@ -272,7 +272,7 @@ impl Encoder {
         }
 
         self.inner
-            .add_frame(data, timestamp_ms)
+            .add_frame_rgba(data, timestamp_ms)
             .map_err(|_| Error::EncoderAddFailed)?;
 
         self.previous_timestamp = timestamp_ms;

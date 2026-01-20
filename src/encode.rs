@@ -59,7 +59,7 @@ pub fn encode_rgba(
 ) -> Result<Vec<u8>> {
     EncoderConfig::new()
         .quality(quality)
-        .encode_rgba_stoppable(data, width, height, &stop)
+        .encode_rgba(data, width, height, stop)
 }
 
 /// Encode RGB pixels to WebP (no alpha).
@@ -80,7 +80,7 @@ pub fn encode_rgb(
 ) -> Result<Vec<u8>> {
     EncoderConfig::new()
         .quality(quality)
-        .encode_rgb_stoppable(data, width, height, &stop)
+        .encode_rgb(data, width, height, stop)
 }
 
 /// Encode BGRA pixels to WebP.
@@ -142,92 +142,7 @@ pub fn encode_bgr(
 pub fn encode_lossless(data: &[u8], width: u32, height: u32, stop: impl Stop) -> Result<Vec<u8>> {
     EncoderConfig::new()
         .lossless(true)
-        .encode_rgba_stoppable(data, width, height, &stop)
-}
-
-/// Internal: Encode with full config (called by EncoderConfig).
-pub(crate) fn encode_with_config(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    bpp: u8,
-    config: &EncoderConfig,
-) -> Result<Vec<u8>> {
-    validate_dimensions(width, height)?;
-    validate_buffer_size(data.len(), width, height, bpp as u32)?;
-
-    let webp_config = config.to_libwebp()?;
-
-    // Initialize picture
-    let mut picture = libwebp_sys::WebPPicture::new()
-        .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
-
-    picture.width = width as i32;
-    picture.height = height as i32;
-    picture.use_argb = 1;
-
-    // Import pixel data
-    let import_ok = if bpp == 4 {
-        unsafe {
-            libwebp_sys::WebPPictureImportRGBA(&mut picture, data.as_ptr(), (width * 4) as i32)
-        }
-    } else {
-        unsafe {
-            libwebp_sys::WebPPictureImportRGB(&mut picture, data.as_ptr(), (width * 3) as i32)
-        }
-    };
-
-    if import_ok == 0 {
-        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-        return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
-    }
-
-    // Setup memory writer
-    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
-    unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
-    let mut writer = unsafe { writer.assume_init() };
-
-    picture.writer = Some(libwebp_sys::WebPMemoryWrite);
-    picture.custom_ptr = &mut writer as *mut _ as *mut _;
-
-    // Encode
-    let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
-
-    let result = if ok == 0 {
-        let error = EncodingError::from(picture.error_code as i32);
-        unsafe {
-            libwebp_sys::WebPPictureFree(&mut picture);
-            libwebp_sys::WebPMemoryWriterClear(&mut writer);
-        }
-        Err(at!(Error::EncodeFailed(error)))
-    } else {
-        let webp_data = unsafe {
-            let slice = core::slice::from_raw_parts(writer.mem, writer.size);
-            slice.to_vec()
-        };
-        unsafe {
-            libwebp_sys::WebPPictureFree(&mut picture);
-            libwebp_sys::WebPMemoryWriterClear(&mut writer);
-        }
-        Ok(webp_data)
-    };
-
-    // Embed metadata if present
-    #[cfg(feature = "icc")]
-    if let Ok(mut webp_data) = result {
-        if let Some(ref icc) = config.icc_profile {
-            webp_data = crate::mux::embed_icc(&webp_data, icc)?;
-        }
-        if let Some(ref exif) = config.exif_data {
-            webp_data = crate::mux::embed_exif(&webp_data, exif)?;
-        }
-        if let Some(ref xmp) = config.xmp_data {
-            webp_data = crate::mux::embed_xmp(&webp_data, xmp)?;
-        }
-        return Ok(webp_data);
-    }
-
-    result
+        .encode_rgba(data, width, height, stop)
 }
 
 /// Internal: Encode with full config and return stats (called by EncoderConfig).

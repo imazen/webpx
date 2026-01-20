@@ -394,7 +394,7 @@ mod encoder_config_tests {
             let config = EncoderConfig::new().quality(75.0).hint(hint);
 
             let webp = config
-                .encode_rgba(&data, width, height)
+                .encode_rgba(&data, width, height, Unstoppable)
                 .unwrap_or_else(|e| panic!("encode with {:?} hint failed: {}", hint, e));
 
             let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -425,7 +425,7 @@ mod encoder_config_tests {
                 .alpha_quality(90);
 
             let webp = config
-                .encode_rgba(&data, width, height)
+                .encode_rgba(&data, width, height, Unstoppable)
                 .unwrap_or_else(|e| panic!("encode with {:?} alpha filter failed: {}", filter, e));
 
             let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -447,7 +447,7 @@ mod encoder_config_tests {
                 .preprocessing(preprocessing);
 
             let webp = config
-                .encode_rgba(&data, width, height)
+                .encode_rgba(&data, width, height, Unstoppable)
                 .unwrap_or_else(|e| {
                     panic!("encode with preprocessing={} failed: {}", preprocessing, e)
                 });
@@ -471,7 +471,7 @@ mod encoder_config_tests {
                 .partition_limit(50);
 
             let webp = config
-                .encode_rgba(&data, width, height)
+                .encode_rgba(&data, width, height, Unstoppable)
                 .unwrap_or_else(|e| panic!("encode with partitions={} failed: {}", partitions, e));
 
             let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -488,7 +488,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::new_lossless().delta_palette(true);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with delta_palette failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -509,7 +509,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::new().quality(75.0).quality_range(30, 80);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with quality_range failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -525,7 +525,7 @@ mod encoder_config_tests {
 
         let config = EncoderConfig::max_compression();
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("max_compression encode failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -540,7 +540,7 @@ mod encoder_config_tests {
 
         let config = EncoderConfig::max_compression_lossless();
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("max_compression_lossless encode failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -561,7 +561,7 @@ mod encoder_config_tests {
         for level in 0..=9 {
             let config = EncoderConfig::new_lossless_level(level);
             let webp = config
-                .encode_rgba(&data, width, height)
+                .encode_rgba(&data, width, height, Unstoppable)
                 .unwrap_or_else(|e| panic!("encode with lossless level {} failed: {}", level, e));
 
             let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -596,7 +596,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::new().quality(75.0).sharp_yuv(true);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with sharp_yuv failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -618,7 +618,7 @@ mod encoder_config_tests {
             .sns_strength(80);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with filter settings failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -635,7 +635,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::new().target_size(500);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with target_size failed");
 
         // File should be close to target (with some tolerance)
@@ -655,7 +655,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::new().quality(75.0).pass(6).segments(4);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with pass/segments failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -671,7 +671,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::new().quality(75.0).low_memory(true);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with low_memory failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -695,7 +695,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::new_lossless().exact(true);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with exact failed");
 
         let (decoded, _, _) = decode_rgba(&webp).expect("decode failed");
@@ -721,7 +721,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::new_lossless().near_lossless(60);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with near_lossless failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -737,7 +737,7 @@ mod encoder_config_tests {
         let config = EncoderConfig::with_preset(Preset::Photo, 85.0);
 
         let webp = config
-            .encode_rgba(&data, width, height)
+            .encode_rgba(&data, width, height, Unstoppable)
             .expect("encode with_preset failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -1873,9 +1873,15 @@ mod animation_tests {
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder creation failed");
         encoder.set_quality(85.0);
 
-        encoder.add_frame(&frame1, 0).expect("add frame 1 failed");
-        encoder.add_frame(&frame2, 100).expect("add frame 2 failed");
-        encoder.add_frame(&frame3, 200).expect("add frame 3 failed");
+        encoder
+            .add_frame_rgba(&frame1, 0)
+            .expect("add frame 1 failed");
+        encoder
+            .add_frame_rgba(&frame2, 100)
+            .expect("add frame 2 failed");
+        encoder
+            .add_frame_rgba(&frame3, 200)
+            .expect("add frame 3 failed");
 
         let webp = encoder.finish(300).expect("finish failed");
 
@@ -1912,8 +1918,12 @@ mod animation_tests {
         let frame2 = generate_rgba(width, height, 0, 255, 0, 255);
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder creation failed");
-        encoder.add_frame(&frame1, 0).expect("add frame 1 failed");
-        encoder.add_frame(&frame2, 100).expect("add frame 2 failed");
+        encoder
+            .add_frame_rgba(&frame1, 0)
+            .expect("add frame 1 failed");
+        encoder
+            .add_frame_rgba(&frame2, 100)
+            .expect("add frame 2 failed");
         let webp = encoder.finish(200).expect("finish failed");
 
         let mut decoder = AnimationDecoder::new(&webp).expect("decoder creation failed");
@@ -1939,8 +1949,12 @@ mod animation_tests {
         let frame2 = generate_rgba(width, height, 0, 255, 0, 255);
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder creation failed");
-        encoder.add_frame(&frame1, 0).expect("add frame 1 failed");
-        encoder.add_frame(&frame2, 100).expect("add frame 2 failed");
+        encoder
+            .add_frame_rgba(&frame1, 0)
+            .expect("add frame 1 failed");
+        encoder
+            .add_frame_rgba(&frame2, 100)
+            .expect("add frame 2 failed");
         let webp = encoder.finish(200).expect("finish failed");
 
         let mut decoder = AnimationDecoder::new(&webp).expect("decoder creation failed");
@@ -1969,8 +1983,12 @@ mod animation_tests {
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder creation failed");
         encoder.set_lossless(true);
-        encoder.add_frame(&frame1, 0).expect("add frame 1 failed");
-        encoder.add_frame(&frame2, 100).expect("add frame 2 failed");
+        encoder
+            .add_frame_rgba(&frame1, 0)
+            .expect("add frame 1 failed");
+        encoder
+            .add_frame_rgba(&frame2, 100)
+            .expect("add frame 2 failed");
         let webp = encoder.finish(200).expect("finish failed");
 
         let mut decoder = AnimationDecoder::new(&webp).expect("decoder creation failed");
@@ -1997,8 +2015,8 @@ mod animation_tests {
         encoder.set_preset(webpx::Preset::Picture);
         encoder.set_lossless(true);
 
-        encoder.add_frame(&frame1, 0).expect("add frame 1");
-        encoder.add_frame(&frame2, 100).expect("add frame 2");
+        encoder.add_frame_rgba(&frame1, 0).expect("add frame 1");
+        encoder.add_frame_rgba(&frame2, 100).expect("add frame 2");
         let webp = encoder.finish(200).expect("finish");
 
         // Decode with options
@@ -2044,9 +2062,9 @@ mod animation_tests {
         let frame3 = generate_rgba(width, height, 0, 0, 255, 255);
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
-        encoder.add_frame(&frame1, 0).expect("add 1");
-        encoder.add_frame(&frame2, 100).expect("add 2");
-        encoder.add_frame(&frame3, 200).expect("add 3");
+        encoder.add_frame_rgba(&frame1, 0).expect("add 1");
+        encoder.add_frame_rgba(&frame2, 100).expect("add 2");
+        encoder.add_frame_rgba(&frame3, 200).expect("add 3");
         let webp = encoder.finish(300).expect("finish");
 
         let mut decoder = AnimationDecoder::new(&webp).expect("decoder");
@@ -2069,7 +2087,7 @@ mod animation_tests {
         let frame = generate_rgba(width, height, 100, 100, 100, 255);
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
-        encoder.add_frame(&frame, 0).expect("add");
+        encoder.add_frame_rgba(&frame, 0).expect("add");
         let webp = encoder.finish(100).expect("finish");
 
         let mut decoder = AnimationDecoder::new(&webp).expect("decoder");
@@ -2089,8 +2107,8 @@ mod animation_tests {
         let frame2 = generate_rgba(width, height, 200, 150, 100, 255);
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
-        encoder.add_frame(&frame1, 0).expect("add");
-        encoder.add_frame(&frame2, 100).expect("add");
+        encoder.add_frame_rgba(&frame1, 0).expect("add");
+        encoder.add_frame_rgba(&frame2, 100).expect("add");
         let webp = encoder.finish(200).expect("finish");
 
         // Test RGBA mode
@@ -2111,8 +2129,8 @@ mod animation_tests {
         let frame2 = generate_rgba(width, height, 200, 150, 100, 255);
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
-        encoder.add_frame(&frame1, 0).expect("add");
-        encoder.add_frame(&frame2, 100).expect("add");
+        encoder.add_frame_rgba(&frame1, 0).expect("add");
+        encoder.add_frame_rgba(&frame2, 100).expect("add");
         let webp = encoder.finish(200).expect("finish");
 
         // Test BGRA mode
@@ -2132,7 +2150,7 @@ mod animation_tests {
         let frame = generate_rgba(width, height, 100, 150, 200, 255);
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
-        encoder.add_frame(&frame, 0).expect("add");
+        encoder.add_frame_rgba(&frame, 0).expect("add");
         let webp = encoder.finish(100).expect("finish");
 
         // YUV modes not supported for animation decoder
@@ -2146,7 +2164,7 @@ mod animation_tests {
 
         let mut encoder = AnimationEncoder::new(100, 100).expect("encoder");
         let small_frame = vec![0u8; 10];
-        let result = encoder.add_frame(&small_frame, 0);
+        let result = encoder.add_frame_rgba(&small_frame, 0);
         assert!(result.is_err());
 
         let result_rgb = encoder.add_frame_rgb(&small_frame, 0);
@@ -2167,7 +2185,7 @@ mod animation_tests {
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
         encoder.set_icc_profile(fake_icc.clone());
-        encoder.add_frame(&frame, 0).expect("add");
+        encoder.add_frame_rgba(&frame, 0).expect("add");
 
         // libwebp mux accepts arbitrary byte sequences as ICC data
         let webp = encoder
@@ -2302,8 +2320,8 @@ mod compat_webp_tests {
         let frame1 = generate_rgba(8, 8, 100, 150, 200, 255);
         let frame2 = generate_rgba(8, 8, 200, 150, 100, 255);
         let mut encoder = webpx::AnimationEncoder::new(8, 8).expect("encoder");
-        encoder.add_frame(&frame1, 0).expect("add");
-        encoder.add_frame(&frame2, 100).expect("add");
+        encoder.add_frame_rgba(&frame1, 0).expect("add");
+        encoder.add_frame_rgba(&frame2, 100).expect("add");
         let webp = encoder.finish(200).expect("finish");
 
         // Verify it's detected as animated

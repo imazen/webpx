@@ -2,7 +2,7 @@
 
 use crate::config::{EncoderConfig, Preset};
 use crate::error::{Error, Result};
-use crate::types::ColorMode;
+use crate::types::{ColorMode, EncodePixel, PixelLayout};
 use alloc::vec::Vec;
 use core::ptr;
 use whereat::*;
@@ -242,18 +242,19 @@ impl Drop for AnimationDecoder {
 ///
 /// ```rust,no_run
 /// use webpx::AnimationEncoder;
+/// use rgb::RGBA8;
 ///
-/// let frame1_rgba = vec![0u8; 640 * 480 * 4];
-/// let frame2_rgba = vec![0u8; 640 * 480 * 4];
-/// let frame3_rgba = vec![0u8; 640 * 480 * 4];
+/// // Create frames with typed pixels (preferred)
+/// let frame1: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 640 * 480];
+/// let frame2: Vec<RGBA8> = vec![RGBA8::new(0, 255, 0, 255); 640 * 480];
+/// let frame3: Vec<RGBA8> = vec![RGBA8::new(0, 0, 255, 255); 640 * 480];
 ///
-/// // Use with_options for loop count (0 = infinite)
 /// let mut encoder = AnimationEncoder::with_options(640, 480, false, 0)?;
 /// encoder.set_quality(85.0);
 ///
-/// encoder.add_frame(&frame1_rgba, 0)?;      // First frame at t=0
-/// encoder.add_frame(&frame2_rgba, 100)?;    // Second frame at t=100ms
-/// encoder.add_frame(&frame3_rgba, 200)?;    // Third frame at t=200ms
+/// encoder.add_frame(&frame1, 0)?;      // First frame at t=0
+/// encoder.add_frame(&frame2, 100)?;    // Second frame at t=100ms
+/// encoder.add_frame(&frame3, 200)?;    // Third frame at t=200ms
 ///
 /// let webp_data = encoder.finish(300)?;     // Total duration 300ms
 /// # Ok::<(), webpx::At<webpx::Error>>(())
@@ -355,15 +356,82 @@ impl AnimationEncoder {
         self.icc_profile = Some(profile);
     }
 
-    /// Add a frame to the animation.
+    /// Add a frame with typed pixel data.
+    ///
+    /// This is the preferred method for type-safe frame addition with rgb crate types.
+    ///
+    /// # Supported Types
+    /// - [`rgb::RGBA8`] - 4-channel RGBA
+    /// - [`rgb::RGB8`] - 3-channel RGB
+    /// - [`rgb::alt::BGRA8`] - 4-channel BGRA (Windows/GPU native)
+    /// - [`rgb::alt::BGR8`] - 3-channel BGR (OpenCV)
     ///
     /// # Arguments
     ///
-    /// * `rgba` - Frame pixel data (RGBA, 4 bytes per pixel)
+    /// * `pixels` - Frame pixel data
     /// * `timestamp_ms` - Frame timestamp in milliseconds from animation start
-    pub fn add_frame(&mut self, rgba: &[u8], timestamp_ms: i32) -> Result<()> {
-        let expected = (self.width as usize) * (self.height as usize) * 4;
-        if rgba.len() < expected {
+    pub fn add_frame<P: EncodePixel>(&mut self, pixels: &[P], timestamp_ms: i32) -> Result<()> {
+        let bpp = P::LAYOUT.bytes_per_pixel();
+        let data = unsafe {
+            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+        };
+        self.add_frame_internal(data, timestamp_ms, P::LAYOUT)
+    }
+
+    /// Add a frame with RGBA byte data.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Frame pixel data (RGBA, 4 bytes per pixel)
+    /// * `timestamp_ms` - Frame timestamp in milliseconds from animation start
+    pub fn add_frame_rgba(&mut self, data: &[u8], timestamp_ms: i32) -> Result<()> {
+        self.add_frame_internal(data, timestamp_ms, PixelLayout::Rgba)
+    }
+
+    /// Add a frame with RGB byte data (no alpha).
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Frame pixel data (RGB, 3 bytes per pixel)
+    /// * `timestamp_ms` - Frame timestamp in milliseconds from animation start
+    pub fn add_frame_rgb(&mut self, data: &[u8], timestamp_ms: i32) -> Result<()> {
+        self.add_frame_internal(data, timestamp_ms, PixelLayout::Rgb)
+    }
+
+    /// Add a frame with BGRA byte data.
+    ///
+    /// BGRA is the native format on Windows and some GPU APIs.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Frame pixel data (BGRA, 4 bytes per pixel)
+    /// * `timestamp_ms` - Frame timestamp in milliseconds from animation start
+    pub fn add_frame_bgra(&mut self, data: &[u8], timestamp_ms: i32) -> Result<()> {
+        self.add_frame_internal(data, timestamp_ms, PixelLayout::Bgra)
+    }
+
+    /// Add a frame with BGR byte data (no alpha).
+    ///
+    /// BGR is common in OpenCV and some image libraries.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Frame pixel data (BGR, 3 bytes per pixel)
+    /// * `timestamp_ms` - Frame timestamp in milliseconds from animation start
+    pub fn add_frame_bgr(&mut self, data: &[u8], timestamp_ms: i32) -> Result<()> {
+        self.add_frame_internal(data, timestamp_ms, PixelLayout::Bgr)
+    }
+
+    /// Internal: Add a frame with a specific pixel layout.
+    fn add_frame_internal(
+        &mut self,
+        data: &[u8],
+        timestamp_ms: i32,
+        layout: PixelLayout,
+    ) -> Result<()> {
+        let bpp = layout.bytes_per_pixel();
+        let expected = (self.width as usize) * (self.height as usize) * bpp;
+        if data.len() < expected {
             return Err(at!(Error::InvalidInput("buffer too small".into())));
         }
 
@@ -376,8 +444,22 @@ impl AnimationEncoder {
         picture.height = self.height as i32;
         picture.use_argb = 1;
 
+        let stride = (self.width as usize * bpp) as i32;
         let import_ok = unsafe {
-            libwebp_sys::WebPPictureImportRGBA(&mut picture, rgba.as_ptr(), (self.width * 4) as i32)
+            match layout {
+                PixelLayout::Rgba => {
+                    libwebp_sys::WebPPictureImportRGBA(&mut picture, data.as_ptr(), stride)
+                }
+                PixelLayout::Rgb => {
+                    libwebp_sys::WebPPictureImportRGB(&mut picture, data.as_ptr(), stride)
+                }
+                PixelLayout::Bgra => {
+                    libwebp_sys::WebPPictureImportBGRA(&mut picture, data.as_ptr(), stride)
+                }
+                PixelLayout::Bgr => {
+                    libwebp_sys::WebPPictureImportBGR(&mut picture, data.as_ptr(), stride)
+                }
+            }
         };
 
         if import_ok == 0 {
@@ -403,44 +485,6 @@ impl AnimationEncoder {
                 }
             };
             return Err(at!(Error::AnimationError(error_msg.into())));
-        }
-
-        Ok(())
-    }
-
-    /// Add a frame with RGB data (no alpha).
-    pub fn add_frame_rgb(&mut self, rgb: &[u8], timestamp_ms: i32) -> Result<()> {
-        let expected = (self.width as usize) * (self.height as usize) * 3;
-        if rgb.len() < expected {
-            return Err(at!(Error::InvalidInput("buffer too small".into())));
-        }
-
-        let webp_config = self.config.to_libwebp()?;
-
-        let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
-
-        picture.width = self.width as i32;
-        picture.height = self.height as i32;
-        picture.use_argb = 1;
-
-        let import_ok = unsafe {
-            libwebp_sys::WebPPictureImportRGB(&mut picture, rgb.as_ptr(), (self.width * 3) as i32)
-        };
-
-        if import_ok == 0 {
-            unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-            return Err(at!(Error::OutOfMemory));
-        }
-
-        let ok = unsafe {
-            libwebp_sys::WebPAnimEncoderAdd(self.encoder, &mut picture, timestamp_ms, &webp_config)
-        };
-
-        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-
-        if ok == 0 {
-            return Err(at!(Error::AnimationError("failed to add frame".into())));
         }
 
         Ok(())

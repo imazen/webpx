@@ -141,9 +141,9 @@ fn bench_animation(c: &mut Criterion) {
         b.iter(|| {
             let mut encoder = AnimationEncoder::new(width, height).unwrap();
             encoder.set_quality(85.0);
-            encoder.add_frame(black_box(&frame1), 0).unwrap();
-            encoder.add_frame(black_box(&frame2), 100).unwrap();
-            encoder.add_frame(black_box(&frame3), 200).unwrap();
+            encoder.add_frame_rgba(black_box(&frame1), 0).unwrap();
+            encoder.add_frame_rgba(black_box(&frame2), 100).unwrap();
+            encoder.add_frame_rgba(black_box(&frame3), 200).unwrap();
             encoder.finish(300).unwrap()
         });
     });

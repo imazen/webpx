@@ -183,7 +183,7 @@ impl Preset {
 /// # Example
 ///
 /// ```rust
-/// use webpx::EncoderConfig;
+/// use webpx::{EncoderConfig, Unstoppable};
 ///
 /// let config = EncoderConfig::new()
 ///     .quality(85.0)
@@ -193,8 +193,8 @@ impl Preset {
 /// // Reuse config for multiple images
 /// let image1 = vec![0u8; 4 * 4 * 4]; // 4x4 RGBA
 /// let image2 = vec![0u8; 8 * 6 * 4]; // 8x6 RGBA
-/// let webp1 = config.encode_rgba(&image1, 4, 4)?;
-/// let webp2 = config.encode_rgba(&image2, 8, 6)?;
+/// let webp1 = config.encode_rgba(&image1, 4, 4, Unstoppable)?;
+/// let webp2 = config.encode_rgba(&image2, 8, 6, Unstoppable)?;
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 #[derive(Debug, Clone)]
@@ -698,34 +698,127 @@ impl EncoderConfig {
 
     // === Encoding Entry Points ===
 
-    /// Encode RGBA pixel data to WebP.
+    /// Encode typed pixel data to WebP.
+    ///
+    /// This is the preferred method for type-safe encoding with rgb crate types.
+    /// The pixel format is determined at compile time from the type parameter.
+    ///
+    /// # Supported Types
+    /// - [`rgb::RGBA8`] - 4-channel RGBA
+    /// - [`rgb::RGB8`] - 3-channel RGB
+    /// - [`rgb::alt::BGRA8`] - 4-channel BGRA (Windows/GPU native)
+    /// - [`rgb::alt::BGR8`] - 3-channel BGR (OpenCV)
     ///
     /// # Arguments
-    /// - `data`: RGBA pixel data (4 bytes per pixel)
+    /// - `pixels`: Slice of typed pixels
     /// - `width`: Image width in pixels
     /// - `height`: Image height in pixels
+    /// - `stop`: Cooperative cancellation token (use [`Unstoppable`](crate::Unstoppable) if not needed)
     ///
     /// # Example
     /// ```rust
-    /// use webpx::EncoderConfig;
+    /// use webpx::{EncoderConfig, Unstoppable};
+    /// use rgb::RGBA8;
+    ///
+    /// let pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 4 * 4];
+    /// let config = EncoderConfig::new().quality(85.0);
+    /// let webp = config.encode(&pixels, 4, 4, Unstoppable)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    pub fn encode<P: EncodePixel>(
+        &self,
+        pixels: &[P],
+        width: u32,
+        height: u32,
+        stop: impl Stop,
+    ) -> Result<Vec<u8>> {
+        let bpp = P::LAYOUT.bytes_per_pixel();
+        let data = unsafe {
+            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+        };
+        self.encode_internal(data, width, height, P::LAYOUT, stop)
+    }
+
+    /// Encode RGBA byte data to WebP.
+    ///
+    /// # Arguments
+    /// - `data`: RGBA pixel data (4 bytes per pixel: red, green, blue, alpha)
+    /// - `width`: Image width in pixels
+    /// - `height`: Image height in pixels
+    /// - `stop`: Cooperative cancellation token (use [`Unstoppable`](crate::Unstoppable) if not needed)
+    ///
+    /// # Example
+    /// ```rust
+    /// use webpx::{EncoderConfig, Unstoppable};
     ///
     /// let rgba_data = vec![0u8; 4 * 4 * 4]; // 4x4 RGBA
     /// let config = EncoderConfig::new().quality(85.0);
-    /// let webp = config.encode_rgba(&rgba_data, 4, 4)?;
+    /// let webp = config.encode_rgba(&rgba_data, 4, 4, Unstoppable)?;
     /// # Ok::<(), webpx::At<webpx::Error>>(())
     /// ```
-    pub fn encode_rgba(&self, data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
-        crate::encode::encode_with_config(data, width, height, 4, self)
+    pub fn encode_rgba(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        stop: impl Stop,
+    ) -> Result<Vec<u8>> {
+        self.encode_internal(data, width, height, PixelLayout::Rgba, stop)
     }
 
-    /// Encode RGB pixel data to WebP (no alpha).
+    /// Encode RGB byte data to WebP (no alpha).
     ///
     /// # Arguments
-    /// - `data`: RGB pixel data (3 bytes per pixel)
+    /// - `data`: RGB pixel data (3 bytes per pixel: red, green, blue)
     /// - `width`: Image width in pixels
     /// - `height`: Image height in pixels
-    pub fn encode_rgb(&self, data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
-        crate::encode::encode_with_config(data, width, height, 3, self)
+    /// - `stop`: Cooperative cancellation token (use [`Unstoppable`](crate::Unstoppable) if not needed)
+    pub fn encode_rgb(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        stop: impl Stop,
+    ) -> Result<Vec<u8>> {
+        self.encode_internal(data, width, height, PixelLayout::Rgb, stop)
+    }
+
+    /// Encode BGRA byte data to WebP.
+    ///
+    /// BGRA is the native format on Windows and some GPU APIs.
+    ///
+    /// # Arguments
+    /// - `data`: BGRA pixel data (4 bytes per pixel: blue, green, red, alpha)
+    /// - `width`: Image width in pixels
+    /// - `height`: Image height in pixels
+    /// - `stop`: Cooperative cancellation token (use [`Unstoppable`](crate::Unstoppable) if not needed)
+    pub fn encode_bgra(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        stop: impl Stop,
+    ) -> Result<Vec<u8>> {
+        self.encode_internal(data, width, height, PixelLayout::Bgra, stop)
+    }
+
+    /// Encode BGR byte data to WebP (no alpha).
+    ///
+    /// BGR is common in OpenCV and some image libraries.
+    ///
+    /// # Arguments
+    /// - `data`: BGR pixel data (3 bytes per pixel: blue, green, red)
+    /// - `width`: Image width in pixels
+    /// - `height`: Image height in pixels
+    /// - `stop`: Cooperative cancellation token (use [`Unstoppable`](crate::Unstoppable) if not needed)
+    pub fn encode_bgr(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        stop: impl Stop,
+    ) -> Result<Vec<u8>> {
+        self.encode_internal(data, width, height, PixelLayout::Bgr, stop)
     }
 
     /// Encode RGBA pixel data and return encoding statistics.
@@ -751,136 +844,25 @@ impl EncoderConfig {
         crate::encode::encode_with_config_stats(data, width, height, 3, self)
     }
 
-    /// Encode RGBA pixel data with cooperative cancellation support.
-    ///
-    /// The encoding can be cancelled by the `stop` parameter. If cancelled,
-    /// returns `Error::Stopped(StopReason)`.
-    ///
-    /// # Arguments
-    /// - `data`: RGBA pixel data (4 bytes per pixel)
-    /// - `width`: Image width in pixels
-    /// - `height`: Image height in pixels
-    /// - `stop`: Cooperative cancellation token
-    pub fn encode_rgba_stoppable(
-        &self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stop: &impl Stop,
-    ) -> Result<Vec<u8>> {
-        crate::encode::encode_with_config_stoppable(data, width, height, 4, self, stop)
-    }
-
-    /// Encode RGB pixel data with cooperative cancellation support.
-    pub fn encode_rgb_stoppable(
-        &self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stop: &impl Stop,
-    ) -> Result<Vec<u8>> {
-        crate::encode::encode_with_config_stoppable(data, width, height, 3, self, stop)
-    }
-
-    /// Encode typed pixel data to WebP.
-    ///
-    /// This is the preferred method for type-safe encoding with rgb crate types.
-    /// The pixel format is determined at compile time from the type parameter.
-    ///
-    /// # Supported Types
-    /// - [`rgb::RGBA8`] - 4-channel RGBA
-    /// - [`rgb::RGB8`] - 3-channel RGB
-    /// - [`rgb::alt::BGRA8`] - 4-channel BGRA (Windows/GPU native)
-    /// - [`rgb::alt::BGR8`] - 3-channel BGR (OpenCV)
-    ///
-    /// # Example
-    /// ```rust
-    /// use webpx::EncoderConfig;
-    /// use rgb::RGBA8;
-    ///
-    /// let pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 4 * 4];
-    /// let config = EncoderConfig::new().quality(85.0);
-    /// let webp = config.encode_pixels(&pixels, 4, 4)?;
-    /// # Ok::<(), webpx::At<webpx::Error>>(())
-    /// ```
-    pub fn encode_pixels<P: EncodePixel>(
-        &self,
-        pixels: &[P],
-        width: u32,
-        height: u32,
-    ) -> Result<Vec<u8>> {
-        let bpp = P::LAYOUT.bytes_per_pixel();
-        let data = unsafe {
-            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
-        };
-        self.encode_pixels_internal(data, width, height, P::LAYOUT)
-    }
-
-    /// Encode typed pixel data with cooperative cancellation support.
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// use webpx::{EncoderConfig, Unstoppable};
-    /// use rgb::RGB8;
-    ///
-    /// let pixels: Vec<RGB8> = vec![RGB8::new(0, 128, 255); 100 * 100];
-    /// let config = EncoderConfig::new().quality(90.0);
-    /// let webp = config.encode_pixels_stoppable(&pixels, 100, 100, &Unstoppable)?;
-    /// # Ok::<(), webpx::At<webpx::Error>>(())
-    /// ```
-    pub fn encode_pixels_stoppable<P: EncodePixel>(
-        &self,
-        pixels: &[P],
-        width: u32,
-        height: u32,
-        stop: &impl Stop,
-    ) -> Result<Vec<u8>> {
-        let bpp = P::LAYOUT.bytes_per_pixel();
-        let data = unsafe {
-            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
-        };
-        self.encode_pixels_internal_stoppable(data, width, height, P::LAYOUT, stop)
-    }
-
     /// Internal: encode bytes with a specific pixel layout.
-    fn encode_pixels_internal(
+    fn encode_internal(
         &self,
         data: &[u8],
         width: u32,
         height: u32,
         layout: PixelLayout,
-    ) -> Result<Vec<u8>> {
-        match layout {
-            PixelLayout::Rgba => crate::encode::encode_with_config(data, width, height, 4, self),
-            PixelLayout::Bgra => crate::Encoder::new_bgra(data, width, height)
-                .config(self.clone())
-                .encode(enough::Unstoppable),
-            PixelLayout::Rgb => crate::encode::encode_with_config(data, width, height, 3, self),
-            PixelLayout::Bgr => crate::Encoder::new_bgr(data, width, height)
-                .config(self.clone())
-                .encode(enough::Unstoppable),
-        }
-    }
-
-    /// Internal: encode bytes with a specific pixel layout and cancellation.
-    fn encode_pixels_internal_stoppable(
-        &self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        layout: PixelLayout,
-        stop: &impl Stop,
+        stop: impl Stop,
     ) -> Result<Vec<u8>> {
         match layout {
             PixelLayout::Rgba => {
-                crate::encode::encode_with_config_stoppable(data, width, height, 4, self, stop)
+                crate::encode::encode_with_config_stoppable(data, width, height, 4, self, &stop)
+            }
+            PixelLayout::Rgb => {
+                crate::encode::encode_with_config_stoppable(data, width, height, 3, self, &stop)
             }
             PixelLayout::Bgra => crate::Encoder::new_bgra(data, width, height)
                 .config(self.clone())
                 .encode(stop),
-            PixelLayout::Rgb => {
-                crate::encode::encode_with_config_stoppable(data, width, height, 3, self, stop)
-            }
             PixelLayout::Bgr => crate::Encoder::new_bgr(data, width, height)
                 .config(self.clone())
                 .encode(stop),
