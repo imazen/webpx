@@ -1,9 +1,9 @@
 //! WebP mux/demux operations for metadata (ICC, EXIF, XMP).
 
-use whereat::*;
 use crate::error::{Error, MuxError, Result};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
+use whereat::*;
 
 /// Extract ICC profile from WebP data.
 ///

@@ -1,6 +1,5 @@
 //! WebP decoding functionality.
 
-use whereat::*;
 use crate::config::DecoderConfig;
 use crate::error::{DecodingError, Error, Result};
 use crate::types::{ImageInfo, YuvPlanes};
@@ -8,6 +7,7 @@ use alloc::vec::Vec;
 use imgref::ImgVec;
 use rgb::alt::{BGR8, BGRA8};
 use rgb::{RGB8, RGBA8};
+use whereat::*;
 
 /// Decode WebP data to RGBA pixels.
 ///
@@ -146,7 +146,8 @@ pub fn decode_rgba_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Re
     let mut height: i32 = 0;
 
     // Get dimensions first
-    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0 {
+    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0
+    {
         return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
@@ -202,7 +203,8 @@ pub fn decode_bgra_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Re
     let mut height: i32 = 0;
 
     // Get dimensions first
-    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0 {
+    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0
+    {
         return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
@@ -256,7 +258,8 @@ pub fn decode_rgb_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Res
     let mut height: i32 = 0;
 
     // Get dimensions first
-    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0 {
+    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0
+    {
         return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
@@ -312,7 +315,8 @@ pub fn decode_bgr_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Res
     let mut height: i32 = 0;
 
     // Get dimensions first
-    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0 {
+    if unsafe { libwebp_sys::WebPGetInfo(data.as_ptr(), data.len(), &mut width, &mut height) } == 0
+    {
         return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 

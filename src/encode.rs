@@ -1,14 +1,14 @@
 //! WebP encoding functionality.
 
-use whereat::*;
 use crate::config::{EncodeStats, EncoderConfig, Preset};
 use crate::error::{EncodingError, Error, Result};
-use crate::types::YuvPlanesRef;
+use crate::types::{Pixel, PixelFormat, YuvPlanesRef};
 use alloc::vec::Vec;
 use enough::Stop;
 use imgref::ImgRef;
 use rgb::alt::{BGR8, BGRA8};
 use rgb::{RGB8, RGBA8};
+use whereat::*;
 
 /// Context for progress hook callback.
 struct StopContext<'a, S: Stop> {
@@ -333,8 +333,7 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
     validate_buffer_size(data.len(), width, height, bpp as u32)?;
 
     // Check for early cancellation
-    stop.check()
-        .map_err(|reason| at!(Error::Stopped(reason)))?;
+    stop.check().map_err(|reason| at!(Error::Stopped(reason)))?;
 
     let webp_config = config.to_libwebp()?;
 
@@ -457,25 +456,13 @@ pub struct Encoder<'a> {
 /// All formats store stride in bytes. For contiguous data, stride = width * bpp.
 enum EncoderInput<'a> {
     /// RGBA 4-channel data with stride in bytes.
-    Rgba {
-        data: &'a [u8],
-        stride_bytes: u32,
-    },
+    Rgba { data: &'a [u8], stride_bytes: u32 },
     /// BGRA 4-channel data with stride in bytes.
-    Bgra {
-        data: &'a [u8],
-        stride_bytes: u32,
-    },
+    Bgra { data: &'a [u8], stride_bytes: u32 },
     /// RGB 3-channel data with stride in bytes.
-    Rgb {
-        data: &'a [u8],
-        stride_bytes: u32,
-    },
+    Rgb { data: &'a [u8], stride_bytes: u32 },
     /// BGR 3-channel data with stride in bytes.
-    Bgr {
-        data: &'a [u8],
-        stride_bytes: u32,
-    },
+    Bgr { data: &'a [u8], stride_bytes: u32 },
     /// YUV planar data.
     Yuv(YuvPlanesRef<'a>),
 }
@@ -700,6 +687,95 @@ impl<'a> Encoder<'a> {
         Self::new_bgr_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
     }
 
+    /// Create encoder from a slice of typed pixels.
+    ///
+    /// This is the preferred method for type-safe encoding with rgb crate types.
+    /// The pixel format is determined at compile time from the type parameter.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use webpx::{Encoder, Unstoppable};
+    /// use rgb::RGBA8;
+    ///
+    /// let pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 100 * 100];
+    /// let webp = Encoder::from_pixels(&pixels, 100, 100)
+    ///     .quality(85.0)
+    ///     .encode(Unstoppable)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn from_pixels<P: Pixel>(pixels: &'a [P], width: u32, height: u32) -> Self {
+        let bpp = P::FORMAT.bytes_per_pixel();
+        // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
+        let data = unsafe {
+            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+        };
+        let stride_bytes = width * bpp as u32;
+        Self::from_pixels_internal(data, width, height, stride_bytes, P::FORMAT)
+    }
+
+    /// Create encoder from a slice of typed pixels with explicit stride.
+    ///
+    /// # Arguments
+    /// * `pixels` - Pixel data
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `stride_pixels` - Row stride in pixels (must be >= width)
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use webpx::{Encoder, Unstoppable};
+    /// use rgb::RGB8;
+    ///
+    /// // Buffer with 128-pixel alignment (stride = 128, width = 100)
+    /// let pixels: Vec<RGB8> = vec![RGB8::new(0, 0, 0); 128 * 100];
+    /// let webp = Encoder::from_pixels_stride(&pixels, 100, 100, 128)
+    ///     .quality(85.0)
+    ///     .encode(Unstoppable)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn from_pixels_stride<P: Pixel>(
+        pixels: &'a [P],
+        width: u32,
+        height: u32,
+        stride_pixels: u32,
+    ) -> Self {
+        let bpp = P::FORMAT.bytes_per_pixel();
+        // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
+        let data = unsafe {
+            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+        };
+        let stride_bytes = stride_pixels * bpp as u32;
+        Self::from_pixels_internal(data, width, height, stride_bytes, P::FORMAT)
+    }
+
+    /// Internal helper to create encoder from byte data with a specific format.
+    fn from_pixels_internal(
+        data: &'a [u8],
+        width: u32,
+        height: u32,
+        stride_bytes: u32,
+        format: PixelFormat,
+    ) -> Self {
+        let input = match format {
+            PixelFormat::Rgba => EncoderInput::Rgba { data, stride_bytes },
+            PixelFormat::Bgra => EncoderInput::Bgra { data, stride_bytes },
+            PixelFormat::Rgb => EncoderInput::Rgb { data, stride_bytes },
+            PixelFormat::Bgr => EncoderInput::Bgr { data, stride_bytes },
+        };
+        Self {
+            data: input,
+            width,
+            height,
+            config: EncoderConfig::default(),
+            #[cfg(feature = "icc")]
+            icc_profile: None,
+        }
+    }
+
     /// Set encoding quality (0.0 = smallest, 100.0 = best).
     #[must_use]
     pub fn quality(mut self, quality: f32) -> Self {
@@ -786,8 +862,7 @@ impl<'a> Encoder<'a> {
         validate_dimensions(self.width, self.height)?;
 
         // Check for early cancellation
-        stop.check()
-            .map_err(|reason| at!(Error::Stopped(reason)))?;
+        stop.check().map_err(|reason| at!(Error::Stopped(reason)))?;
 
         let webp_config = self.config.to_libwebp()?;
 

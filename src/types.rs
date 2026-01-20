@@ -1,7 +1,97 @@
 //! Core types for image data representation.
 
-use whereat::*;
 use alloc::vec::Vec;
+use rgb::alt::{BGR8, BGRA8};
+use rgb::{RGB8, RGBA8};
+use whereat::*;
+
+/// Pixel format for encoding/decoding operations.
+///
+/// This enum describes the channel order and layout for byte-oriented APIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PixelFormat {
+    /// RGBA - 4 bytes per pixel (red, green, blue, alpha)
+    Rgba,
+    /// BGRA - 4 bytes per pixel (blue, green, red, alpha) - Windows/GPU native
+    Bgra,
+    /// RGB - 3 bytes per pixel (red, green, blue)
+    Rgb,
+    /// BGR - 3 bytes per pixel (blue, green, red) - OpenCV native
+    Bgr,
+}
+
+impl PixelFormat {
+    /// Bytes per pixel for this format.
+    #[must_use]
+    pub const fn bytes_per_pixel(self) -> usize {
+        match self {
+            PixelFormat::Rgba | PixelFormat::Bgra => 4,
+            PixelFormat::Rgb | PixelFormat::Bgr => 3,
+        }
+    }
+
+    /// Whether this format has an alpha channel.
+    #[must_use]
+    pub const fn has_alpha(self) -> bool {
+        matches!(self, PixelFormat::Rgba | PixelFormat::Bgra)
+    }
+}
+
+/// Marker trait for pixel types that can be encoded/decoded.
+///
+/// This trait maps rgb crate types to their corresponding [`PixelFormat`],
+/// enabling type-safe encoding and decoding operations.
+///
+/// # Implemented Types
+///
+/// - [`RGB8`] - 3-channel RGB
+/// - [`RGBA8`] - 4-channel RGBA
+/// - [`BGR8`] - 3-channel BGR (Windows/OpenCV)
+/// - [`BGRA8`] - 4-channel BGRA (Windows/GPU native)
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use webpx::{Encoder, Pixel, Unstoppable};
+/// use rgb::RGBA8;
+///
+/// let pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 100 * 100];
+/// let webp = Encoder::from_pixels(&pixels, 100, 100)
+///     .quality(85.0)
+///     .encode(Unstoppable)?;
+/// # Ok::<(), webpx::At<webpx::Error>>(())
+/// ```
+pub trait Pixel: Copy + 'static + private::Sealed {
+    /// The pixel format corresponding to this type.
+    const FORMAT: PixelFormat;
+}
+
+impl Pixel for RGBA8 {
+    const FORMAT: PixelFormat = PixelFormat::Rgba;
+}
+
+impl Pixel for BGRA8 {
+    const FORMAT: PixelFormat = PixelFormat::Bgra;
+}
+
+impl Pixel for RGB8 {
+    const FORMAT: PixelFormat = PixelFormat::Rgb;
+}
+
+impl Pixel for BGR8 {
+    const FORMAT: PixelFormat = PixelFormat::Bgr;
+}
+
+mod private {
+    use super::*;
+
+    pub trait Sealed {}
+    impl Sealed for RGBA8 {}
+    impl Sealed for BGRA8 {}
+    impl Sealed for RGB8 {}
+    impl Sealed for BGR8 {}
+}
 
 /// Information about a WebP image.
 #[derive(Debug, Clone, PartialEq, Eq)]

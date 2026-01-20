@@ -1,11 +1,11 @@
 //! Animated WebP encoding and decoding.
 
-use whereat::*;
 use crate::config::{EncoderConfig, Preset};
 use crate::error::{Error, Result};
 use crate::types::ColorMode;
 use alloc::vec::Vec;
 use core::ptr;
+use whereat::*;
 
 /// A single frame in an animation.
 #[derive(Debug, Clone)]
@@ -463,7 +463,9 @@ impl AnimationEncoder {
         };
 
         if ok == 0 {
-            return Err(at!(Error::AnimationError("failed to finalize animation".into())));
+            return Err(at!(Error::AnimationError(
+                "failed to finalize animation".into()
+            )));
         }
 
         // Assemble the animation
@@ -471,7 +473,9 @@ impl AnimationEncoder {
         let ok = unsafe { libwebp_sys::WebPAnimEncoderAssemble(self.encoder, &mut webp_data) };
 
         if ok == 0 {
-            return Err(at!(Error::AnimationError("failed to assemble animation".into())));
+            return Err(at!(Error::AnimationError(
+                "failed to assemble animation".into()
+            )));
         }
 
         let result = unsafe {

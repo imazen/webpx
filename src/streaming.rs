@@ -1,10 +1,10 @@
 //! Streaming/incremental WebP decode and encode.
 
-use whereat::*;
 use crate::error::{DecodingError, Error, Result};
 use crate::types::ColorMode;
 use alloc::vec::Vec;
 use core::ptr;
+use whereat::*;
 
 /// Status of a streaming decode operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,10 +157,7 @@ impl StreamingDecoder {
     }
 
     /// Process the VP8 status code and update internal state.
-    fn process_status(
-        &mut self,
-        status: libwebp_sys::VP8StatusCode,
-    ) -> Result<DecodeStatus> {
+    fn process_status(&mut self, status: libwebp_sys::VP8StatusCode) -> Result<DecodeStatus> {
         match status {
             libwebp_sys::VP8StatusCode::VP8_STATUS_OK => {
                 // Decode complete - update dimensions

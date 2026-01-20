@@ -1,9 +1,9 @@
 //! Encoder and decoder configuration types.
 
-use whereat::*;
 use crate::error::{Error, Result};
 use alloc::vec::Vec;
 use enough::Stop;
+use whereat::*;
 
 /// Content-aware encoding presets.
 ///
