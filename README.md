@@ -192,6 +192,7 @@ for chunk in network_stream {
                 display_partial(data, w, h);
             }
         }
+        _ => {} // Handle future variants
     }
 }
 
@@ -267,11 +268,11 @@ Choose a preset to optimize for your content type:
 | `Text` | Screenshots | Crisp text rendering |
 
 ```rust
-use webpx::{Encoder, Preset};
+use webpx::{Encoder, Preset, Unstoppable};
 
 let webp = Encoder::new(&data, w, h)
     .preset(Preset::Photo)
-    .encode()?;
+    .encode(Unstoppable)?;
 ```
 
 ## Platform Support
@@ -346,4 +347,8 @@ at your option.
 
 ## Contributing
 
-Contributions welcome! Please read our contributing guidelines and code of conduct.
+Contributions welcome! Please open issues and pull requests on [GitHub](https://github.com/imazen/webpx).
+
+## AI-Generated Code Notice
+
+This crate was developed with assistance from Claude (Anthropic). Not all code has been manually reviewed. Please review critical paths before production use.
