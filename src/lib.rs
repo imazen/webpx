@@ -2,12 +2,14 @@
 //!
 //! Complete WebP encoding and decoding with ICC profiles, streaming, and animation support.
 //!
-//! This crate wraps libwebp via FFI to provide:
-//! - Static and animated WebP encode/decode
-//! - ICC profile embedding and extraction
-//! - Streaming/incremental processing
-//! - Content-aware optimization presets
-//! - RGB, RGBA, and YUV plane support
+//! `webpx` provides safe Rust bindings to Google's libwebp library, offering:
+//!
+//! - **Static Images**: Encode/decode RGB, RGBA, and YUV formats with lossy or lossless compression
+//! - **Animations**: Create and decode animated WebP files frame-by-frame or in batch
+//! - **Metadata**: Embed and extract ICC color profiles, EXIF, and XMP data
+//! - **Streaming**: Incremental decoding for large files or network streams
+//! - **Presets**: Content-aware optimization (Photo, Picture, Drawing, Icon, Text)
+//! - **Advanced Config**: Full control over compression parameters, alpha handling, and more
 //!
 //! ## Quick Start
 //!
@@ -20,10 +22,10 @@
 //!     255, 255, 255, 255 // white
 //! ];
 //!
-//! // Encode to WebP
+//! // Encode to WebP (lossy, quality 85)
 //! let webp_bytes = webpx::encode_rgba(&rgba_data, 2, 2, 85.0)?;
 //!
-//! // Decode back
+//! // Decode back to RGBA
 //! let (pixels, width, height) = webpx::decode_rgba(&webp_bytes)?;
 //! assert_eq!((width, height), (2, 2));
 //! # Ok::<(), webpx::Error>(())
@@ -31,16 +33,42 @@
 //!
 //! ## Builder API
 //!
+//! For more control, use the builder pattern:
+//!
 //! ```rust,no_run
 //! use webpx::{Encoder, Preset};
 //!
 //! let rgba_data: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
 //! let webp_bytes = Encoder::new(rgba_data, 640, 480)
-//!     .preset(Preset::Photo)
-//!     .quality(85.0)
+//!     .preset(Preset::Photo)  // Optimize for photos
+//!     .quality(85.0)          // 0-100, higher = better quality
+//!     .method(4)              // 0-6, higher = slower but smaller
 //!     .encode()?;
 //! # Ok::<(), webpx::Error>(())
 //! ```
+//!
+//! ## Feature Flags
+//!
+//! | Feature | Default | Description |
+//! |---------|---------|-------------|
+//! | `decode` | Yes | Decoding support |
+//! | `encode` | Yes | Encoding support |
+//! | `std` | Yes | Standard library (disable for no_std) |
+//! | `animation` | No | Animated WebP support |
+//! | `icc` | No | ICC/EXIF/XMP metadata |
+//! | `streaming` | No | Incremental processing |
+//!
+//! ## no_std Support
+//!
+//! This crate supports `no_std` with `alloc`. Disable the `std` feature:
+//!
+//! ```toml
+//! webpx = { version = "0.1", default-features = false, features = ["decode", "encode"] }
+//! ```
+//!
+//! ## Compatibility Shims
+//!
+//! For easy migration from other WebP crates, see [`compat::webp`] and [`compat::webp_animation`].
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(unsafe_op_in_unsafe_fn)]
@@ -72,7 +100,7 @@ pub mod compat;
 // Re-exports
 pub use config::{AlphaFilter, DecoderConfig, EncodeStats, EncoderConfig, ImageHint, Preset};
 pub use error::{DecodingError, EncodingError, Error, MuxError, Result};
-pub use types::{ColorMode, ImageInfo, YuvPlanes};
+pub use types::{BitstreamFormat, ColorMode, ImageInfo, YuvPlanes, YuvPlanesRef};
 
 #[cfg(feature = "decode")]
 pub use decode::{decode_rgb, decode_rgba, decode_yuv, Decoder};

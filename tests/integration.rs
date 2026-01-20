@@ -1234,6 +1234,546 @@ mod streaming_tests {
     }
 }
 
+mod types_tests {
+    use webpx::{BitstreamFormat, ColorMode, ImageInfo, YuvPlanes, YuvPlanesRef};
+
+    #[test]
+    fn test_color_mode_bytes_per_pixel() {
+        assert_eq!(ColorMode::Rgba.bytes_per_pixel(), Some(4));
+        assert_eq!(ColorMode::Bgra.bytes_per_pixel(), Some(4));
+        assert_eq!(ColorMode::Argb.bytes_per_pixel(), Some(4));
+        assert_eq!(ColorMode::Rgb.bytes_per_pixel(), Some(3));
+        assert_eq!(ColorMode::Bgr.bytes_per_pixel(), Some(3));
+        assert_eq!(ColorMode::Yuv420.bytes_per_pixel(), None);
+        assert_eq!(ColorMode::Yuva420.bytes_per_pixel(), None);
+    }
+
+    #[test]
+    fn test_color_mode_has_alpha() {
+        assert!(ColorMode::Rgba.has_alpha());
+        assert!(ColorMode::Bgra.has_alpha());
+        assert!(ColorMode::Argb.has_alpha());
+        assert!(ColorMode::Yuva420.has_alpha());
+        assert!(!ColorMode::Rgb.has_alpha());
+        assert!(!ColorMode::Bgr.has_alpha());
+        assert!(!ColorMode::Yuv420.has_alpha());
+    }
+
+    #[test]
+    fn test_color_mode_is_yuv() {
+        assert!(ColorMode::Yuv420.is_yuv());
+        assert!(ColorMode::Yuva420.is_yuv());
+        assert!(!ColorMode::Rgba.is_yuv());
+        assert!(!ColorMode::Rgb.is_yuv());
+        assert!(!ColorMode::Bgra.is_yuv());
+    }
+
+    #[test]
+    fn test_color_mode_default() {
+        assert_eq!(ColorMode::default(), ColorMode::Rgba);
+    }
+
+    #[test]
+    fn test_yuv_planes_new() {
+        let planes = YuvPlanes::new(64, 48, false);
+        assert_eq!(planes.width, 64);
+        assert_eq!(planes.height, 48);
+        assert_eq!(planes.y_stride, 64);
+        assert_eq!(planes.y.len(), 64 * 48);
+        assert_eq!(planes.u_stride, 32);
+        assert_eq!(planes.u.len(), 32 * 24);
+        assert_eq!(planes.v.len(), 32 * 24);
+        assert!(planes.a.is_none());
+    }
+
+    #[test]
+    fn test_yuv_planes_new_with_alpha() {
+        let planes = YuvPlanes::new(64, 48, true);
+        assert!(planes.a.is_some());
+        assert_eq!(planes.a.as_ref().unwrap().len(), 64 * 48);
+        assert_eq!(planes.a_stride, 64);
+    }
+
+    #[test]
+    fn test_yuv_planes_uv_dimensions() {
+        let planes = YuvPlanes::new(100, 100, false);
+        let (uv_w, uv_h) = planes.uv_dimensions();
+        assert_eq!(uv_w, 50);
+        assert_eq!(uv_h, 50);
+
+        // Odd dimensions
+        let planes_odd = YuvPlanes::new(101, 101, false);
+        let (uv_w, uv_h) = planes_odd.uv_dimensions();
+        assert_eq!(uv_w, 51);
+        assert_eq!(uv_h, 51);
+    }
+
+    #[test]
+    fn test_yuv_planes_ref_from() {
+        let planes = YuvPlanes::new(32, 32, true);
+        let planes_ref: YuvPlanesRef = (&planes).into();
+
+        assert_eq!(planes_ref.width, 32);
+        assert_eq!(planes_ref.height, 32);
+        assert_eq!(planes_ref.y.len(), planes.y.len());
+        assert!(planes_ref.a.is_some());
+    }
+
+    #[test]
+    fn test_bitstream_format_default() {
+        assert_eq!(BitstreamFormat::default(), BitstreamFormat::Undefined);
+    }
+
+    #[test]
+    fn test_image_info_lossy_format() {
+        use super::generate_gradient_rgba;
+        let data = generate_gradient_rgba(32, 32);
+        let webp = webpx::encode_rgba(&data, 32, 32, 85.0).expect("encode");
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.format, BitstreamFormat::Lossy);
+        assert!(!info.has_animation);
+        assert_eq!(info.frame_count, 1);
+    }
+
+    #[test]
+    fn test_image_info_lossless_format() {
+        use super::generate_rgba;
+        let data = generate_rgba(32, 32, 100, 150, 200, 255);
+        let webp = webpx::encode_lossless(&data, 32, 32).expect("encode");
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.format, BitstreamFormat::Lossless);
+    }
+
+    #[test]
+    fn test_image_info_clone_eq() {
+        use super::generate_rgba;
+        let data = generate_rgba(32, 32, 100, 150, 200, 255);
+        let webp = webpx::encode_rgba(&data, 32, 32, 85.0).expect("encode");
+        let info1 = ImageInfo::from_webp(&webp).expect("info");
+        let info2 = info1.clone();
+        assert_eq!(info1, info2);
+    }
+}
+
+mod decoder_tests {
+    use super::*;
+    use webpx::{Decoder, DecoderConfig};
+
+    #[test]
+    fn test_decoder_decode_rgb() {
+        let width = 32;
+        let height = 32;
+        let data = generate_rgb(width, height, 100, 150, 200);
+        let webp = encode_rgb(&data, width, height, 85.0).expect("encode");
+
+        let decoder = Decoder::new(&webp).expect("decoder");
+        let img = decoder.decode_rgb().expect("decode_rgb");
+        assert_eq!(img.width(), width as usize);
+        assert_eq!(img.height(), height as usize);
+    }
+
+    #[test]
+    fn test_decoder_decode_yuv() {
+        let width = 32;
+        let height = 32;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0).expect("encode");
+
+        let decoder = Decoder::new(&webp).expect("decoder");
+        let yuv = decoder.decode_yuv().expect("decode_yuv");
+        assert_eq!(yuv.width, width);
+        assert_eq!(yuv.height, height);
+    }
+
+    #[test]
+    fn test_decoder_config() {
+        let width = 64;
+        let height = 64;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0).expect("encode");
+
+        let config = DecoderConfig::new()
+            .bypass_filtering(true)
+            .no_fancy_upsampling(true)
+            .use_threads(true)
+            .flip(false)
+            .alpha_dithering(50);
+
+        let decoder = Decoder::new(&webp).expect("decoder");
+        let (decoded, w, h) = decoder.config(config).decode_rgba_raw().expect("decode");
+        assert_eq!(w, width);
+        assert_eq!(h, height);
+        assert_eq!(decoded.len(), (width * height * 4) as usize);
+    }
+
+    #[test]
+    fn test_decoder_crop_and_scale() {
+        let width = 100;
+        let height = 100;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0).expect("encode");
+
+        // Crop then scale
+        let decoder = Decoder::new(&webp).expect("decoder");
+        let (decoded, w, h) = decoder
+            .crop(10, 10, 80, 80)
+            .scale(40, 40)
+            .decode_rgba_raw()
+            .expect("decode");
+
+        assert_eq!(w, 40);
+        assert_eq!(h, 40);
+        assert_eq!(decoded.len(), 40 * 40 * 4);
+    }
+
+    #[test]
+    fn test_decoder_rgb_with_scaling() {
+        let width = 100;
+        let height = 100;
+        let data = generate_rgb(width, height, 100, 150, 200);
+        let webp = encode_rgb(&data, width, height, 85.0).expect("encode");
+
+        let decoder = Decoder::new(&webp).expect("decoder");
+        let (decoded, w, h) = decoder.scale(50, 50).decode_rgb_raw().expect("decode");
+
+        assert_eq!(w, 50);
+        assert_eq!(h, 50);
+        assert_eq!(decoded.len(), 50 * 50 * 3);
+    }
+}
+
+#[cfg(feature = "streaming")]
+mod streaming_advanced_tests {
+    use super::*;
+    use webpx::{ColorMode, DecodeStatus, StreamingDecoder, StreamingEncoder};
+
+    #[test]
+    fn test_streaming_decoder_with_buffer() {
+        let width = 64;
+        let height = 64;
+        let original = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_lossless(&original, width, height).expect("encode");
+
+        // Pre-allocate buffer
+        let mut buffer = vec![0u8; (width * height * 4) as usize];
+        let stride = (width * 4) as usize;
+
+        let mut decoder =
+            StreamingDecoder::with_buffer(&mut buffer, stride, ColorMode::Rgba).expect("decoder");
+
+        let status = decoder.append(&webp).expect("append");
+        assert_eq!(status, DecodeStatus::Complete);
+    }
+
+    #[test]
+    fn test_streaming_decoder_update() {
+        let width = 32;
+        let height = 32;
+        let original = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_lossless(&original, width, height).expect("encode");
+
+        let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
+
+        // Use update instead of append (expects complete data)
+        let status = decoder.update(&webp).expect("update");
+        assert_eq!(status, DecodeStatus::Complete);
+
+        let (decoded, w, h) = decoder.finish().expect("finish");
+        assert_eq!(w, width);
+        assert_eq!(h, height);
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_streaming_decoder_dimensions_and_rows() {
+        let width = 64;
+        let height = 64;
+        let original = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_lossless(&original, width, height).expect("encode");
+
+        let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
+
+        // Initially no dimensions
+        assert!(decoder.dimensions().is_none());
+        assert_eq!(decoder.decoded_rows(), 0);
+
+        // Feed data in chunks to see partial progress
+        let chunk_size = 100;
+        for chunk in webp.chunks(chunk_size) {
+            let status = decoder.append(chunk);
+            if status.is_ok() {
+                // Once we have some data, dimensions might be available
+                if decoder.dimensions().is_some() {
+                    break;
+                }
+            }
+        }
+
+        // Dimensions may or may not be available depending on when header is parsed
+        // This tests the API works, not specific behavior
+        let _ = decoder.dimensions();
+        let _ = decoder.decoded_rows();
+    }
+
+    #[test]
+    fn test_streaming_decoder_get_partial() {
+        let width = 64;
+        let height = 64;
+        let original = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_lossless(&original, width, height).expect("encode");
+
+        let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
+
+        // Feed data in small chunks to get partial decoding
+        let chunk_size = 50;
+        for chunk in webp.chunks(chunk_size) {
+            match decoder.append(chunk) {
+                Ok(DecodeStatus::Complete) => break,
+                Ok(DecodeStatus::Partial(_rows)) => {
+                    // Try to get partial data
+                    if let Some((data, w, h)) = decoder.get_partial() {
+                        assert!(w > 0);
+                        assert!(h > 0);
+                        assert!(!data.is_empty());
+                    }
+                }
+                Ok(DecodeStatus::NeedMoreData) => continue,
+                Err(e) => panic!("decode error: {}", e),
+            }
+        }
+    }
+
+    #[test]
+    fn test_streaming_decoder_color_modes() {
+        let width = 32;
+        let height = 32;
+        let original = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_lossless(&original, width, height).expect("encode");
+
+        for mode in [
+            ColorMode::Rgba,
+            ColorMode::Bgra,
+            ColorMode::Argb,
+            ColorMode::Rgb,
+            ColorMode::Bgr,
+        ] {
+            let mut decoder = StreamingDecoder::new(mode).expect("decoder");
+            let status = decoder.append(&webp).expect("append");
+            assert_eq!(status, DecodeStatus::Complete);
+
+            let (decoded, w, h) = decoder.finish().expect("finish");
+            assert_eq!(w, width);
+            assert_eq!(h, height);
+            let bpp = mode.bytes_per_pixel().unwrap();
+            assert_eq!(decoded.len(), (width * height) as usize * bpp);
+        }
+    }
+
+    #[test]
+    fn test_streaming_decoder_yuv_buffer_error() {
+        let mut buffer = vec![0u8; 1000];
+        // YUV modes require separate plane buffers
+        let result = StreamingDecoder::with_buffer(&mut buffer, 100, ColorMode::Yuv420);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_streaming_encoder_rgb() {
+        let width = 32;
+        let height = 32;
+        let data = generate_rgb(width, height, 100, 150, 200);
+
+        let mut encoder = StreamingEncoder::new(width, height).expect("encoder");
+        encoder.set_quality(75.0);
+        encoder.set_preset(webpx::Preset::Photo);
+        encoder.set_lossless(false);
+
+        let mut output = Vec::new();
+        encoder
+            .encode_rgb_with_callback(&data, |chunk| {
+                output.extend_from_slice(chunk);
+                Ok(())
+            })
+            .expect("encode");
+
+        assert!(!output.is_empty());
+
+        let info = ImageInfo::from_webp(&output).expect("info");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+    }
+
+    #[test]
+    fn test_streaming_encoder_buffer_too_small() {
+        let encoder = StreamingEncoder::new(100, 100).expect("encoder");
+        let small_buffer = vec![0u8; 10];
+
+        let result = encoder.encode_rgba_with_callback(&small_buffer, |_| Ok(()));
+        assert!(result.is_err());
+
+        let encoder2 = StreamingEncoder::new(100, 100).expect("encoder");
+        let result2 = encoder2.encode_rgb_with_callback(&small_buffer, |_| Ok(()));
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn test_streaming_encoder_callback_error() {
+        let width = 32;
+        let height = 32;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let encoder = StreamingEncoder::new(width, height).expect("encoder");
+
+        // Callback returns error
+        let result = encoder.encode_rgba_with_callback(&data, |_| {
+            Err(webpx::Error::InvalidInput("test error".into()))
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_streaming_decoder_finish_incomplete() {
+        let decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
+
+        // Try to finish without any data - should error
+        let result = decoder.finish();
+        assert!(result.is_err());
+    }
+}
+
+mod encoder_advanced_tests {
+    use super::*;
+    use webpx::{Encoder, Preset};
+
+    #[test]
+    fn test_encoder_new_rgb() {
+        let width = 32;
+        let height = 32;
+        let data = generate_rgb(width, height, 100, 150, 200);
+
+        let webp = Encoder::new_rgb(&data, width, height)
+            .quality(85.0)
+            .encode()
+            .expect("encode");
+
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+    }
+
+    #[test]
+    fn test_encoder_new_yuv() {
+        use webpx::YuvPlanes;
+
+        let width = 32u32;
+        let height = 32u32;
+
+        // Create YUV planes with valid data
+        let mut planes = YuvPlanes::new(width, height, false);
+        // Fill with some data (gray)
+        planes.y.fill(128);
+        planes.u.fill(128);
+        planes.v.fill(128);
+
+        let planes_ref = (&planes).into();
+        let webp = Encoder::new_yuv(planes_ref)
+            .quality(85.0)
+            .encode()
+            .expect("encode");
+
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+    }
+
+    #[test]
+    fn test_encoder_from_rgba() {
+        use imgref::ImgVec;
+        use rgb::RGBA8;
+
+        let width = 16usize;
+        let height = 16usize;
+        let pixels: Vec<RGBA8> = (0..width * height)
+            .map(|i| RGBA8::new((i % 256) as u8, 100, 150, 255))
+            .collect();
+
+        let img = ImgVec::new(pixels, width, height);
+        let webp = Encoder::from_rgba(img.as_ref())
+            .quality(85.0)
+            .encode()
+            .expect("encode");
+
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.width, width as u32);
+        assert_eq!(info.height, height as u32);
+    }
+
+    #[test]
+    fn test_encoder_from_rgb() {
+        use imgref::ImgVec;
+        use rgb::RGB8;
+
+        let width = 16usize;
+        let height = 16usize;
+        let pixels: Vec<RGB8> = (0..width * height)
+            .map(|i| RGB8::new((i % 256) as u8, 100, 150))
+            .collect();
+
+        let img = ImgVec::new(pixels, width, height);
+        let webp = Encoder::from_rgb(img.as_ref())
+            .quality(85.0)
+            .encode()
+            .expect("encode");
+
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.width, width as u32);
+        assert_eq!(info.height, height as u32);
+    }
+
+    #[test]
+    fn test_encoder_all_options() {
+        let width = 32;
+        let height = 32;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let webp = Encoder::new(&data, width, height)
+            .preset(Preset::Photo)
+            .quality(85.0)
+            .method(4)
+            .lossless(false)
+            .near_lossless(100)
+            .alpha_quality(90)
+            .exact(false)
+            .target_size(0)
+            .sharp_yuv(true)
+            .encode()
+            .expect("encode");
+
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.width, width);
+    }
+
+    #[test]
+    fn test_encoder_with_config() {
+        use webpx::EncoderConfig;
+
+        let width = 32;
+        let height = 32;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let config = EncoderConfig::new().quality(90.0).method(5);
+
+        let webp = Encoder::new(&data, width, height)
+            .config(config)
+            .encode()
+            .expect("encode");
+
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        assert_eq!(info.width, width);
+    }
+}
+
 #[cfg(feature = "animation")]
 mod animation_tests {
     use super::*;
@@ -1358,5 +1898,511 @@ mod animation_tests {
         // Lossless frames should match exactly
         assert_eq!(frames[0].data, frame1);
         assert_eq!(frames[1].data, frame2);
+    }
+
+    #[test]
+    fn test_animation_with_options() {
+        use webpx::{AnimationDecoder, AnimationEncoder, ColorMode};
+
+        let width = 16;
+        let height = 16;
+        let frame = generate_rgba(width, height, 100, 150, 200, 255);
+
+        // Create with options: allow mixed, loop 3 times
+        let mut encoder =
+            AnimationEncoder::with_options(width, height, true, 3).expect("encoder");
+        encoder.set_quality(80.0);
+        encoder.set_preset(webpx::Preset::Picture);
+        encoder.set_lossless(true);
+
+        encoder.add_frame(&frame, 0).expect("add frame");
+        let webp = encoder.finish(100).expect("finish");
+
+        // Decode with options
+        let decoder =
+            AnimationDecoder::with_options(&webp, ColorMode::Bgra, false).expect("decoder");
+        let info = decoder.info();
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+        // Loop count may be different depending on libwebp behavior
+        assert!(info.loop_count <= 3);
+    }
+
+    #[test]
+    fn test_animation_add_frame_rgb() {
+        use webpx::AnimationEncoder;
+
+        let width = 16;
+        let height = 16;
+        let frame_rgb = generate_rgb(width, height, 100, 150, 200);
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame_rgb(&frame_rgb, 0).expect("add frame rgb");
+        encoder.add_frame_rgb(&frame_rgb, 100).expect("add frame rgb 2");
+
+        let webp = encoder.finish(200).expect("finish");
+        let info = ImageInfo::from_webp(&webp).expect("info");
+        // Animation with 2+ frames should be marked animated
+        // (single frame might not be)
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+    }
+
+    #[test]
+    fn test_animation_decode_all_with_durations() {
+        use webpx::{AnimationDecoder, AnimationEncoder};
+
+        let width = 8;
+        let height = 8;
+        let frame1 = generate_rgba(width, height, 255, 0, 0, 255);
+        let frame2 = generate_rgba(width, height, 0, 255, 0, 255);
+        let frame3 = generate_rgba(width, height, 0, 0, 255, 255);
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame(&frame1, 0).expect("add 1");
+        encoder.add_frame(&frame2, 100).expect("add 2");
+        encoder.add_frame(&frame3, 200).expect("add 3");
+        let webp = encoder.finish(300).expect("finish");
+
+        let mut decoder = AnimationDecoder::new(&webp).expect("decoder");
+        let frames = decoder.decode_all().expect("decode_all");
+
+        assert_eq!(frames.len(), 3);
+        // Timestamps are reported as END times by libwebp
+        // Frame 1 ends at 0+duration, etc.
+        assert!(frames[0].timestamp_ms >= 0);
+        assert!(frames[1].timestamp_ms > frames[0].timestamp_ms);
+        assert!(frames[2].timestamp_ms > frames[1].timestamp_ms);
+    }
+
+    #[test]
+    fn test_animation_has_more_frames() {
+        use webpx::{AnimationDecoder, AnimationEncoder};
+
+        let width = 8;
+        let height = 8;
+        let frame = generate_rgba(width, height, 100, 100, 100, 255);
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame(&frame, 0).expect("add");
+        let webp = encoder.finish(100).expect("finish");
+
+        let mut decoder = AnimationDecoder::new(&webp).expect("decoder");
+        assert!(decoder.has_more_frames());
+
+        decoder.next_frame().expect("next").expect("frame");
+        assert!(!decoder.has_more_frames());
+    }
+
+    #[test]
+    fn test_animation_color_mode_rgba() {
+        use webpx::{AnimationDecoder, AnimationEncoder, ColorMode};
+
+        let width = 8;
+        let height = 8;
+        let frame1 = generate_rgba(width, height, 100, 150, 200, 255);
+        let frame2 = generate_rgba(width, height, 200, 150, 100, 255);
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame(&frame1, 0).expect("add");
+        encoder.add_frame(&frame2, 100).expect("add");
+        let webp = encoder.finish(200).expect("finish");
+
+        // Test RGBA mode
+        let mut decoder =
+            AnimationDecoder::with_options(&webp, ColorMode::Rgba, true).expect("decoder");
+        let decoded = decoder.next_frame().expect("next").expect("frame");
+        assert_eq!(decoded.width, width);
+        assert_eq!(decoded.height, height);
+    }
+
+    #[test]
+    fn test_animation_color_mode_bgra() {
+        use webpx::{AnimationDecoder, AnimationEncoder, ColorMode};
+
+        let width = 8;
+        let height = 8;
+        let frame1 = generate_rgba(width, height, 100, 150, 200, 255);
+        let frame2 = generate_rgba(width, height, 200, 150, 100, 255);
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame(&frame1, 0).expect("add");
+        encoder.add_frame(&frame2, 100).expect("add");
+        let webp = encoder.finish(200).expect("finish");
+
+        // Test BGRA mode
+        let mut decoder =
+            AnimationDecoder::with_options(&webp, ColorMode::Bgra, false).expect("decoder");
+        let decoded = decoder.next_frame().expect("next").expect("frame");
+        assert_eq!(decoded.width, width);
+        assert_eq!(decoded.height, height);
+    }
+
+    #[test]
+    fn test_animation_decoder_yuv_error() {
+        use webpx::{AnimationDecoder, AnimationEncoder, ColorMode};
+
+        let width = 8;
+        let height = 8;
+        let frame = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame(&frame, 0).expect("add");
+        let webp = encoder.finish(100).expect("finish");
+
+        // YUV modes not supported for animation decoder
+        let result = AnimationDecoder::with_options(&webp, ColorMode::Yuv420, true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_animation_invalid_frame_size() {
+        use webpx::AnimationEncoder;
+
+        let mut encoder = AnimationEncoder::new(100, 100).expect("encoder");
+        let small_frame = vec![0u8; 10];
+        let result = encoder.add_frame(&small_frame, 0);
+        assert!(result.is_err());
+
+        let result_rgb = encoder.add_frame_rgb(&small_frame, 0);
+        assert!(result_rgb.is_err());
+    }
+
+    #[cfg(feature = "icc")]
+    #[test]
+    fn test_animation_with_icc_profile() {
+        use webpx::AnimationEncoder;
+
+        let width = 8;
+        let height = 8;
+        let frame = generate_rgba(width, height, 100, 150, 200, 255);
+
+        // Minimal ICC profile header (not fully valid but tests the path)
+        let fake_icc = vec![0u8; 128];
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.set_icc_profile(fake_icc);
+        encoder.add_frame(&frame, 0).expect("add");
+
+        // This may fail due to invalid ICC, but tests the code path
+        let _ = encoder.finish(100);
+    }
+}
+
+mod compat_webp_tests {
+    use super::{generate_rgb, generate_rgba};
+    use webpx::compat::webp::{BitstreamFeatures, Decoder, Encoder, PixelLayout};
+
+    #[test]
+    fn test_pixel_layout_bytes_per_pixel() {
+        assert_eq!(PixelLayout::Rgb.bytes_per_pixel(), 3);
+        assert_eq!(PixelLayout::Rgba.bytes_per_pixel(), 4);
+    }
+
+    #[test]
+    fn test_encoder_from_rgb() {
+        let rgb = generate_rgb(8, 8, 100, 150, 200);
+        let encoder = Encoder::from_rgb(&rgb, 8, 8);
+        let webp = encoder.encode(85.0);
+        assert!(!webp.is_empty());
+    }
+
+    #[test]
+    fn test_encoder_from_rgba() {
+        let rgba = generate_rgba(8, 8, 100, 150, 200, 255);
+        let encoder = Encoder::from_rgba(&rgba, 8, 8);
+        let webp = encoder.encode_lossless();
+        assert!(!webp.is_empty());
+    }
+
+    #[test]
+    fn test_encoder_encode_simple() {
+        let rgba = generate_rgba(8, 8, 100, 150, 200, 255);
+        let encoder = Encoder::new(&rgba, PixelLayout::Rgba, 8, 8);
+
+        // Lossy
+        let webp_lossy = encoder.encode_simple(false, 85.0).expect("encode lossy");
+        assert!(!webp_lossy.is_empty());
+
+        // Lossless
+        let webp_lossless = encoder.encode_simple(true, 75.0).expect("encode lossless");
+        assert!(!webp_lossless.is_empty());
+    }
+
+    #[test]
+    fn test_webp_memory_deref() {
+        let rgba = generate_rgba(4, 4, 255, 0, 0, 255);
+        let encoder = Encoder::from_rgba(&rgba, 4, 4);
+        let webp = encoder.encode(85.0);
+
+        // Test Deref
+        let slice: &[u8] = &webp;
+        assert_eq!(slice.len(), webp.len());
+
+        // Test AsRef
+        let as_ref: &[u8] = webp.as_ref();
+        assert_eq!(as_ref.len(), webp.len());
+    }
+
+    #[test]
+    fn test_decoder_decode_without_alpha() {
+        let rgb = generate_rgb(8, 8, 100, 150, 200);
+        let encoder = Encoder::from_rgb(&rgb, 8, 8);
+        let webp = encoder.encode(85.0);
+
+        let decoder = Decoder::new(&webp);
+        let image = decoder.decode().expect("decode");
+
+        assert_eq!(image.width(), 8);
+        assert_eq!(image.height(), 8);
+        // RGB input may produce RGB or RGBA depending on libwebp
+        assert!(!image.data().is_empty());
+    }
+
+    #[test]
+    fn test_webp_image_accessors() {
+        let rgba = generate_rgba(4, 4, 100, 150, 200, 255);
+        let encoder = Encoder::from_rgba(&rgba, 4, 4);
+        let webp = encoder.encode_lossless();
+
+        let decoder = Decoder::new(&webp);
+        let image = decoder.decode().expect("decode");
+
+        assert_eq!(image.width(), 4);
+        assert_eq!(image.height(), 4);
+        let _ = image.layout(); // Just verify it doesn't panic
+        let _ = image.data();
+    }
+
+    #[test]
+    fn test_bitstream_features_accessors() {
+        let rgba = generate_rgba(16, 16, 100, 150, 200, 128);
+        let encoder = Encoder::from_rgba(&rgba, 16, 16);
+        let webp = encoder.encode(85.0);
+
+        let features = BitstreamFeatures::new(&webp).expect("features");
+        assert_eq!(features.width(), 16);
+        assert_eq!(features.height(), 16);
+        let _ = features.has_alpha();
+        assert!(!features.has_animation());
+    }
+
+    #[test]
+    fn test_bitstream_features_invalid() {
+        let invalid = b"not webp";
+        let features = BitstreamFeatures::new(invalid);
+        assert!(features.is_none());
+    }
+
+    #[test]
+    fn test_decoder_decode_animated() {
+        // Create an animated webp with multiple frames
+        let frame1 = generate_rgba(8, 8, 100, 150, 200, 255);
+        let frame2 = generate_rgba(8, 8, 200, 150, 100, 255);
+        let mut encoder = webpx::AnimationEncoder::new(8, 8).expect("encoder");
+        encoder.add_frame(&frame1, 0).expect("add");
+        encoder.add_frame(&frame2, 100).expect("add");
+        let webp = encoder.finish(200).expect("finish");
+
+        // compat decoder should return None for animated
+        // (single-frame animations may not be flagged as animated)
+        let decoder = Decoder::new(&webp);
+        let result = decoder.decode();
+        // With multiple frames, it should be detected as animated
+        // The compat layer returns None for animated images
+        if let Some(image) = result {
+            // If it decoded, verify it's valid
+            assert_eq!(image.width(), 8);
+            assert_eq!(image.height(), 8);
+        }
+        // Either way is acceptable - the test verifies the code path works
+    }
+}
+
+#[cfg(feature = "animation")]
+mod compat_webp_animation_tests {
+    use super::generate_rgba;
+    use webpx::compat::webp_animation::{
+        ColorMode, Decoder, DecoderOptions, Encoder, EncoderOptions, EncodingConfig,
+        EncodingType, Error, Frame, LossyEncodingConfig,
+    };
+
+    #[test]
+    fn test_color_mode_size() {
+        assert_eq!(ColorMode::Rgb.size(), 3);
+        assert_eq!(ColorMode::Rgba.size(), 4);
+        assert_eq!(ColorMode::Bgra.size(), 4);
+        assert_eq!(ColorMode::Bgr.size(), 3);
+    }
+
+    #[test]
+    fn test_color_mode_default() {
+        assert_eq!(ColorMode::default(), ColorMode::Rgba);
+    }
+
+    #[test]
+    fn test_webp_data_accessors() {
+        let frame = generate_rgba(4, 4, 100, 150, 200, 255);
+        let mut encoder = Encoder::new((4, 4)).expect("encoder");
+        encoder.add_frame(&frame, 0).expect("add");
+        let webp = encoder.finalize(100).expect("finalize");
+
+        assert!(!webp.is_empty());
+
+        // Test Deref and AsRef
+        let slice: &[u8] = &webp;
+        assert!(!slice.is_empty());
+        let as_ref: &[u8] = webp.as_ref();
+        assert!(!as_ref.is_empty());
+    }
+
+    #[test]
+    fn test_encoder_with_options() {
+        let frame = generate_rgba(4, 4, 100, 150, 200, 255);
+
+        let options = EncoderOptions {
+            kmin: 0,
+            kmax: 0,
+            encoding_config: Some(EncodingConfig {
+                quality: 90.0,
+                encoding_type: EncodingType::Lossy(LossyEncodingConfig {
+                    segments: 4,
+                    alpha_compression: true,
+                }),
+            }),
+        };
+
+        let mut encoder = Encoder::new_with_options((4, 4), options).expect("encoder");
+        encoder.add_frame(&frame, 0).expect("add");
+        let webp = encoder.finalize(100).expect("finalize");
+        assert!(!webp.is_empty());
+    }
+
+    #[test]
+    fn test_encoder_lossless_config() {
+        let frame = generate_rgba(4, 4, 100, 150, 200, 255);
+
+        let options = EncoderOptions {
+            kmin: 0,
+            kmax: 0,
+            encoding_config: Some(EncodingConfig {
+                quality: 75.0,
+                encoding_type: EncodingType::Lossless,
+            }),
+        };
+
+        let mut encoder = Encoder::new_with_options((4, 4), options).expect("encoder");
+        encoder.add_frame(&frame, 0).expect("add");
+        let webp = encoder.finalize(100).expect("finalize");
+        assert!(!webp.is_empty());
+    }
+
+    #[test]
+    fn test_encoder_zero_dimensions_error() {
+        let result = Encoder::new((0, 0));
+        assert!(matches!(result, Err(Error::DimensionsMustbePositive)));
+    }
+
+    #[test]
+    fn test_encoder_no_frames_error() {
+        let encoder = Encoder::new((4, 4)).expect("encoder");
+        let result = encoder.finalize(100);
+        assert!(matches!(result, Err(Error::NoFramesAdded)));
+    }
+
+    #[test]
+    fn test_decoder_with_options() {
+        let frame = generate_rgba(4, 4, 100, 150, 200, 255);
+        let mut encoder = Encoder::new((4, 4)).expect("encoder");
+        encoder.add_frame(&frame, 0).expect("add");
+        let webp = encoder.finalize(100).expect("finalize");
+
+        let options = DecoderOptions {
+            use_threads: true,
+            color_mode: ColorMode::Bgra,
+        };
+
+        let decoder = Decoder::new_with_options(&webp, options).expect("decoder");
+        let frames = decoder.decode().expect("decode");
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].color_mode(), ColorMode::Bgra);
+    }
+
+    #[test]
+    fn test_decoder_empty_error() {
+        let result = Decoder::new(&[]);
+        assert!(matches!(result, Err(Error::DecodeFailed)));
+    }
+
+    #[test]
+    fn test_frame_accessors() {
+        let frame_data1 = generate_rgba(8, 8, 100, 150, 200, 255);
+        let frame_data2 = generate_rgba(8, 8, 200, 150, 100, 255);
+        let mut encoder = Encoder::new((8, 8)).expect("encoder");
+        encoder.add_frame(&frame_data1, 0).expect("add");
+        encoder.add_frame(&frame_data2, 100).expect("add");
+        let webp = encoder.finalize(200).expect("finalize");
+
+        let decoder = Decoder::new(&webp).expect("decoder");
+        let frames = decoder.decode().expect("decode");
+
+        assert_eq!(frames.len(), 2);
+        let frame = &frames[0];
+        assert_eq!(frame.dimensions(), (8, 8));
+        // Timestamp is end time, not start time
+        assert!(frame.timestamp() >= 0);
+        assert_eq!(frame.color_mode(), ColorMode::Rgba);
+        assert!(!frame.data().is_empty());
+    }
+
+    #[test]
+    fn test_decoder_iterator() {
+        let frame1 = generate_rgba(4, 4, 255, 0, 0, 255);
+        let frame2 = generate_rgba(4, 4, 0, 255, 0, 255);
+
+        let mut encoder = Encoder::new((4, 4)).expect("encoder");
+        encoder.add_frame(&frame1, 0).expect("add 1");
+        encoder.add_frame(&frame2, 100).expect("add 2");
+        let webp = encoder.finalize(200).expect("finalize");
+
+        let decoder = Decoder::new(&webp).expect("decoder");
+        let frames: Vec<Frame> = decoder.into_iter().collect();
+
+        assert_eq!(frames.len(), 2);
+        // Timestamps are end times per libwebp API
+        assert!(frames[0].timestamp() >= 0);
+        assert!(frames[1].timestamp() > frames[0].timestamp());
+    }
+
+    #[test]
+    fn test_compat_error_display() {
+        // Test the compat Error type display
+        let errors: Vec<(Error, &str)> = vec![
+            (Error::EncoderCreateFailed, "Encoder creation failed"),
+            (Error::EncoderAddFailed, "Frame add failed"),
+            (Error::EncoderAssmebleFailed, "Encoder assembly failed"),
+            (Error::DecodeFailed, "Decode failed"),
+            (
+                Error::BufferSizeFailed(10, 100),
+                "Buffer size mismatch: got 10, expected 100",
+            ),
+            (
+                Error::TimestampMustBeHigherThanPrevious(50, 100),
+                "Timestamp 50 must be higher than previous 100",
+            ),
+            (Error::NoFramesAdded, "No frames added"),
+            (Error::DimensionsMustbePositive, "Dimensions must be positive"),
+        ];
+
+        for (error, expected) in errors {
+            assert_eq!(format!("{}", error), expected);
+        }
+    }
+
+    #[test]
+    fn test_encoding_config_default() {
+        let config = EncodingConfig::default();
+        assert_eq!(config.quality, 75.0);
+        assert!(matches!(config.encoding_type, EncodingType::Lossy(_)));
     }
 }

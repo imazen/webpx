@@ -6,78 +6,121 @@
 [![codecov](https://codecov.io/gh/imazen/webpx/branch/main/graph/badge.svg)](https://codecov.io/gh/imazen/webpx)
 [![License](https://img.shields.io/crates/l/webpx.svg)](https://github.com/imazen/webpx#license)
 
-Complete WebP encoding and decoding via FFI bindings to libwebp.
+**Complete WebP encoding and decoding for Rust** - safe bindings to Google's libwebp with support for static images, animations, ICC profiles, streaming, and `no_std`.
 
-## Features
+## Why webpx?
 
-- **Static Images**: Encode and decode RGB, RGBA, and YUV formats
-- **Animation**: Full animated WebP support with frame-by-frame or batch processing
-- **Metadata**: ICC profile, EXIF, and XMP embedding and extraction
-- **Streaming**: Incremental decoding as data arrives
-- **Presets**: Content-aware optimization (Photo, Picture, Drawing, Icon, Text)
-- **Builder APIs**: Ergonomic interfaces with sensible defaults
+- **Full libwebp features** - Lossy, lossless, animation, alpha, metadata
+- **Safe & ergonomic API** - Builder patterns, strong types, comprehensive error handling
+- **High performance** - Zero-copy where possible, direct FFI to optimized C code
+- **Flexible** - Works with `no_std`, supports WebAssembly via emscripten
+- **Migration-friendly** - Compatibility shims for `webp` and `webp-animation` crates
 
-## Usage
-
-Add to your `Cargo.toml`:
+## Quick Start
 
 ```toml
 [dependencies]
 webpx = "0.1"
 ```
 
-### Quick Start
-
 ```rust
-use webpx::{encode_rgba, decode_rgba, encode_lossless};
+use webpx::{encode_rgba, decode_rgba};
 
-// Encode RGBA data to lossy WebP
-let rgba_data: &[u8] = &[/* ... */];
-let webp = encode_rgba(rgba_data, 640, 480, 85.0)?;
+// Encode RGBA pixels to WebP
+let webp = encode_rgba(&pixels, width, height, 85.0)?;
 
 // Decode WebP back to RGBA
-let (pixels, width, height) = decode_rgba(&webp)?;
-
-// Lossless encoding
-let webp_lossless = encode_lossless(rgba_data, 640, 480)?;
+let (pixels, w, h) = decode_rgba(&webp)?;
 ```
 
-### Builder API
+## Features at a Glance
+
+| Feature | Description |
+|---------|-------------|
+| **Lossy Encoding** | VP8-based compression with quality 0-100 |
+| **Lossless Encoding** | Exact pixel preservation |
+| **Alpha Channel** | Full transparency support with separate quality control |
+| **Animation** | Multi-frame WebP with timing control |
+| **ICC Profiles** | Embed/extract color profiles |
+| **EXIF/XMP** | Preserve camera metadata |
+| **Streaming** | Decode as data arrives |
+| **Cropping/Scaling** | Decode to any size |
+| **YUV Support** | Direct YUV420 input/output |
+| **Content Presets** | Optimized settings for photos, drawings, icons, text |
+
+## Examples
+
+### Basic Encoding
 
 ```rust
-use webpx::{Encoder, Decoder, Preset};
+use webpx::{encode_rgba, encode_lossless, encode_rgb};
 
-// Encode with options
+// Lossy encoding (quality 0-100)
+let webp = encode_rgba(&rgba_data, 640, 480, 85.0)?;
+
+// Lossless encoding (exact pixels)
+let webp = encode_lossless(&rgba_data, 640, 480)?;
+
+// RGB without alpha
+let webp = encode_rgb(&rgb_data, 640, 480, 85.0)?;
+```
+
+### Builder API with Options
+
+```rust
+use webpx::{Encoder, Preset};
+
 let webp = Encoder::new(&rgba_data, 640, 480)
-    .preset(Preset::Photo)
+    .preset(Preset::Photo)    // Content-aware optimization
+    .quality(90.0)            // Higher quality
+    .method(5)                // Better compression (slower)
+    .alpha_quality(95)        // High-quality alpha
+    .sharp_yuv(true)          // Better color accuracy
+    .encode()?;
+```
+
+### Advanced Configuration
+
+```rust
+use webpx::EncoderConfig;
+
+// Maximum compression (slow but smallest files)
+let config = EncoderConfig::max_compression();
+let webp = config.encode_rgba(&data, width, height)?;
+
+// Maximum quality lossless
+let config = EncoderConfig::max_compression_lossless();
+let webp = config.encode_rgba(&data, width, height)?;
+
+// Fine-grained control
+let config = EncoderConfig::new()
     .quality(85.0)
-    .method(4)  // 0=fast, 6=better
-    .encode()?;
-
-// Decode with cropping/scaling
-let decoder = Decoder::new(&webp)?;
-let (cropped, w, h) = decoder
-    .crop(10, 10, 100, 100)
-    .decode_rgba_raw()?;
+    .method(6)
+    .filter_strength(60)
+    .sns_strength(80)
+    .segments(4)
+    .pass(6)
+    .preprocessing(4);
+let (webp, stats) = config.encode_rgba_with_stats(&data, width, height)?;
+println!("PSNR: {:.2} dB, size: {} bytes", stats.psnr[4], stats.coded_size);
 ```
 
-### ICC Profiles
+### Decoding with Processing
 
 ```rust
-use webpx::{Encoder, get_icc_profile, embed_icc};
+use webpx::Decoder;
 
-// Embed ICC profile during encoding
-let webp = Encoder::new(&rgba_data, 640, 480)
-    .icc_profile(&srgb_icc)
-    .encode()?;
+let decoder = Decoder::new(&webp_data)?;
 
-// Extract ICC profile
-if let Some(icc) = get_icc_profile(&webp)? {
-    println!("Found ICC profile: {} bytes", icc.len());
-}
+// Get image info without decoding
+let info = decoder.info();
+println!("{}x{}, alpha: {}", info.width, info.height, info.has_alpha);
 
-// Embed into existing WebP
-let webp_with_icc = embed_icc(&existing_webp, &icc_profile)?;
+// Decode with cropping and scaling
+let (pixels, w, h) = decoder
+    .crop(100, 100, 400, 300)  // Extract region
+    .scale(200, 150)           // Resize
+    .decode_rgba_raw()?;
 ```
 
 ### Animation
@@ -86,21 +129,47 @@ let webp_with_icc = embed_icc(&existing_webp, &icc_profile)?;
 use webpx::{AnimationEncoder, AnimationDecoder};
 
 // Create animated WebP
-let mut encoder = AnimationEncoder::new(640, 480)?;
-encoder.set_quality(85.0);
+let mut encoder = AnimationEncoder::new(320, 240)?;
+encoder.set_quality(80.0);
+encoder.set_lossless(false);
 
-encoder.add_frame(&frame1_rgba, 0)?;      // t=0ms
-encoder.add_frame(&frame2_rgba, 100)?;    // t=100ms
-encoder.add_frame(&frame3_rgba, 200)?;    // t=200ms
-let webp = encoder.finish(300)?;          // total: 300ms
+encoder.add_frame(&frame1, 0)?;     // Start at 0ms
+encoder.add_frame(&frame2, 100)?;   // Show at 100ms
+encoder.add_frame(&frame3, 200)?;   // Show at 200ms
+let webp = encoder.finish(300)?;    // Total duration
 
 // Decode animation
 let mut decoder = AnimationDecoder::new(&webp)?;
 let info = decoder.info();
-println!("{}x{}, {} frames", info.width, info.height, info.frame_count);
+println!("{} frames, {}x{}", info.frame_count, info.width, info.height);
 
+// Iterate frames
 while let Some(frame) = decoder.next_frame()? {
-    process_frame(&frame.data, frame.timestamp_ms);
+    render(&frame.data, frame.timestamp_ms);
+}
+
+// Or get all at once
+decoder.reset();
+let frames = decoder.decode_all()?;
+```
+
+### ICC Profiles & Metadata
+
+```rust
+use webpx::{embed_icc, get_icc_profile, embed_exif, get_exif};
+
+// Embed ICC profile
+let webp_with_icc = embed_icc(&webp_data, &srgb_profile)?;
+
+// Extract ICC profile
+if let Some(icc) = get_icc_profile(&webp_data)? {
+    println!("ICC profile: {} bytes", icc.len());
+}
+
+// EXIF data
+let webp_with_exif = embed_exif(&webp_data, &exif_bytes)?;
+if let Some(exif) = get_exif(&webp_data)? {
+    // Parse EXIF...
 }
 ```
 
@@ -111,14 +180,15 @@ use webpx::{StreamingDecoder, DecodeStatus, ColorMode};
 
 let mut decoder = StreamingDecoder::new(ColorMode::Rgba)?;
 
-for chunk in network_chunks {
-    match decoder.append(chunk)? {
+// Feed data as it arrives
+for chunk in network_stream {
+    match decoder.append(&chunk)? {
         DecodeStatus::Complete => break,
         DecodeStatus::NeedMoreData => continue,
         DecodeStatus::Partial(rows) => {
-            // Process partial data
+            // Progressive display
             if let Some((data, w, h)) = decoder.get_partial() {
-                display_rows(data, h);
+                display_partial(data, w, h);
             }
         }
     }
@@ -131,67 +201,112 @@ let (pixels, width, height) = decoder.finish()?;
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `decode` | Yes | Decoding support |
-| `encode` | Yes | Encoding support |
-| `std` | Yes | Standard library (disable for no_std) |
+| `decode` | Yes | WebP decoding |
+| `encode` | Yes | WebP encoding |
+| `std` | Yes | Use std (disable for no_std + alloc) |
 | `animation` | No | Animated WebP support |
 | `icc` | No | ICC/EXIF/XMP metadata |
-| `streaming` | No | Incremental processing |
-
-Enable all features:
+| `streaming` | No | Incremental decode/encode |
 
 ```toml
-[dependencies]
+# All features
 webpx = { version = "0.1", features = ["animation", "icc", "streaming"] }
+
+# no_std
+webpx = { version = "0.1", default-features = false, features = ["decode", "encode"] }
 ```
 
 ## Content Presets
 
-| Preset | Use Case |
-|--------|----------|
-| `Default` | General purpose |
-| `Photo` | Outdoor photos, landscapes |
-| `Picture` | Indoor photos, portraits |
-| `Drawing` | Line art, high contrast |
-| `Icon` | Small colorful images |
-| `Text` | Text-heavy images |
+Choose a preset to optimize for your content type:
+
+| Preset | Best For | Characteristics |
+|--------|----------|-----------------|
+| `Default` | General use | Balanced settings |
+| `Photo` | Photographs | Better color, outdoor scenes |
+| `Picture` | Indoor/portraits | Skin tone optimization |
+| `Drawing` | Line art | High contrast, sharp edges |
+| `Icon` | Small images | Color preservation |
+| `Text` | Screenshots | Crisp text rendering |
+
+```rust
+use webpx::{Encoder, Preset};
+
+let webp = Encoder::new(&data, w, h)
+    .preset(Preset::Photo)
+    .encode()?;
+```
 
 ## Platform Support
 
-This crate uses FFI bindings to libwebp, which compiles native C code.
+| Platform | Status |
+|----------|--------|
+| Linux x64/ARM64 | ✅ Full support |
+| macOS x64/ARM64 | ✅ Full support |
+| Windows x64/ARM64 | ✅ Full support |
+| WebAssembly (emscripten) | ✅ Supported |
+| WebAssembly (wasm32-unknown-unknown) | ❌ Not supported* |
 
-| Platform | Support |
-|----------|---------|
-| Linux (x64, ARM64) | ✅ Full |
-| macOS (x64, ARM64) | ✅ Full |
-| Windows (x64, ARM64) | ✅ Full |
-| WebAssembly | ⚠️ Limited |
+*libwebp requires C compilation. For pure-Rust WASM, see [image-webp](https://crates.io/crates/image-webp) (lossless only).
 
-### WebAssembly
-
-The underlying `libwebp-sys` compiles C code, so `wasm32-unknown-unknown` is **not supported**. For WebAssembly targets, use `wasm32-unknown-emscripten`:
+### Building for WebAssembly
 
 ```bash
-# Install emscripten SDK (one-time setup)
+# Install emscripten
 git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 cd ~/emsdk && ./emsdk install latest && ./emsdk activate latest
 
-# Add Rust target
+# Add target and build
 rustup target add wasm32-unknown-emscripten
-
-# Build (source emsdk_env.sh first)
 source ~/emsdk/emsdk_env.sh
 cargo build --target wasm32-unknown-emscripten --release
 ```
 
-This produces `.wasm` and `.js` files that work with Node.js or browsers.
+## Migration from Other Crates
 
-For `wasm32-unknown-unknown` (no emscripten), consider [`image-webp`](https://crates.io/crates/image-webp) which is pure Rust but only supports lossless encoding.
+### From `webp` crate
 
-## Minimum Rust Version
+```rust
+// Before
+use webp::{Encoder, Decoder};
+
+// After - use compat shim
+use webpx::compat::webp::{Encoder, Decoder};
+// API is compatible, just change the import
+```
+
+### From `webp-animation` crate
+
+```rust
+// Before
+use webp_animation::{Encoder, Decoder};
+
+// After - use compat shim
+use webpx::compat::webp_animation::{Encoder, Decoder};
+// Uses finalize() instead of finish() to match original API
+```
+
+## Performance Tips
+
+1. **Use appropriate `method`** - Higher values (4-6) give better compression but are slower
+2. **Choose the right preset** - Presets tune internal parameters for content type
+3. **Consider `sharp_yuv`** - Better color accuracy at slight speed cost
+4. **Batch frames** - For animations, encode multiple frames before finalizing
+5. **Pre-allocate buffers** - Use `StreamingDecoder::with_buffer()` to avoid allocations
+
+## Minimum Supported Rust Version
 
 Rust 1.80 or later.
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+## Contributing
+
+Contributions welcome! Please read our contributing guidelines and code of conduct.
