@@ -70,7 +70,7 @@ mod animation;
 pub mod compat;
 
 // Re-exports
-pub use config::{DecoderConfig, EncoderConfig, Preset};
+pub use config::{AlphaFilter, DecoderConfig, EncodeStats, EncoderConfig, ImageHint, Preset};
 pub use error::{Error, Result};
 pub use types::{ColorMode, ImageInfo, YuvPlanes};
 

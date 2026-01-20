@@ -30,6 +30,130 @@ pub enum Preset {
     Text = 5,
 }
 
+/// Hint about image content for encoder optimization.
+///
+/// Unlike [`Preset`], which configures initial encoding parameters,
+/// hints guide the encoder's internal decisions during compression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u32)]
+pub enum ImageHint {
+    /// No specific hint, use default heuristics.
+    #[default]
+    Default = 0,
+    /// Indoor digital picture (portrait, indoor shot).
+    Picture = 1,
+    /// Outdoor photograph with natural lighting.
+    Photo = 2,
+    /// Discrete tone image (graph, map, etc.).
+    Graph = 3,
+}
+
+impl ImageHint {
+    pub(crate) fn to_libwebp(self) -> libwebp_sys::WebPImageHint {
+        match self {
+            ImageHint::Default => libwebp_sys::WebPImageHint::WEBP_HINT_DEFAULT,
+            ImageHint::Picture => libwebp_sys::WebPImageHint::WEBP_HINT_PICTURE,
+            ImageHint::Photo => libwebp_sys::WebPImageHint::WEBP_HINT_PHOTO,
+            ImageHint::Graph => libwebp_sys::WebPImageHint::WEBP_HINT_GRAPH,
+        }
+    }
+}
+
+/// Alpha channel filtering method.
+///
+/// Controls how the alpha plane is filtered during compression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(i32)]
+pub enum AlphaFilter {
+    /// No filtering.
+    None = 0,
+    /// Fast filtering (predictive).
+    #[default]
+    Fast = 1,
+    /// Best filtering (slower but better compression).
+    Best = 2,
+}
+
+/// Encoding statistics returned after compression.
+///
+/// Provides detailed information about the encoding process,
+/// useful for analysis, debugging, and optimization.
+#[derive(Debug, Clone, Default)]
+pub struct EncodeStats {
+    /// Encoded file size in bytes.
+    pub coded_size: u32,
+    /// PSNR values: [Y, U, V, Alpha, All].
+    pub psnr: [f32; 5],
+    /// Number of macroblocks in each partition [0-2].
+    pub block_count: [u32; 3],
+    /// Header size in bytes [lossless, lossy].
+    pub header_bytes: [u32; 2],
+    /// Size of each segment in bytes.
+    pub segment_size: [u32; 4],
+    /// Quantizer value for each segment.
+    pub segment_quant: [u32; 4],
+    /// Filter level for each segment.
+    pub segment_level: [u32; 4],
+    /// Size of alpha data in bytes.
+    pub alpha_data_size: u32,
+    /// For lossless: histogram bits used.
+    pub histogram_bits: u32,
+    /// For lossless: transform bits used.
+    pub transform_bits: u32,
+    /// For lossless: cache bits used.
+    pub cache_bits: u32,
+    /// For lossless: palette size (0 = no palette).
+    pub palette_size: u32,
+    /// For lossless: total compressed size.
+    pub lossless_size: u32,
+    /// For lossless: header size.
+    pub lossless_hdr_size: u32,
+    /// For lossless: data size.
+    pub lossless_data_size: u32,
+}
+
+impl EncodeStats {
+    /// Create from libwebp WebPAuxStats.
+    pub(crate) fn from_libwebp(stats: &libwebp_sys::WebPAuxStats) -> Self {
+        Self {
+            coded_size: stats.coded_size as u32,
+            psnr: stats.PSNR,
+            block_count: [
+                stats.block_count[0] as u32,
+                stats.block_count[1] as u32,
+                stats.block_count[2] as u32,
+            ],
+            header_bytes: [stats.header_bytes[0] as u32, stats.header_bytes[1] as u32],
+            segment_size: [
+                stats.segment_size[0] as u32,
+                stats.segment_size[1] as u32,
+                stats.segment_size[2] as u32,
+                stats.segment_size[3] as u32,
+            ],
+            segment_quant: [
+                stats.segment_quant[0] as u32,
+                stats.segment_quant[1] as u32,
+                stats.segment_quant[2] as u32,
+                stats.segment_quant[3] as u32,
+            ],
+            segment_level: [
+                stats.segment_level[0] as u32,
+                stats.segment_level[1] as u32,
+                stats.segment_level[2] as u32,
+                stats.segment_level[3] as u32,
+            ],
+            alpha_data_size: stats.alpha_data_size as u32,
+            histogram_bits: stats.histogram_bits as u32,
+            transform_bits: stats.transform_bits as u32,
+            cache_bits: stats.cache_bits as u32,
+            palette_size: stats.palette_size as u32,
+            lossless_size: stats.lossless_size as u32,
+            lossless_hdr_size: stats.lossless_hdr_size as u32,
+            lossless_data_size: stats.lossless_data_size as u32,
+        }
+    }
+}
+
 impl Preset {
     /// Convert to libwebp preset value.
     pub(crate) fn to_libwebp(self) -> libwebp_sys::WebPPreset {
@@ -75,6 +199,7 @@ pub struct EncoderConfig {
     pub(crate) near_lossless: u8,
     pub(crate) alpha_quality: u8,
     pub(crate) alpha_compression: bool,
+    pub(crate) alpha_filter: AlphaFilter,
     pub(crate) exact: bool,
     pub(crate) target_size: u32,
     pub(crate) target_psnr: f32,
@@ -88,6 +213,14 @@ pub struct EncoderConfig {
     pub(crate) use_sharp_yuv: bool,
     pub(crate) thread_level: u8,
     pub(crate) low_memory: bool,
+    // New compression options
+    pub(crate) hint: ImageHint,
+    pub(crate) preprocessing: u8,
+    pub(crate) partitions: u8,
+    pub(crate) partition_limit: u8,
+    pub(crate) delta_palette: bool,
+    pub(crate) qmin: u8,
+    pub(crate) qmax: u8,
     #[cfg(feature = "icc")]
     pub(crate) icc_profile: Option<Vec<u8>>,
     #[cfg(feature = "icc")]
@@ -106,6 +239,7 @@ impl Default for EncoderConfig {
             near_lossless: 100,
             alpha_quality: 100,
             alpha_compression: true,
+            alpha_filter: AlphaFilter::Fast,
             exact: false,
             target_size: 0,
             target_psnr: 0.0,
@@ -119,6 +253,13 @@ impl Default for EncoderConfig {
             use_sharp_yuv: false,
             thread_level: 0,
             low_memory: false,
+            hint: ImageHint::Default,
+            preprocessing: 0,
+            partitions: 0,
+            partition_limit: 0,
+            delta_palette: false,
+            qmin: 0,
+            qmax: 100,
             #[cfg(feature = "icc")]
             icc_profile: None,
             #[cfg(feature = "icc")]
@@ -154,6 +295,45 @@ impl EncoderConfig {
         }
     }
 
+    /// Create a lossless encoder with a compression level (0-9).
+    ///
+    /// This uses libwebp's lossless presets which configure optimal
+    /// settings for each compression level:
+    /// - 0: Fastest, largest files
+    /// - 9: Slowest, smallest files (maximum compression)
+    ///
+    /// Level 6 is a good balance of speed and compression.
+    #[must_use]
+    pub fn new_lossless_level(level: u8) -> Self {
+        let level = level.min(9);
+        // Map lossless level to method and quality
+        // Based on WebPConfigLosslessPreset behavior
+        let method = match level {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            3 => 3,
+            4 => 3,
+            5 => 4,
+            6 => 4,
+            7 => 4,
+            8 => 5,
+            _ => 6,
+        };
+        let quality = match level {
+            0..=4 => 25.0 + (level as f32) * 15.0,
+            _ => 80.0 + ((level - 5) as f32) * 4.0,
+        };
+
+        Self {
+            lossless: true,
+            method,
+            quality,
+            alpha_compression: false,
+            ..Self::default()
+        }
+    }
+
     /// Create a configuration with preset and quality.
     ///
     /// Presets configure optimal settings for different content types.
@@ -162,6 +342,41 @@ impl EncoderConfig {
         Self {
             preset,
             quality,
+            ..Self::default()
+        }
+    }
+
+    /// Create a maximum compression configuration.
+    ///
+    /// Configures all options for smallest possible file size.
+    /// Encoding will be slow but produces optimal compression.
+    #[must_use]
+    pub fn max_compression() -> Self {
+        Self {
+            quality: 90.0,
+            method: 6,
+            pass: 10,
+            segments: 4,
+            sns_strength: 100,
+            autofilter: true,
+            use_sharp_yuv: true,
+            partition_limit: 100,
+            ..Self::default()
+        }
+    }
+
+    /// Create a maximum compression lossless configuration.
+    ///
+    /// Uses all available techniques for smallest lossless output.
+    #[must_use]
+    pub fn max_compression_lossless() -> Self {
+        Self {
+            lossless: true,
+            quality: 100.0,
+            method: 6,
+            near_lossless: 100,
+            delta_palette: true,
+            alpha_compression: false,
             ..Self::default()
         }
     }
@@ -238,6 +453,18 @@ impl EncoderConfig {
     #[must_use]
     pub fn alpha_compression(mut self, enable: bool) -> Self {
         self.alpha_compression = enable;
+        self
+    }
+
+    /// Set alpha filtering method.
+    ///
+    /// Controls how the alpha plane is filtered:
+    /// - `None`: No filtering
+    /// - `Fast`: Predictive filtering (default, good balance)
+    /// - `Best`: Best compression (slower)
+    #[must_use]
+    pub fn alpha_filter(mut self, filter: AlphaFilter) -> Self {
+        self.alpha_filter = filter;
         self
     }
 
@@ -348,6 +575,94 @@ impl EncoderConfig {
         self
     }
 
+    // === Content Hints ===
+
+    /// Set image content hint for encoder optimization.
+    ///
+    /// Hints guide the encoder's internal compression decisions:
+    /// - `Default`: No specific optimization
+    /// - `Picture`: Indoor digital pictures, portraits
+    /// - `Photo`: Outdoor photographs, landscapes
+    /// - `Graph`: Discrete tone images (diagrams, maps, charts)
+    ///
+    /// This complements [`preset`](Self::preset) - preset sets initial parameters,
+    /// while hint guides runtime decisions.
+    #[must_use]
+    pub fn hint(mut self, hint: ImageHint) -> Self {
+        self.hint = hint;
+        self
+    }
+
+    // === Advanced Compression ===
+
+    /// Set preprocessing filter (0-7).
+    ///
+    /// Applies filtering before encoding:
+    /// - Bit 0: Pseudo-random dithering (helps gradients)
+    /// - Bit 1: Segment-smooth
+    /// - Bit 2: Additional filtering
+    ///
+    /// Higher values may improve compression for images with gradients.
+    #[must_use]
+    pub fn preprocessing(mut self, level: u8) -> Self {
+        self.preprocessing = level.min(7);
+        self
+    }
+
+    /// Set number of token partitions (0-3).
+    ///
+    /// Controls parallelism in the bitstream:
+    /// - 0 = 1 partition
+    /// - 1 = 2 partitions
+    /// - 2 = 4 partitions
+    /// - 3 = 8 partitions
+    ///
+    /// More partitions enable parallel decoding but may reduce compression.
+    #[must_use]
+    pub fn partitions(mut self, log2_partitions: u8) -> Self {
+        self.partitions = log2_partitions.min(3);
+        self
+    }
+
+    /// Set partition size limit (0-100).
+    ///
+    /// Controls quality degradation allowed to fit partitions within
+    /// the 512k limit. Higher values allow more degradation for smaller
+    /// partitions, which can help streaming/parallel decode.
+    ///
+    /// 0 = no degradation allowed, 100 = full degradation allowed.
+    #[must_use]
+    pub fn partition_limit(mut self, limit: u8) -> Self {
+        self.partition_limit = limit.min(100);
+        self
+    }
+
+    /// Enable delta palette encoding for lossless mode.
+    ///
+    /// Uses delta encoding for palette entries, which can significantly
+    /// improve compression for images with smooth color gradients or
+    /// palette-based content. Only effective in lossless mode.
+    #[must_use]
+    pub fn delta_palette(mut self, enable: bool) -> Self {
+        self.delta_palette = enable;
+        self
+    }
+
+    /// Set quantizer range (min, max) for lossy encoding.
+    ///
+    /// Constrains the quantizer values used during encoding:
+    /// - `min`: Minimum quantizer (0-100, lower = higher quality floor)
+    /// - `max`: Maximum quantizer (0-100, lower = higher quality ceiling)
+    ///
+    /// Useful for ensuring consistent quality across images.
+    /// Default is (0, 100) = full range.
+    #[must_use]
+    pub fn quality_range(mut self, min: u8, max: u8) -> Self {
+        self.qmin = min.min(100);
+        self.qmax = max.min(100).max(self.qmin);
+        self
+    }
+
     // === Metadata (ICC feature) ===
 
     /// Attach an ICC color profile to the output.
@@ -406,6 +721,29 @@ impl EncoderConfig {
         crate::encode::encode_with_config(data, width, height, 3, self)
     }
 
+    /// Encode RGBA pixel data and return encoding statistics.
+    ///
+    /// Returns both the encoded WebP data and detailed encoding statistics
+    /// including PSNR, segment info, and compression metrics.
+    pub fn encode_rgba_with_stats(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<(Vec<u8>, EncodeStats)> {
+        crate::encode::encode_with_config_stats(data, width, height, 4, self)
+    }
+
+    /// Encode RGB pixel data and return encoding statistics.
+    pub fn encode_rgb_with_stats(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<(Vec<u8>, EncodeStats)> {
+        crate::encode::encode_with_config_stats(data, width, height, 3, self)
+    }
+
     // === Validation ===
 
     /// Validate the configuration.
@@ -426,6 +764,7 @@ impl EncoderConfig {
         config.near_lossless = self.near_lossless as i32;
         config.alpha_quality = self.alpha_quality as i32;
         config.alpha_compression = self.alpha_compression as i32;
+        config.alpha_filtering = self.alpha_filter as i32;
         config.exact = self.exact as i32;
         config.target_size = self.target_size as i32;
         config.target_PSNR = self.target_psnr;
@@ -439,6 +778,14 @@ impl EncoderConfig {
         config.use_sharp_yuv = self.use_sharp_yuv as i32;
         config.thread_level = self.thread_level as i32;
         config.low_memory = self.low_memory as i32;
+        // New compression options
+        config.image_hint = self.hint.to_libwebp();
+        config.preprocessing = self.preprocessing as i32;
+        config.partitions = self.partitions as i32;
+        config.partition_limit = self.partition_limit as i32;
+        config.use_delta_palette = self.delta_palette as i32;
+        config.qmin = self.qmin as i32;
+        config.qmax = self.qmax as i32;
 
         // Validate the config
         if unsafe { libwebp_sys::WebPValidateConfig(&config) } == 0 {
