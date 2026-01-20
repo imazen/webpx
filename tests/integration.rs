@@ -2497,3 +2497,370 @@ mod compat_webp_animation_tests {
         assert!(matches!(config.encoding_type, EncodingType::Lossy(_)));
     }
 }
+
+mod bgra_tests {
+    use super::*;
+
+    /// Generate BGRA data from RGBA by swapping R and B channels.
+    fn generate_bgra(width: u32, height: u32, b: u8, g: u8, r: u8, a: u8) -> Vec<u8> {
+        let mut data = Vec::with_capacity((width * height * 4) as usize);
+        for _ in 0..(width * height) {
+            data.push(b);
+            data.push(g);
+            data.push(r);
+            data.push(a);
+        }
+        data
+    }
+
+    /// Generate BGR data.
+    fn generate_bgr(width: u32, height: u32, b: u8, g: u8, r: u8) -> Vec<u8> {
+        let mut data = Vec::with_capacity((width * height * 3) as usize);
+        for _ in 0..(width * height) {
+            data.push(b);
+            data.push(g);
+            data.push(r);
+        }
+        data
+    }
+
+    #[test]
+    fn test_encode_bgra() {
+        let width = 32;
+        let height = 32;
+        let bgra = generate_bgra(width, height, 255, 128, 64, 255);
+
+        let webp = encode_bgra(&bgra, width, height, 85.0, Unstoppable).unwrap();
+        assert!(!webp.is_empty());
+
+        // Decode and verify it's valid
+        let (decoded, w, h) = decode_rgba(&webp).unwrap();
+        assert_eq!((w, h), (width, height));
+        assert_eq!(decoded.len(), (width * height * 4) as usize);
+    }
+
+    #[test]
+    fn test_encode_bgr() {
+        let width = 32;
+        let height = 32;
+        let bgr = generate_bgr(width, height, 255, 128, 64);
+
+        let webp = encode_bgr(&bgr, width, height, 85.0, Unstoppable).unwrap();
+        assert!(!webp.is_empty());
+
+        // Decode and verify it's valid
+        let (decoded, w, h) = decode_rgb(&webp).unwrap();
+        assert_eq!((w, h), (width, height));
+        assert_eq!(decoded.len(), (width * height * 3) as usize);
+    }
+
+    #[test]
+    fn test_decode_bgra() {
+        let width = 32;
+        let height = 32;
+        let rgba = generate_rgba(width, height, 64, 128, 255, 200);
+
+        let webp = encode_rgba(&rgba, width, height, 100.0, Unstoppable).unwrap();
+        let (bgra, w, h) = decode_bgra(&webp).unwrap();
+
+        assert_eq!((w, h), (width, height));
+        assert_eq!(bgra.len(), (width * height * 4) as usize);
+    }
+
+    #[test]
+    fn test_decode_bgr() {
+        let width = 32;
+        let height = 32;
+        let rgb = generate_rgb(width, height, 64, 128, 255);
+
+        let webp = encode_rgb(&rgb, width, height, 100.0, Unstoppable).unwrap();
+        let (bgr, w, h) = decode_bgr(&webp).unwrap();
+
+        assert_eq!((w, h), (width, height));
+        assert_eq!(bgr.len(), (width * height * 3) as usize);
+    }
+
+    #[test]
+    fn test_encoder_new_bgra() {
+        let width = 16;
+        let height = 16;
+        let bgra = generate_bgra(width, height, 100, 150, 200, 255);
+
+        let webp = Encoder::new_bgra(&bgra, width, height)
+            .quality(80.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        assert!(!webp.is_empty());
+    }
+
+    #[test]
+    fn test_encoder_new_bgr() {
+        let width = 16;
+        let height = 16;
+        let bgr = generate_bgr(width, height, 100, 150, 200);
+
+        let webp = Encoder::new_bgr(&bgr, width, height)
+            .quality(80.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        assert!(!webp.is_empty());
+    }
+
+    #[test]
+    fn test_decoder_decode_bgra() {
+        let width = 16;
+        let height = 16;
+        let rgba = generate_rgba(width, height, 200, 150, 100, 255);
+
+        let webp = encode_rgba(&rgba, width, height, 100.0, Unstoppable).unwrap();
+        let decoder = Decoder::new(&webp).unwrap();
+        let img = decoder.decode_bgra().unwrap();
+
+        assert_eq!(img.width(), width as usize);
+        assert_eq!(img.height(), height as usize);
+    }
+
+    #[test]
+    fn test_decoder_decode_bgr() {
+        let width = 16;
+        let height = 16;
+        let rgb = generate_rgb(width, height, 200, 150, 100);
+
+        let webp = encode_rgb(&rgb, width, height, 100.0, Unstoppable).unwrap();
+        let decoder = Decoder::new(&webp).unwrap();
+        let img = decoder.decode_bgr().unwrap();
+
+        assert_eq!(img.width(), width as usize);
+        assert_eq!(img.height(), height as usize);
+    }
+}
+
+mod zero_copy_tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_rgba_into() {
+        let width = 32;
+        let height = 32;
+        let rgba = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let webp = encode_rgba(&rgba, width, height, 100.0, Unstoppable).unwrap();
+
+        // Allocate buffer
+        let stride = (width * 4) as usize;
+        let mut buffer = vec![0u8; stride * height as usize];
+
+        let (w, h) = decode_rgba_into(&webp, &mut buffer, stride as u32).unwrap();
+
+        assert_eq!((w, h), (width, height));
+        // Buffer should be filled with non-zero data
+        assert!(buffer.iter().any(|&x| x != 0));
+    }
+
+    #[test]
+    fn test_decode_bgra_into() {
+        let width = 32;
+        let height = 32;
+        let rgba = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let webp = encode_rgba(&rgba, width, height, 100.0, Unstoppable).unwrap();
+
+        // Allocate buffer
+        let stride = (width * 4) as usize;
+        let mut buffer = vec![0u8; stride * height as usize];
+
+        let (w, h) = decode_bgra_into(&webp, &mut buffer, stride as u32).unwrap();
+
+        assert_eq!((w, h), (width, height));
+        assert!(buffer.iter().any(|&x| x != 0));
+    }
+
+    #[test]
+    fn test_decode_rgb_into() {
+        let width = 32;
+        let height = 32;
+        let rgb = generate_rgb(width, height, 100, 150, 200);
+
+        let webp = encode_rgb(&rgb, width, height, 100.0, Unstoppable).unwrap();
+
+        // Allocate buffer
+        let stride = (width * 3) as usize;
+        let mut buffer = vec![0u8; stride * height as usize];
+
+        let (w, h) = decode_rgb_into(&webp, &mut buffer, stride as u32).unwrap();
+
+        assert_eq!((w, h), (width, height));
+        assert!(buffer.iter().any(|&x| x != 0));
+    }
+
+    #[test]
+    fn test_decode_bgr_into() {
+        let width = 32;
+        let height = 32;
+        let rgb = generate_rgb(width, height, 100, 150, 200);
+
+        let webp = encode_rgb(&rgb, width, height, 100.0, Unstoppable).unwrap();
+
+        // Allocate buffer
+        let stride = (width * 3) as usize;
+        let mut buffer = vec![0u8; stride * height as usize];
+
+        let (w, h) = decode_bgr_into(&webp, &mut buffer, stride as u32).unwrap();
+
+        assert_eq!((w, h), (width, height));
+        assert!(buffer.iter().any(|&x| x != 0));
+    }
+
+    #[test]
+    fn test_decode_into_with_stride() {
+        let width = 16;
+        let height = 16;
+        let rgba = generate_rgba(width, height, 128, 64, 192, 255);
+
+        let webp = encode_rgba(&rgba, width, height, 100.0, Unstoppable).unwrap();
+
+        // Use a larger stride (e.g., aligned to 64 bytes)
+        let stride = ((width * 4).div_ceil(64) * 64) as usize;
+        let mut buffer = vec![0u8; stride * height as usize];
+
+        let (w, h) = decode_rgba_into(&webp, &mut buffer, stride as u32).unwrap();
+
+        assert_eq!((w, h), (width, height));
+
+        // Check that data is in the right place
+        for y in 0..height as usize {
+            let row_start = y * stride;
+            let row_data = &buffer[row_start..row_start + (width * 4) as usize];
+            assert!(row_data.iter().any(|&x| x != 0), "Row {} should have data", y);
+        }
+    }
+
+    #[test]
+    fn test_decode_into_buffer_too_small() {
+        let width = 32;
+        let height = 32;
+        let rgba = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let webp = encode_rgba(&rgba, width, height, 100.0, Unstoppable).unwrap();
+
+        // Buffer is too small
+        let mut buffer = vec![0u8; 100];
+
+        let result = decode_rgba_into(&webp, &mut buffer, width * 4);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_into_stride_too_small() {
+        let width = 32;
+        let height = 32;
+        let rgba = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let webp = encode_rgba(&rgba, width, height, 100.0, Unstoppable).unwrap();
+
+        // Buffer is big enough but stride is too small
+        let mut buffer = vec![0u8; (width * height * 4) as usize];
+
+        let result = decode_rgba_into(&webp, &mut buffer, 10); // stride too small
+        assert!(result.is_err());
+    }
+}
+
+mod stride_tests {
+    use super::*;
+
+    #[test]
+    fn test_encoder_with_stride() {
+        let width = 16u32;
+        let height = 16u32;
+        // Create buffer with padding (stride > width * bpp)
+        let stride = (width * 4 + 16) as usize; // 16 bytes padding per row
+        let mut data = vec![0u8; stride * height as usize];
+
+        // Fill only the image portion
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let offset = y * stride + x * 4;
+                data[offset] = 100; // R
+                data[offset + 1] = 150; // G
+                data[offset + 2] = 200; // B
+                data[offset + 3] = 255; // A
+            }
+        }
+
+        let webp = Encoder::new_rgba_stride(&data, width, height, stride as u32)
+            .quality(85.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        assert!(!webp.is_empty());
+
+        // Decode and verify dimensions
+        let (_, w, h) = decode_rgba(&webp).unwrap();
+        assert_eq!((w, h), (width, height));
+    }
+
+    #[test]
+    fn test_encoder_bgra_with_stride() {
+        let width = 16u32;
+        let height = 16u32;
+        let stride = (width * 4 + 32) as usize;
+        let mut data = vec![0u8; stride * height as usize];
+
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let offset = y * stride + x * 4;
+                data[offset] = 200; // B
+                data[offset + 1] = 150; // G
+                data[offset + 2] = 100; // R
+                data[offset + 3] = 255; // A
+            }
+        }
+
+        let webp = Encoder::new_bgra_stride(&data, width, height, stride as u32)
+            .quality(85.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        assert!(!webp.is_empty());
+    }
+
+    #[test]
+    fn test_encoder_rgb_with_stride() {
+        let width = 16u32;
+        let height = 16u32;
+        let stride = (width * 3 + 8) as usize;
+        let mut data = vec![0u8; stride * height as usize];
+
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let offset = y * stride + x * 3;
+                data[offset] = 100; // R
+                data[offset + 1] = 150; // G
+                data[offset + 2] = 200; // B
+            }
+        }
+
+        let webp = Encoder::new_rgb_stride(&data, width, height, stride as u32)
+            .quality(85.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        assert!(!webp.is_empty());
+    }
+
+    #[test]
+    fn test_stride_validation_too_small() {
+        let width = 32u32;
+        let height = 32u32;
+        let data = vec![0u8; (width * height * 4) as usize];
+
+        // Stride is smaller than width * 4
+        let result = Encoder::new_rgba_stride(&data, width, height, 10)
+            .encode(Unstoppable);
+
+        assert!(result.is_err());
+    }
+}
