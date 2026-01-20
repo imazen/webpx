@@ -2,6 +2,61 @@
 
 use webpx::*;
 
+// Helper functions to replace removed top-level encode functions
+fn encode_rgba(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: f32,
+    stop: impl Stop,
+) -> Result<Vec<u8>> {
+    Encoder::new_rgba(data, width, height)
+        .quality(quality)
+        .encode(stop)
+}
+
+fn encode_rgb(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: f32,
+    stop: impl Stop,
+) -> Result<Vec<u8>> {
+    Encoder::new_rgb(data, width, height)
+        .quality(quality)
+        .encode(stop)
+}
+
+fn encode_lossless(data: &[u8], width: u32, height: u32, stop: impl Stop) -> Result<Vec<u8>> {
+    EncoderConfig::new()
+        .lossless(true)
+        .encode_rgba(data, width, height, stop)
+}
+
+fn encode_bgra(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: f32,
+    stop: impl Stop,
+) -> Result<Vec<u8>> {
+    Encoder::new_bgra(data, width, height)
+        .quality(quality)
+        .encode(stop)
+}
+
+fn encode_bgr(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: f32,
+    stop: impl Stop,
+) -> Result<Vec<u8>> {
+    Encoder::new_bgr(data, width, height)
+        .quality(quality)
+        .encode(stop)
+}
+
 /// Generate a solid color RGBA image.
 fn generate_rgba(width: u32, height: u32, r: u8, g: u8, b: u8, a: u8) -> Vec<u8> {
     let mut data = Vec::with_capacity((width * height * 4) as usize);
@@ -989,7 +1044,7 @@ mod error_tests {
 mod stop_tests {
     use super::generate_gradient_rgba;
     use core::sync::atomic::{AtomicBool, Ordering};
-    use webpx::{encode_rgba, Error, Stop, StopReason};
+    use webpx::{Encoder, Error, Stop, StopReason};
 
     /// A Stop implementation that cancels immediately.
     struct ImmediateCanceller;
@@ -1032,7 +1087,9 @@ mod stop_tests {
     #[test]
     fn test_encode_cancelled_immediately() {
         let data = generate_gradient_rgba(32, 32);
-        let result = encode_rgba(&data, 32, 32, 85.0, ImmediateCanceller);
+        let result = Encoder::new_rgba(&data, 32, 32)
+            .quality(85.0)
+            .encode(ImmediateCanceller);
 
         match result {
             Err(ref e) if matches!(e.error(), Error::Stopped(StopReason::Cancelled)) => {} // expected
@@ -1045,7 +1102,9 @@ mod stop_tests {
         // Use a larger image so progress callbacks are called
         let data = generate_gradient_rgba(256, 256);
         let stopper = DelayedCanceller::new(1); // Cancel after first progress callback
-        let result = encode_rgba(&data, 256, 256, 85.0, &stopper);
+        let result = Encoder::new_rgba(&data, 256, 256)
+            .quality(85.0)
+            .encode(&stopper);
 
         match result {
             Err(ref e) if matches!(e.error(), Error::Stopped(StopReason::Cancelled)) => {} // expected
@@ -1315,7 +1374,10 @@ mod streaming_tests {
 }
 
 mod types_tests {
-    use webpx::{BitstreamFormat, ColorMode, ImageInfo, Unstoppable, YuvPlanes, YuvPlanesRef};
+    use webpx::{
+        BitstreamFormat, ColorMode, Encoder, EncoderConfig, ImageInfo, Unstoppable, YuvPlanes,
+        YuvPlanesRef,
+    };
 
     #[test]
     fn test_color_mode_bytes_per_pixel() {
@@ -1408,7 +1470,10 @@ mod types_tests {
     fn test_image_info_lossy_format() {
         use super::generate_gradient_rgba;
         let data = generate_gradient_rgba(32, 32);
-        let webp = webpx::encode_rgba(&data, 32, 32, 85.0, Unstoppable).expect("encode");
+        let webp = Encoder::new_rgba(&data, 32, 32)
+            .quality(85.0)
+            .encode(Unstoppable)
+            .expect("encode");
         let info = ImageInfo::from_webp(&webp).expect("info");
         assert_eq!(info.format, BitstreamFormat::Lossy);
         assert!(!info.has_animation);
@@ -1419,7 +1484,10 @@ mod types_tests {
     fn test_image_info_lossless_format() {
         use super::generate_rgba;
         let data = generate_rgba(32, 32, 100, 150, 200, 255);
-        let webp = webpx::encode_lossless(&data, 32, 32, Unstoppable).expect("encode");
+        let webp = EncoderConfig::new()
+            .lossless(true)
+            .encode_rgba(&data, 32, 32, Unstoppable)
+            .expect("encode");
         let info = ImageInfo::from_webp(&webp).expect("info");
         assert_eq!(info.format, BitstreamFormat::Lossless);
     }
@@ -1428,7 +1496,10 @@ mod types_tests {
     fn test_image_info_clone_eq() {
         use super::generate_rgba;
         let data = generate_rgba(32, 32, 100, 150, 200, 255);
-        let webp = webpx::encode_rgba(&data, 32, 32, 85.0, Unstoppable).expect("encode");
+        let webp = Encoder::new_rgba(&data, 32, 32)
+            .quality(85.0)
+            .encode(Unstoppable)
+            .expect("encode");
         let info1 = ImageInfo::from_webp(&webp).expect("info");
         let info2 = info1.clone();
         assert_eq!(info1, info2);

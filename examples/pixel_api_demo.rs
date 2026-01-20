@@ -35,28 +35,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- Raw &[u8] bytes ---");
 
     // RGBA bytes
-    let rgba_bytes: Vec<u8> = vec![255, 0, 0, 255].repeat(100 * 100);
+    let rgba_bytes: Vec<u8> = [255, 0, 0, 255].repeat(100 * 100);
     let webp = Encoder::new_rgba(&rgba_bytes, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
     println!("  Encoder::new_rgba: {} bytes", webp.len());
 
     // RGB bytes (no alpha)
-    let rgb_bytes: Vec<u8> = vec![255, 0, 0].repeat(100 * 100);
+    let rgb_bytes: Vec<u8> = [255, 0, 0].repeat(100 * 100);
     let webp = Encoder::new_rgb(&rgb_bytes, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
     println!("  Encoder::new_rgb: {} bytes", webp.len());
 
     // BGRA bytes (Windows/GPU native)
-    let bgra_bytes: Vec<u8> = vec![0, 0, 255, 255].repeat(100 * 100); // Blue in BGRA
+    let bgra_bytes: Vec<u8> = [0, 0, 255, 255].repeat(100 * 100); // Blue in BGRA
     let webp = Encoder::new_bgra(&bgra_bytes, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
     println!("  Encoder::new_bgra: {} bytes", webp.len());
 
     // BGR bytes (OpenCV)
-    let bgr_bytes: Vec<u8> = vec![0, 0, 255].repeat(100 * 100);
+    let bgr_bytes: Vec<u8> = [0, 0, 255].repeat(100 * 100);
     let webp = Encoder::new_bgr(&bgr_bytes, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
@@ -162,21 +162,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     encoder.add_frame_rgba(&raw2, 100)?;
     let webp = encoder.finish(200)?;
     println!("  add_frame_rgba: {} bytes, 2 frames", webp.len());
-
-    // =========================================================================
-    // TOP-LEVEL CONVENIENCE FUNCTIONS
-    // =========================================================================
-
-    println!("\n=== TOP-LEVEL FUNCTIONS (quick one-off) ===\n");
-
-    let webp = webpx::encode_rgba(&rgba_bytes, 100, 100, 85.0, Unstoppable)?;
-    println!("  encode_rgba: {} bytes", webp.len());
-
-    let webp = webpx::encode_rgb(&rgb_bytes, 100, 100, 85.0, Unstoppable)?;
-    println!("  encode_rgb: {} bytes", webp.len());
-
-    let webp = webpx::encode_lossless(&rgba_bytes, 100, 100, Unstoppable)?;
-    println!("  encode_lossless: {} bytes", webp.len());
 
     println!("\n=== SUMMARY ===");
     println!("

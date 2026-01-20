@@ -14,7 +14,7 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use webpx::Unstoppable;
+//! use webpx::{Encoder, Unstoppable};
 //!
 //! // Create a small 2x2 RGBA image (red, green, blue, white)
 //! let rgba_data: Vec<u8> = vec![
@@ -25,7 +25,9 @@
 //! ];
 //!
 //! // Encode to WebP (lossy, quality 85)
-//! let webp_bytes = webpx::encode_rgba(&rgba_data, 2, 2, 85.0, Unstoppable)?;
+//! let webp_bytes = Encoder::new_rgba(&rgba_data, 2, 2)
+//!     .quality(85.0)
+//!     .encode(Unstoppable)?;
 //!
 //! // Decode back to RGBA
 //! let (pixels, width, height) = webpx::decode_rgba(&webp_bytes)?;
@@ -128,7 +130,7 @@ pub use decode::{
 };
 
 #[cfg(feature = "encode")]
-pub use encode::{encode_bgr, encode_bgra, encode_lossless, encode_rgb, encode_rgba, Encoder};
+pub use encode::Encoder;
 
 #[cfg(feature = "icc")]
 pub use mux::{

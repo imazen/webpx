@@ -2,9 +2,7 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
-use webpx::{
-    decode_rgba, encode_lossless, encode_rgba, AnimationEncoder, Encoder, Preset, Unstoppable,
-};
+use webpx::{decode_rgba, AnimationEncoder, Encoder, EncoderConfig, Preset, Unstoppable};
 
 /// Generate a gradient RGBA image for benchmarking.
 fn generate_gradient_rgba(width: u32, height: u32) -> Vec<u8> {
@@ -35,7 +33,12 @@ fn bench_encode_lossy(c: &mut Criterion) {
             BenchmarkId::new("q85", format!("{}x{}", width, height)),
             &rgba,
             |b, rgba| {
-                b.iter(|| encode_rgba(black_box(rgba), width, height, 85.0, Unstoppable).unwrap());
+                b.iter(|| {
+                    Encoder::new_rgba(black_box(rgba), width, height)
+                        .quality(85.0)
+                        .encode(Unstoppable)
+                        .unwrap()
+                });
             },
         );
     }
@@ -55,7 +58,12 @@ fn bench_encode_lossless(c: &mut Criterion) {
             BenchmarkId::new("lossless", format!("{}x{}", width, height)),
             &rgba,
             |b, rgba| {
-                b.iter(|| encode_lossless(black_box(rgba), width, height, Unstoppable).unwrap());
+                b.iter(|| {
+                    EncoderConfig::new()
+                        .lossless(true)
+                        .encode_rgba(black_box(rgba), width, height, Unstoppable)
+                        .unwrap()
+                });
             },
         );
     }
@@ -68,8 +76,14 @@ fn bench_decode(c: &mut Criterion) {
 
     for &(width, height) in &[(64, 64), (256, 256), (512, 512)] {
         let rgba = generate_gradient_rgba(width, height);
-        let webp_lossy = encode_rgba(&rgba, width, height, 85.0, Unstoppable).unwrap();
-        let webp_lossless = encode_lossless(&rgba, width, height, Unstoppable).unwrap();
+        let webp_lossy = Encoder::new_rgba(&rgba, width, height)
+            .quality(85.0)
+            .encode(Unstoppable)
+            .unwrap();
+        let webp_lossless = EncoderConfig::new()
+            .lossless(true)
+            .encode_rgba(&rgba, width, height, Unstoppable)
+            .unwrap();
         let pixels = (width * height) as u64;
         group.throughput(Throughput::Elements(pixels));
 
@@ -115,7 +129,7 @@ fn bench_presets(c: &mut Criterion) {
             &rgba,
             |b, rgba| {
                 b.iter(|| {
-                    Encoder::new(black_box(rgba), width, height)
+                    Encoder::new_rgba(black_box(rgba), width, height)
                         .preset(preset)
                         .quality(85.0)
                         .encode(Unstoppable)
