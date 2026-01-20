@@ -1,6 +1,7 @@
 //! Encoder and decoder configuration types.
 
 use crate::error::{Error, Result};
+use crate::types::{EncodePixel, PixelLayout};
 use alloc::vec::Vec;
 use enough::Stop;
 use whereat::*;
@@ -779,6 +780,111 @@ impl EncoderConfig {
         stop: &impl Stop,
     ) -> Result<Vec<u8>> {
         crate::encode::encode_with_config_stoppable(data, width, height, 3, self, stop)
+    }
+
+    /// Encode typed pixel data to WebP.
+    ///
+    /// This is the preferred method for type-safe encoding with rgb crate types.
+    /// The pixel format is determined at compile time from the type parameter.
+    ///
+    /// # Supported Types
+    /// - [`rgb::RGBA8`] - 4-channel RGBA
+    /// - [`rgb::RGB8`] - 3-channel RGB
+    /// - [`rgb::alt::BGRA8`] - 4-channel BGRA (Windows/GPU native)
+    /// - [`rgb::alt::BGR8`] - 3-channel BGR (OpenCV)
+    ///
+    /// # Example
+    /// ```rust
+    /// use webpx::EncoderConfig;
+    /// use rgb::RGBA8;
+    ///
+    /// let pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 4 * 4];
+    /// let config = EncoderConfig::new().quality(85.0);
+    /// let webp = config.encode_pixels(&pixels, 4, 4)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    pub fn encode_pixels<P: EncodePixel>(
+        &self,
+        pixels: &[P],
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>> {
+        let bpp = P::LAYOUT.bytes_per_pixel();
+        let data = unsafe {
+            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+        };
+        self.encode_pixels_internal(data, width, height, P::LAYOUT)
+    }
+
+    /// Encode typed pixel data with cooperative cancellation support.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use webpx::{EncoderConfig, Unstoppable};
+    /// use rgb::RGB8;
+    ///
+    /// let pixels: Vec<RGB8> = vec![RGB8::new(0, 128, 255); 100 * 100];
+    /// let config = EncoderConfig::new().quality(90.0);
+    /// let webp = config.encode_pixels_stoppable(&pixels, 100, 100, &Unstoppable)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    pub fn encode_pixels_stoppable<P: EncodePixel>(
+        &self,
+        pixels: &[P],
+        width: u32,
+        height: u32,
+        stop: &impl Stop,
+    ) -> Result<Vec<u8>> {
+        let bpp = P::LAYOUT.bytes_per_pixel();
+        let data = unsafe {
+            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+        };
+        self.encode_pixels_internal_stoppable(data, width, height, P::LAYOUT, stop)
+    }
+
+    /// Internal: encode bytes with a specific pixel layout.
+    fn encode_pixels_internal(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        layout: PixelLayout,
+    ) -> Result<Vec<u8>> {
+        match layout {
+            PixelLayout::Rgba => crate::encode::encode_with_config(data, width, height, 4, self),
+            PixelLayout::Bgra => crate::Encoder::new_bgra(data, width, height)
+                .config(self.clone())
+                .encode(enough::Unstoppable),
+            PixelLayout::Rgb => crate::encode::encode_with_config(data, width, height, 3, self),
+            PixelLayout::Bgr => crate::Encoder::new_bgr(data, width, height)
+                .config(self.clone())
+                .encode(enough::Unstoppable),
+        }
+    }
+
+    /// Internal: encode bytes with a specific pixel layout and cancellation.
+    fn encode_pixels_internal_stoppable(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        layout: PixelLayout,
+        stop: &impl Stop,
+    ) -> Result<Vec<u8>> {
+        match layout {
+            PixelLayout::Rgba => {
+                crate::encode::encode_with_config_stoppable(data, width, height, 4, self, stop)
+            }
+            PixelLayout::Bgra => crate::Encoder::new_bgra(data, width, height)
+                .config(self.clone())
+                .encode(stop),
+            PixelLayout::Rgb => {
+                crate::encode::encode_with_config_stoppable(data, width, height, 3, self, stop)
+            }
+            PixelLayout::Bgr => crate::Encoder::new_bgr(data, width, height)
+                .config(self.clone())
+                .encode(stop),
+        }
     }
 
     // === Validation ===
