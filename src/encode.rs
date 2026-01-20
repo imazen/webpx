@@ -2,7 +2,7 @@
 
 use crate::config::{EncodeStats, EncoderConfig, Preset};
 use crate::error::{EncodingError, Error, Result};
-use crate::types::{Pixel, PixelFormat, YuvPlanesRef};
+use crate::types::{EncodePixel, PixelLayout, YuvPlanesRef};
 use alloc::vec::Vec;
 use enough::Stop;
 use imgref::ImgRef;
@@ -705,14 +705,14 @@ impl<'a> Encoder<'a> {
     /// # Ok::<(), webpx::At<webpx::Error>>(())
     /// ```
     #[must_use]
-    pub fn from_pixels<P: Pixel>(pixels: &'a [P], width: u32, height: u32) -> Self {
-        let bpp = P::FORMAT.bytes_per_pixel();
+    pub fn from_pixels<P: EncodePixel>(pixels: &'a [P], width: u32, height: u32) -> Self {
+        let bpp = P::LAYOUT.bytes_per_pixel();
         // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
         let data = unsafe {
             core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
         };
         let stride_bytes = width * bpp as u32;
-        Self::from_pixels_internal(data, width, height, stride_bytes, P::FORMAT)
+        Self::from_pixels_internal(data, width, height, stride_bytes, P::LAYOUT)
     }
 
     /// Create encoder from a slice of typed pixels with explicit stride.
@@ -737,19 +737,19 @@ impl<'a> Encoder<'a> {
     /// # Ok::<(), webpx::At<webpx::Error>>(())
     /// ```
     #[must_use]
-    pub fn from_pixels_stride<P: Pixel>(
+    pub fn from_pixels_stride<P: EncodePixel>(
         pixels: &'a [P],
         width: u32,
         height: u32,
         stride_pixels: u32,
     ) -> Self {
-        let bpp = P::FORMAT.bytes_per_pixel();
+        let bpp = P::LAYOUT.bytes_per_pixel();
         // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
         let data = unsafe {
             core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
         };
         let stride_bytes = stride_pixels * bpp as u32;
-        Self::from_pixels_internal(data, width, height, stride_bytes, P::FORMAT)
+        Self::from_pixels_internal(data, width, height, stride_bytes, P::LAYOUT)
     }
 
     /// Internal helper to create encoder from byte data with a specific format.
@@ -758,13 +758,13 @@ impl<'a> Encoder<'a> {
         width: u32,
         height: u32,
         stride_bytes: u32,
-        format: PixelFormat,
+        format: PixelLayout,
     ) -> Self {
         let input = match format {
-            PixelFormat::Rgba => EncoderInput::Rgba { data, stride_bytes },
-            PixelFormat::Bgra => EncoderInput::Bgra { data, stride_bytes },
-            PixelFormat::Rgb => EncoderInput::Rgb { data, stride_bytes },
-            PixelFormat::Bgr => EncoderInput::Bgr { data, stride_bytes },
+            PixelLayout::Rgba => EncoderInput::Rgba { data, stride_bytes },
+            PixelLayout::Bgra => EncoderInput::Bgra { data, stride_bytes },
+            PixelLayout::Rgb => EncoderInput::Rgb { data, stride_bytes },
+            PixelLayout::Bgr => EncoderInput::Bgr { data, stride_bytes },
         };
         Self {
             data: input,

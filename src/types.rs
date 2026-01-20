@@ -5,12 +5,13 @@ use rgb::alt::{BGR8, BGRA8};
 use rgb::{RGB8, RGBA8};
 use whereat::*;
 
-/// Pixel format for encoding/decoding operations.
+/// Pixel layout describing channel order for byte-oriented APIs.
 ///
-/// This enum describes the channel order and layout for byte-oriented APIs.
+/// This is similar to `PixelLayout` in jpegli-rs. The name avoids collision
+/// with the many `PixelFormat` enums in other crates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum PixelFormat {
+pub enum PixelLayout {
     /// RGBA - 4 bytes per pixel (red, green, blue, alpha)
     Rgba,
     /// BGRA - 4 bytes per pixel (blue, green, red, alpha) - Windows/GPU native
@@ -21,66 +22,48 @@ pub enum PixelFormat {
     Bgr,
 }
 
-impl PixelFormat {
-    /// Bytes per pixel for this format.
+impl PixelLayout {
+    /// Bytes per pixel for this layout.
     #[must_use]
     pub const fn bytes_per_pixel(self) -> usize {
         match self {
-            PixelFormat::Rgba | PixelFormat::Bgra => 4,
-            PixelFormat::Rgb | PixelFormat::Bgr => 3,
+            PixelLayout::Rgba | PixelLayout::Bgra => 4,
+            PixelLayout::Rgb | PixelLayout::Bgr => 3,
         }
     }
 
-    /// Whether this format has an alpha channel.
+    /// Whether this layout has an alpha channel.
     #[must_use]
     pub const fn has_alpha(self) -> bool {
-        matches!(self, PixelFormat::Rgba | PixelFormat::Bgra)
+        matches!(self, PixelLayout::Rgba | PixelLayout::Bgra)
     }
 }
 
-/// Marker trait for pixel types that can be encoded/decoded.
+/// Sealed marker trait for pixel types that can be encoded.
 ///
-/// This trait maps rgb crate types to their corresponding [`PixelFormat`],
-/// enabling type-safe encoding and decoding operations.
-///
-/// # Implemented Types
-///
-/// - [`RGB8`] - 3-channel RGB
-/// - [`RGBA8`] - 4-channel RGBA
-/// - [`BGR8`] - 3-channel BGR (Windows/OpenCV)
-/// - [`BGRA8`] - 4-channel BGRA (Windows/GPU native)
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use webpx::{Encoder, Pixel, Unstoppable};
-/// use rgb::RGBA8;
-///
-/// let pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 100 * 100];
-/// let webp = Encoder::from_pixels(&pixels, 100, 100)
-///     .quality(85.0)
-///     .encode(Unstoppable)?;
-/// # Ok::<(), webpx::At<webpx::Error>>(())
-/// ```
-pub trait Pixel: Copy + 'static + private::Sealed {
-    /// The pixel format corresponding to this type.
-    const FORMAT: PixelFormat;
+/// This trait is an implementation detail and should not be referenced directly.
+/// Use concrete types like [`RGB8`], [`RGBA8`], [`BGR8`], [`BGRA8`] with
+/// [`Encoder::from_pixels`](crate::Encoder::from_pixels).
+#[doc(hidden)]
+pub trait EncodePixel: Copy + 'static + private::Sealed {
+    /// The pixel layout corresponding to this type.
+    const LAYOUT: PixelLayout;
 }
 
-impl Pixel for RGBA8 {
-    const FORMAT: PixelFormat = PixelFormat::Rgba;
+impl EncodePixel for RGBA8 {
+    const LAYOUT: PixelLayout = PixelLayout::Rgba;
 }
 
-impl Pixel for BGRA8 {
-    const FORMAT: PixelFormat = PixelFormat::Bgra;
+impl EncodePixel for BGRA8 {
+    const LAYOUT: PixelLayout = PixelLayout::Bgra;
 }
 
-impl Pixel for RGB8 {
-    const FORMAT: PixelFormat = PixelFormat::Rgb;
+impl EncodePixel for RGB8 {
+    const LAYOUT: PixelLayout = PixelLayout::Rgb;
 }
 
-impl Pixel for BGR8 {
-    const FORMAT: PixelFormat = PixelFormat::Bgr;
+impl EncodePixel for BGR8 {
+    const LAYOUT: PixelLayout = PixelLayout::Bgr;
 }
 
 mod private {
