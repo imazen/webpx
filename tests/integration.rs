@@ -2159,15 +2159,19 @@ mod animation_tests {
         let height = 8;
         let frame = generate_rgba(width, height, 100, 150, 200, 255);
 
-        // Minimal ICC profile header (not fully valid but tests the path)
+        // Minimal ICC profile header (zeros are not a valid ICC but libwebp accepts them)
         let fake_icc = vec![0u8; 128];
 
         let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
-        encoder.set_icc_profile(fake_icc);
+        encoder.set_icc_profile(fake_icc.clone());
         encoder.add_frame(&frame, 0).expect("add");
 
-        // This may fail due to invalid ICC, but tests the code path
-        let _ = encoder.finish(100);
+        // libwebp mux accepts arbitrary byte sequences as ICC data
+        let webp = encoder.finish(100).expect("finish should succeed even with invalid ICC");
+
+        // Verify the ICC data was embedded
+        let extracted = webpx::get_icc_profile(&webp).expect("should extract ICC");
+        assert_eq!(extracted, Some(fake_icc), "ICC profile should round-trip");
     }
 }
 
@@ -2232,13 +2236,17 @@ mod compat_webp_tests {
         let encoder = Encoder::from_rgb(&rgb, 8, 8);
         let webp = encoder.encode(85.0);
 
+        // Verify the encoded WebP doesn't have alpha
+        let features = BitstreamFeatures::new(&webp).expect("features");
+        assert!(!features.has_alpha(), "RGB encode should not have alpha");
+
         let decoder = Decoder::new(&webp);
         let image = decoder.decode().expect("decode");
 
         assert_eq!(image.width(), 8);
         assert_eq!(image.height(), 8);
-        // RGB input may produce RGB or RGBA depending on libwebp
-        assert!(!image.data().is_empty());
+        assert_eq!(image.layout(), PixelLayout::Rgb);
+        assert_eq!(image.data().len(), 8 * 8 * 3); // RGB = 3 bytes per pixel
     }
 
     #[test]
@@ -2278,7 +2286,7 @@ mod compat_webp_tests {
 
     #[test]
     fn test_decoder_decode_animated() {
-        // Create an animated webp with multiple frames
+        // Create an animated webp with multiple distinct frames
         let frame1 = generate_rgba(8, 8, 100, 150, 200, 255);
         let frame2 = generate_rgba(8, 8, 200, 150, 100, 255);
         let mut encoder = webpx::AnimationEncoder::new(8, 8).expect("encoder");
@@ -2286,18 +2294,15 @@ mod compat_webp_tests {
         encoder.add_frame(&frame2, 100).expect("add");
         let webp = encoder.finish(200).expect("finish");
 
-        // compat decoder should return None for animated
-        // (single-frame animations may not be flagged as animated)
+        // Verify it's detected as animated
+        let features = BitstreamFeatures::new(&webp).expect("features");
+        assert!(features.has_animation(), "multi-frame WebP should be flagged as animated");
+
+        // compat decoder should return None for animated images
+        // (mimics original webp crate behavior)
         let decoder = Decoder::new(&webp);
         let result = decoder.decode();
-        // With multiple frames, it should be detected as animated
-        // The compat layer returns None for animated images
-        if let Some(image) = result {
-            // If it decoded, verify it's valid
-            assert_eq!(image.width(), 8);
-            assert_eq!(image.height(), 8);
-        }
-        // Either way is acceptable - the test verifies the code path works
+        assert!(result.is_none(), "compat decoder should return None for animated WebP");
     }
 }
 
