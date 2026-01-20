@@ -19,8 +19,8 @@ use rgb::{RGB8, RGBA8};
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// let rgba: &[u8] = &[/* ... */];
+/// ```rust,no_run
+/// let rgba: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
 /// let webp = webpx::encode_rgba(rgba, 640, 480, 85.0)?;
 /// # Ok::<(), webpx::Error>(())
 /// ```
@@ -132,10 +132,10 @@ pub fn encode_lossless(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> 
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use webpx::{Encoder, Preset};
 ///
-/// let rgba: &[u8] = &[/* ... */];
+/// let rgba: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
 /// let webp = Encoder::new(rgba, 640, 480)
 ///     .preset(Preset::Photo)
 ///     .quality(85.0)

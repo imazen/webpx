@@ -10,8 +10,8 @@ use core::mem::MaybeUninit;
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// let webp_data: &[u8] = &[/* ... */];
+/// ```rust,no_run
+/// let webp_data: &[u8] = &[0u8; 100]; // placeholder
 /// if let Some(icc) = webpx::get_icc_profile(webp_data)? {
 ///     println!("Found ICC profile: {} bytes", icc.len());
 /// }

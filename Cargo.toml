@@ -25,3 +25,7 @@ imgref = "1.12.0"
 
 [dev-dependencies]
 criterion = "0.6"
+
+[[bench]]
+name = "codec"
+harness = false

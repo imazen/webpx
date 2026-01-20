@@ -22,9 +22,12 @@ pub enum DecodeStatus {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use webpx::{StreamingDecoder, DecodeStatus, ColorMode};
 ///
+/// fn process_rows(_data: &[u8], _w: u32, _h: u32) {}
+///
+/// let data_chunks: Vec<&[u8]> = vec![];
 /// let mut decoder = StreamingDecoder::new(ColorMode::Rgba)?;
 ///
 /// // Feed data incrementally
@@ -32,10 +35,10 @@ pub enum DecodeStatus {
 ///     match decoder.append(chunk)? {
 ///         DecodeStatus::Complete => break,
 ///         DecodeStatus::NeedMoreData => continue,
-///         DecodeStatus::Partial(rows) => {
+///         DecodeStatus::Partial(_rows) => {
 ///             // Can access partially decoded data
-///             if let Some(partial) = decoder.get_partial() {
-///                 process_rows(partial, rows);
+///             if let Some((data, w, h)) = decoder.get_partial() {
+///                 process_rows(data, w, h);
 ///             }
 ///         }
 ///     }
@@ -323,8 +326,11 @@ impl Drop for StreamingDecoder {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use webpx::StreamingEncoder;
+///
+/// let rgba_data = vec![0u8; 640 * 480 * 4];
+/// let mut output = Vec::new();
 ///
 /// let mut encoder = StreamingEncoder::new(640, 480)?;
 /// encoder.set_quality(85.0);
@@ -332,7 +338,7 @@ impl Drop for StreamingDecoder {
 /// // Encode with callback for output chunks
 /// encoder.encode_rgba_with_callback(&rgba_data, |chunk| {
 ///     // Write chunk to file/network
-///     output.write_all(chunk)?;
+///     output.extend_from_slice(chunk);
 ///     Ok(())
 /// })?;
 /// # Ok::<(), webpx::Error>(())

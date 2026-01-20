@@ -1,5 +1,11 @@
 # webpx
 
+[![CI](https://github.com/imazen/webpx/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/webpx/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/webpx.svg)](https://crates.io/crates/webpx)
+[![Docs.rs](https://docs.rs/webpx/badge.svg)](https://docs.rs/webpx)
+[![codecov](https://codecov.io/gh/imazen/webpx/branch/main/graph/badge.svg)](https://codecov.io/gh/imazen/webpx)
+[![License](https://img.shields.io/crates/l/webpx.svg)](https://github.com/imazen/webpx#license)
+
 Complete WebP encoding and decoding via FFI bindings to libwebp.
 
 ## Features

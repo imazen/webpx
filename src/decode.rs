@@ -13,8 +13,8 @@ use rgb::{RGB8, RGBA8};
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// let webp_data: &[u8] = &[/* ... */];
+/// ```rust,no_run
+/// let webp_data: &[u8] = &[0u8; 100]; // placeholder
 /// let (pixels, width, height) = webpx::decode_rgba(webp_data)?;
 /// # Ok::<(), webpx::Error>(())
 /// ```
@@ -126,10 +126,10 @@ pub fn decode_yuv(data: &[u8]) -> Result<YuvPlanes> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use webpx::Decoder;
 ///
-/// let webp_data: &[u8] = &[/* ... */];
+/// let webp_data: &[u8] = &[0u8; 100]; // placeholder
 /// let decoder = Decoder::new(webp_data)?;
 /// let info = decoder.info();
 /// println!("Image: {}x{}, alpha: {}", info.width, info.height, info.has_alpha);

@@ -11,27 +11,35 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,ignore
-//! // Simple encode
-//! let rgba_data: &[u8] = &[/* RGBA pixel data */];
-//! let webp_bytes = webpx::encode_rgba(rgba_data, 640, 480, 85.0)?;
+//! ```rust
+//! // Create a small 2x2 RGBA image (red, green, blue, white)
+//! let rgba_data: Vec<u8> = vec![
+//!     255, 0, 0, 255,    // red
+//!     0, 255, 0, 255,    // green
+//!     0, 0, 255, 255,    // blue
+//!     255, 255, 255, 255 // white
+//! ];
 //!
-//! // Simple decode
+//! // Encode to WebP
+//! let webp_bytes = webpx::encode_rgba(&rgba_data, 2, 2, 85.0)?;
+//!
+//! // Decode back
 //! let (pixels, width, height) = webpx::decode_rgba(&webp_bytes)?;
+//! assert_eq!((width, height), (2, 2));
+//! # Ok::<(), webpx::Error>(())
 //! ```
 //!
 //! ## Builder API
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use webpx::{Encoder, Preset};
 //!
-//! let rgba_data: &[u8] = &[/* RGBA pixel data */];
-//! let icc_bytes: &[u8] = &[/* ICC profile data */];
-//! let webp_bytes = webpx::Encoder::new(rgba_data, 640, 480)
+//! let rgba_data: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
+//! let webp_bytes = Encoder::new(rgba_data, 640, 480)
 //!     .preset(Preset::Photo)
 //!     .quality(85.0)
-//!     .icc_profile(icc_bytes)
 //!     .encode()?;
+//! # Ok::<(), webpx::Error>(())
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]

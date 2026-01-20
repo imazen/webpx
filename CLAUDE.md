@@ -27,16 +27,35 @@ Initial implementation complete. All core features working:
 
 ## Build Commands
 
+Use justfile commands for common tasks:
+
 ```bash
-# Run all tests
+just test      # Run all tests
+just clippy    # Run clippy
+just fmt       # Format code
+just ci        # Full CI check (fmt, clippy, test)
+just bench     # Run benchmarks
+just coverage  # Generate coverage report
+just doc       # Build and open docs
+```
+
+Or directly:
+
+```bash
 cargo test --all-features
-
-# Clippy
 cargo clippy --all-targets --all-features -- -D warnings
-
-# Format
 cargo fmt
 ```
+
+## Test Fixtures
+
+Test WebP files are in `tests/fixtures/`:
+- `lossless_2color.webp` - 314 bytes, lossless
+- `lossy_rgb.webp` - 2.2K, lossy RGB
+- `lossy_alpha.webp` - 1.3K, lossy with alpha
+- `animated.webp` - 11K, animated
+
+Larger test files available at `~/work/codec-corpus/image-rs/test-images/webp/`.
 
 ## libwebp API Notes
 

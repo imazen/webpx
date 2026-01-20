@@ -40,10 +40,12 @@ pub struct AnimationInfo {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use webpx::AnimationDecoder;
 ///
-/// let webp_data: &[u8] = &[/* ... */];
+/// fn process_frame(_data: &[u8], _ts: i32) {}
+///
+/// let webp_data: &[u8] = &[0u8; 100]; // placeholder
 /// let mut decoder = AnimationDecoder::new(webp_data)?;
 ///
 /// let info = decoder.info();
@@ -235,8 +237,12 @@ impl Drop for AnimationDecoder {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use webpx::AnimationEncoder;
+///
+/// let frame1_rgba = vec![0u8; 640 * 480 * 4];
+/// let frame2_rgba = vec![0u8; 640 * 480 * 4];
+/// let frame3_rgba = vec![0u8; 640 * 480 * 4];
 ///
 /// let mut encoder = AnimationEncoder::new(640, 480)?;
 /// encoder.set_quality(85.0);
