@@ -2251,17 +2251,21 @@ mod compat_webp_tests {
 
     #[test]
     fn test_webp_image_accessors() {
-        let rgba = generate_rgba(4, 4, 100, 150, 200, 255);
+        // Use semi-transparent alpha to ensure alpha channel is preserved
+        let rgba = generate_rgba(4, 4, 100, 150, 200, 128);
         let encoder = Encoder::from_rgba(&rgba, 4, 4);
         let webp = encoder.encode_lossless();
+
+        let features = BitstreamFeatures::new(&webp).expect("features");
+        assert!(features.has_alpha(), "semi-transparent RGBA should have alpha");
 
         let decoder = Decoder::new(&webp);
         let image = decoder.decode().expect("decode");
 
         assert_eq!(image.width(), 4);
         assert_eq!(image.height(), 4);
-        let _ = image.layout(); // Just verify it doesn't panic
-        let _ = image.data();
+        assert_eq!(image.layout(), PixelLayout::Rgba);
+        assert_eq!(image.data().len(), 4 * 4 * 4); // RGBA = 4 bytes per pixel
     }
 
     #[test]
@@ -2273,7 +2277,7 @@ mod compat_webp_tests {
         let features = BitstreamFeatures::new(&webp).expect("features");
         assert_eq!(features.width(), 16);
         assert_eq!(features.height(), 16);
-        let _ = features.has_alpha();
+        assert!(features.has_alpha(), "RGBA encode should have alpha");
         assert!(!features.has_animation());
     }
 
