@@ -553,60 +553,62 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    /// Create encoder from an imgref `ImgRef<RGBA8>`.
+    /// Create encoder from an imgref image.
     ///
+    /// Accepts `ImgRef<RGBA8>`, `ImgRef<RGB8>`, `ImgRef<BGRA8>`, or `ImgRef<BGR8>`.
     /// Properly handles non-contiguous stride from imgref.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use webpx::{Encoder, Unstoppable};
+    /// use rgb::RGBA8;
+    ///
+    /// let pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 100 * 100];
+    /// let img = imgref::Img::new(pixels.as_slice(), 100, 100);
+    /// let webp = Encoder::from_img(img)
+    ///     .quality(85.0)
+    ///     .encode(Unstoppable)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
     #[must_use]
+    pub fn from_img<P: EncodePixel>(img: ImgRef<'a, P>) -> Self {
+        let bpp = P::LAYOUT.bytes_per_pixel();
+        // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
+        let data = unsafe {
+            core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * bpp)
+        };
+        // imgref stride() returns stride in pixels, we need bytes
+        let stride_bytes = (img.stride() * bpp) as u32;
+        Self::from_pixels_internal(data, img.width() as u32, img.height() as u32, stride_bytes, P::LAYOUT)
+    }
+
+    /// Alias for [`Self::from_img`] for backwards compatibility.
+    #[must_use]
+    #[doc(hidden)]
     pub fn from_rgba(img: ImgRef<'a, RGBA8>) -> Self {
-        // SAFETY: RGBA8 is repr(C) and has the same layout as [u8; 4]
-        let data = unsafe {
-            core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * 4)
-        };
-        // imgref stride() returns stride in pixels, we need bytes
-        let stride_bytes = (img.stride() * 4) as u32;
-        Self::new_rgba_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
+        Self::from_img(img)
     }
 
-    /// Create encoder from an imgref `ImgRef<BGRA8>`.
-    ///
-    /// Properly handles non-contiguous stride from imgref.
+    /// Alias for [`Self::from_img`] for backwards compatibility.
     #[must_use]
+    #[doc(hidden)]
     pub fn from_bgra(img: ImgRef<'a, BGRA8>) -> Self {
-        // SAFETY: BGRA8 is repr(C) and has the same layout as [u8; 4]
-        let data = unsafe {
-            core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * 4)
-        };
-        // imgref stride() returns stride in pixels, we need bytes
-        let stride_bytes = (img.stride() * 4) as u32;
-        Self::new_bgra_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
+        Self::from_img(img)
     }
 
-    /// Create encoder from an imgref `ImgRef<RGB8>`.
-    ///
-    /// Properly handles non-contiguous stride from imgref.
+    /// Alias for [`Self::from_img`] for backwards compatibility.
     #[must_use]
+    #[doc(hidden)]
     pub fn from_rgb(img: ImgRef<'a, RGB8>) -> Self {
-        // SAFETY: RGB8 is repr(C) and has the same layout as [u8; 3]
-        let data = unsafe {
-            core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * 3)
-        };
-        // imgref stride() returns stride in pixels, we need bytes
-        let stride_bytes = (img.stride() * 3) as u32;
-        Self::new_rgb_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
+        Self::from_img(img)
     }
 
-    /// Create encoder from an imgref `ImgRef<BGR8>`.
-    ///
-    /// Properly handles non-contiguous stride from imgref.
+    /// Alias for [`Self::from_img`] for backwards compatibility.
     #[must_use]
+    #[doc(hidden)]
     pub fn from_bgr(img: ImgRef<'a, BGR8>) -> Self {
-        // SAFETY: BGR8 is repr(C) and has the same layout as [u8; 3]
-        let data = unsafe {
-            core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * 3)
-        };
-        // imgref stride() returns stride in pixels, we need bytes
-        let stride_bytes = (img.stride() * 3) as u32;
-        Self::new_bgr_stride(data, img.width() as u32, img.height() as u32, stride_bytes)
+        Self::from_img(img)
     }
 
     /// Create encoder from a slice of typed pixels.

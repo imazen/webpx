@@ -1,216 +1,203 @@
-//! Demonstration of the typed pixel API with imgref, rgb crate, and raw bytes.
+//! Demonstration of the encoding API - "one right way" per input format.
 //!
-//! This example shows zero-copy encoding paths for different pixel sources.
+//! This example shows the recommended encoding path for each input format.
 //!
 //! Run with: cargo run --example pixel_api_demo --features "encode animation"
+//!
+//! ## Quick Reference
+//!
+//! | Input Format        | Recommended Method                           |
+//! |---------------------|----------------------------------------------|
+//! | `&[u8]` RGBA        | `Encoder::new_rgba(data, w, h).encode()`     |
+//! | `&[u8]` RGB         | `Encoder::new_rgb(data, w, h).encode()`      |
+//! | `&[u8]` BGRA        | `Encoder::new_bgra(data, w, h).encode()`     |
+//! | `&[u8]` BGR         | `Encoder::new_bgr(data, w, h).encode()`      |
+//! | `&[RGBA8]` etc      | `Encoder::from_pixels(pixels, w, h).encode()`|
+//! | `ImgRef<RGBA8>` etc | `Encoder::from_img(img).encode()`            |
+//! | `YuvPlanesRef`      | `Encoder::new_yuv(planes).encode()`          |
+//!
+//! For reusable config across multiple images, use `EncoderConfig`:
+//! - `config.encode_rgba(data, w, h, stop)` for raw bytes
+//! - `config.encode(pixels, w, h, stop)` for typed pixels
+//! - `config.encode_img(img, stop)` for imgref
 
 use rgb::alt::BGRA8;
 use rgb::{RGB8, RGBA8};
 use webpx::{AnimationEncoder, Encoder, EncoderConfig, Unstoppable};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== STILL IMAGE ENCODING ===\n");
+
     // =========================================================================
-    // STILL FRAMES
+    // RAW BYTES - use explicit format methods
     // =========================================================================
 
-    // -------------------------------------------------------------------------
-    // 1. From Vec<RGBA8> (rgb crate) - zero copy
-    // -------------------------------------------------------------------------
-    let pixels: Vec<RGBA8> = (0..100 * 100)
-        .map(|i| {
-            let x = (i % 100) as u8;
-            let y = (i / 100) as u8;
-            RGBA8::new(x, y, 128, 255)
-        })
-        .collect();
+    println!("--- Raw &[u8] bytes ---");
 
-    // Option A: Using Encoder builder (recommended for complex settings)
-    let webp = Encoder::from_pixels(&pixels, 100, 100)
+    // RGBA bytes
+    let rgba_bytes: Vec<u8> = vec![255, 0, 0, 255].repeat(100 * 100);
+    let webp = Encoder::new_rgba(&rgba_bytes, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
-    println!("Encoder::from_pixels: {} bytes", webp.len());
+    println!("  Encoder::new_rgba: {} bytes", webp.len());
 
-    // Option B: Using EncoderConfig (reusable config)
-    let config = EncoderConfig::new().quality(85.0);
-    let webp = config.encode(&pixels, 100, 100, Unstoppable)?;
-    println!("EncoderConfig::encode: {} bytes", webp.len());
-
-    // -------------------------------------------------------------------------
-    // 2. From imgref::ImgVec<RGBA8> - zero copy with stride handling
-    // -------------------------------------------------------------------------
-    // imgref is commonly used for image processing with non-contiguous buffers
-    let img = imgref::ImgVec::new(pixels.clone(), 100, 100);
-
-    // Direct from ImgRef - handles stride automatically
-    let webp = Encoder::from_rgba(img.as_ref())
+    // RGB bytes (no alpha)
+    let rgb_bytes: Vec<u8> = vec![255, 0, 0].repeat(100 * 100);
+    let webp = Encoder::new_rgb(&rgb_bytes, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
-    println!("Encoder::from_rgba(ImgRef): {} bytes", webp.len());
+    println!("  Encoder::new_rgb: {} bytes", webp.len());
 
-    // -------------------------------------------------------------------------
-    // 3. From imgref with padding (stride > width) - zero copy
-    // -------------------------------------------------------------------------
-    // Simulate a buffer with 128-pixel stride but only 100 pixels of data per row
-    let padded_buf: Vec<RGBA8> = vec![RGBA8::new(0, 0, 0, 255); 128 * 100];
-    let img_with_stride = imgref::Img::new_stride(padded_buf.as_slice(), 100, 100, 128);
-
-    let webp = Encoder::from_rgba(img_with_stride)
+    // BGRA bytes (Windows/GPU native)
+    let bgra_bytes: Vec<u8> = vec![0, 0, 255, 255].repeat(100 * 100); // Blue in BGRA
+    let webp = Encoder::new_bgra(&bgra_bytes, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
-    println!("Encoder::from_rgba (with stride): {} bytes", webp.len());
+    println!("  Encoder::new_bgra: {} bytes", webp.len());
 
-    // -------------------------------------------------------------------------
-    // 4. From Vec<RGB8> (no alpha) - zero copy
-    // -------------------------------------------------------------------------
-    let rgb_pixels: Vec<RGB8> = (0..100 * 100)
-        .map(|i| RGB8::new((i % 256) as u8, ((i / 100) % 256) as u8, 128))
-        .collect();
+    // BGR bytes (OpenCV)
+    let bgr_bytes: Vec<u8> = vec![0, 0, 255].repeat(100 * 100);
+    let webp = Encoder::new_bgr(&bgr_bytes, 100, 100)
+        .quality(85.0)
+        .encode(Unstoppable)?;
+    println!("  Encoder::new_bgr: {} bytes", webp.len());
 
+    // =========================================================================
+    // TYPED PIXELS - format inferred from type
+    // =========================================================================
+
+    println!("\n--- Typed &[P] pixels ---");
+
+    // Vec<RGBA8>
+    let rgba_pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 100 * 100];
+    let webp = Encoder::from_pixels(&rgba_pixels, 100, 100)
+        .quality(85.0)
+        .encode(Unstoppable)?;
+    println!("  Encoder::from_pixels (RGBA8): {} bytes", webp.len());
+
+    // Vec<RGB8>
+    let rgb_pixels: Vec<RGB8> = vec![RGB8::new(0, 255, 0); 100 * 100];
     let webp = Encoder::from_pixels(&rgb_pixels, 100, 100)
-        .quality(90.0)
+        .quality(85.0)
         .encode(Unstoppable)?;
-    println!("RGB8 pixels: {} bytes", webp.len());
+    println!("  Encoder::from_pixels (RGB8): {} bytes", webp.len());
 
-    // -------------------------------------------------------------------------
-    // 5. From Vec<BGRA8> (Windows/GPU native) - zero copy
-    // -------------------------------------------------------------------------
-    let bgra_pixels: Vec<BGRA8> = (0..100 * 100)
-        .map(|_| BGRA8 { b: 255, g: 128, r: 64, a: 255 })
-        .collect();
-
+    // Vec<BGRA8>
+    let bgra_pixels: Vec<BGRA8> = vec![BGRA8 { b: 0, g: 0, r: 255, a: 255 }; 100 * 100];
     let webp = Encoder::from_pixels(&bgra_pixels, 100, 100)
         .quality(85.0)
         .encode(Unstoppable)?;
-    println!("BGRA8 pixels: {} bytes", webp.len());
+    println!("  Encoder::from_pixels (BGRA8): {} bytes", webp.len());
 
-    // Also works with imgref
-    let bgra_img = imgref::ImgVec::new(bgra_pixels.clone(), 100, 100);
-    let webp = Encoder::from_bgra(bgra_img.as_ref())
+    // =========================================================================
+    // IMGREF - format inferred from type, stride handled automatically
+    // =========================================================================
+
+    println!("\n--- imgref::ImgRef<P> ---");
+
+    // Contiguous imgref
+    let pixels: Vec<RGBA8> = vec![RGBA8::new(0, 0, 255, 255); 100 * 100];
+    let img = imgref::Img::new(pixels.as_slice(), 100, 100);
+    let webp = Encoder::from_img(img)
         .quality(85.0)
         .encode(Unstoppable)?;
-    println!("BGRA8 via imgref: {} bytes", webp.len());
+    println!("  Encoder::from_img (contiguous): {} bytes", webp.len());
 
-    // -------------------------------------------------------------------------
-    // 6. From raw &[u8] bytes - when you have bytes from a file decoder
-    // -------------------------------------------------------------------------
-    let raw_rgba: Vec<u8> = vec![0u8; 100 * 100 * 4];
-
-    // Option A: Encoder builder with explicit format
-    let webp = Encoder::new_rgba(&raw_rgba, 100, 100)
+    // imgref with stride (e.g., cropped region)
+    let padded: Vec<RGBA8> = vec![RGBA8::new(128, 128, 128, 255); 128 * 100];
+    let img_with_stride = imgref::Img::new_stride(padded.as_slice(), 100, 100, 128);
+    let webp = Encoder::from_img(img_with_stride)
         .quality(85.0)
         .encode(Unstoppable)?;
-    println!("Raw bytes via Encoder::new_rgba: {} bytes", webp.len());
+    println!("  Encoder::from_img (with stride): {} bytes", webp.len());
 
-    // Option B: EncoderConfig with explicit format
-    let webp = config.encode_rgba(&raw_rgba, 100, 100, Unstoppable)?;
-    println!("Raw bytes via config.encode_rgba: {} bytes", webp.len());
+    // =========================================================================
+    // REUSABLE CONFIG - for encoding multiple images
+    // =========================================================================
 
-    // Option C: Top-level function for quick encoding
-    let webp = webpx::encode_rgba(&raw_rgba, 100, 100, 85.0, Unstoppable)?;
-    println!("Raw bytes via encode_rgba: {} bytes", webp.len());
+    println!("\n--- EncoderConfig (reusable) ---");
+
+    let config = EncoderConfig::new().quality(90.0).method(6);
+
+    // With raw bytes
+    let webp1 = config.encode_rgba(&rgba_bytes, 100, 100, Unstoppable)?;
+    println!("  config.encode_rgba: {} bytes", webp1.len());
+
+    // With typed pixels
+    let webp2 = config.encode(&rgba_pixels, 100, 100, Unstoppable)?;
+    println!("  config.encode (typed): {} bytes", webp2.len());
+
+    // With imgref
+    let img = imgref::Img::new(rgba_pixels.as_slice(), 100, 100);
+    let webp3 = config.encode_img(img, Unstoppable)?;
+    println!("  config.encode_img: {} bytes", webp3.len());
 
     // =========================================================================
     // ANIMATION
     // =========================================================================
 
-    // -------------------------------------------------------------------------
-    // 7. Animation with Vec<RGBA8> frames - zero copy
-    // -------------------------------------------------------------------------
+    println!("\n=== ANIMATION ENCODING ===\n");
+
+    // Typed pixels - format inferred
+    println!("--- AnimationEncoder with typed pixels ---");
     let frame1: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 64 * 64];
     let frame2: Vec<RGBA8> = vec![RGBA8::new(0, 255, 0, 255); 64 * 64];
     let frame3: Vec<RGBA8> = vec![RGBA8::new(0, 0, 255, 255); 64 * 64];
 
     let mut encoder = AnimationEncoder::new(64, 64)?;
     encoder.set_quality(80.0);
-    encoder.add_frame(&frame1, 0)?; // Uses typed pixel API
+    encoder.add_frame(&frame1, 0)?;
     encoder.add_frame(&frame2, 100)?;
     encoder.add_frame(&frame3, 200)?;
     let webp = encoder.finish(300)?;
-    println!("Animation (typed): {} bytes, 3 frames", webp.len());
+    println!("  add_frame (RGBA8): {} bytes, 3 frames", webp.len());
 
-    // -------------------------------------------------------------------------
-    // 8. Animation with BGRA frames - zero copy
-    // -------------------------------------------------------------------------
-    let bgra_frame1: Vec<BGRA8> = vec![BGRA8 { b: 255, g: 0, r: 0, a: 255 }; 64 * 64];
-    let bgra_frame2: Vec<BGRA8> = vec![BGRA8 { b: 0, g: 255, r: 0, a: 255 }; 64 * 64];
+    // Raw bytes - explicit format
+    println!("\n--- AnimationEncoder with raw bytes ---");
+    let raw1: Vec<u8> = vec![255; 64 * 64 * 4];
+    let raw2: Vec<u8> = vec![128; 64 * 64 * 4];
 
     let mut encoder = AnimationEncoder::new(64, 64)?;
-    encoder.add_frame(&bgra_frame1, 0)?; // BGRA8 also works
-    encoder.add_frame(&bgra_frame2, 100)?;
+    encoder.add_frame_rgba(&raw1, 0)?;
+    encoder.add_frame_rgba(&raw2, 100)?;
     let webp = encoder.finish(200)?;
-    println!("Animation (BGRA8): {} bytes", webp.len());
-
-    // -------------------------------------------------------------------------
-    // 9. Animation with raw bytes - when frames come as &[u8]
-    // -------------------------------------------------------------------------
-    let raw_frame1: Vec<u8> = vec![255u8; 64 * 64 * 4];
-    let raw_frame2: Vec<u8> = vec![128u8; 64 * 64 * 4];
-
-    let mut encoder = AnimationEncoder::new(64, 64)?;
-    encoder.add_frame_rgba(&raw_frame1, 0)?; // Explicit format
-    encoder.add_frame_rgba(&raw_frame2, 100)?;
-    let webp = encoder.finish(200)?;
-    println!("Animation (raw bytes): {} bytes", webp.len());
-
-    // -------------------------------------------------------------------------
-    // 10. Mixed formats in animation - each frame can be different format
-    // -------------------------------------------------------------------------
-    let rgba_frame: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 64 * 64];
-    let bgra_frame: Vec<BGRA8> = vec![BGRA8 { b: 0, g: 255, r: 0, a: 255 }; 64 * 64];
-    let rgb_frame: Vec<RGB8> = vec![RGB8::new(0, 0, 255); 64 * 64];
-    let raw_frame: Vec<u8> = vec![128u8; 64 * 64 * 4];
-
-    let mut encoder = AnimationEncoder::new(64, 64)?;
-    encoder.add_frame(&rgba_frame, 0)?; // RGBA8
-    encoder.add_frame(&bgra_frame, 100)?; // BGRA8
-    encoder.add_frame(&rgb_frame, 200)?; // RGB8 (no alpha)
-    encoder.add_frame_rgba(&raw_frame, 300)?; // raw bytes
-    let webp = encoder.finish(400)?;
-    println!("Animation (mixed formats): {} bytes, 4 frames", webp.len());
+    println!("  add_frame_rgba: {} bytes, 2 frames", webp.len());
 
     // =========================================================================
-    // CONVERTING FROM OTHER SOURCES
+    // TOP-LEVEL CONVENIENCE FUNCTIONS
     // =========================================================================
 
-    // -------------------------------------------------------------------------
-    // 11. From image crate (hypothetical - shows the pattern)
-    // -------------------------------------------------------------------------
-    // If you have an image::RgbaImage, you can convert:
-    //
-    // ```rust
-    // use image::RgbaImage;
-    // let img: RgbaImage = load_image();
-    //
-    // // image crate stores as contiguous Vec<u8>, so use raw bytes API:
-    // let webp = Encoder::new_rgba(img.as_raw(), img.width(), img.height())
-    //     .quality(85.0)
-    //     .encode(Unstoppable)?;
-    //
-    // // Or convert to Vec<RGBA8> if you want type safety:
-    // let pixels: Vec<RGBA8> = img.pixels()
-    //     .map(|p| RGBA8::new(p[0], p[1], p[2], p[3]))
-    //     .collect();
-    // let webp = Encoder::from_pixels(&pixels, img.width(), img.height())...
-    // ```
+    println!("\n=== TOP-LEVEL FUNCTIONS (quick one-off) ===\n");
 
-    // -------------------------------------------------------------------------
-    // 12. From a GPU texture (hypothetical - shows BGRA path)
-    // -------------------------------------------------------------------------
-    // Many GPU APIs (DirectX, Metal, Vulkan) use BGRA format.
-    // If you have a mapped texture buffer:
-    //
-    // ```rust
-    // let texture_data: &[u8] = mapped_buffer.as_slice();
-    // let webp = Encoder::new_bgra(texture_data, width, height)
-    //     .quality(85.0)
-    //     .encode(Unstoppable)?;
-    //
-    // // Or if you have it as BGRA8 pixels:
-    // let pixels: &[BGRA8] = bytemuck::cast_slice(texture_data);
-    // let webp = Encoder::from_pixels(pixels, width, height)...
-    // ```
+    let webp = webpx::encode_rgba(&rgba_bytes, 100, 100, 85.0, Unstoppable)?;
+    println!("  encode_rgba: {} bytes", webp.len());
 
-    println!("\nAll examples completed successfully!");
+    let webp = webpx::encode_rgb(&rgb_bytes, 100, 100, 85.0, Unstoppable)?;
+    println!("  encode_rgb: {} bytes", webp.len());
+
+    let webp = webpx::encode_lossless(&rgba_bytes, 100, 100, Unstoppable)?;
+    println!("  encode_lossless: {} bytes", webp.len());
+
+    println!("\n=== SUMMARY ===");
+    println!("
+The 'one right way' for each input format:
+
+  &[u8] with known format  →  Encoder::new_rgba/rgb/bgra/bgr()
+  &[P] typed pixels        →  Encoder::from_pixels()
+  ImgRef<P>                →  Encoder::from_img()
+  YuvPlanesRef             →  Encoder::new_yuv()
+
+For reusable config:
+
+  &[u8]       →  config.encode_rgba/rgb/bgra/bgr()
+  &[P]        →  config.encode()
+  ImgRef<P>   →  config.encode_img()
+
+For animation:
+
+  &[P]        →  encoder.add_frame()
+  &[u8]       →  encoder.add_frame_rgba/rgb/bgra/bgr()
+");
 
     Ok(())
 }

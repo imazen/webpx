@@ -739,6 +739,30 @@ impl EncoderConfig {
         self.encode_internal(data, width, height, P::LAYOUT, stop)
     }
 
+    /// Encode an imgref image to WebP.
+    ///
+    /// Accepts `ImgRef<RGBA8>`, `ImgRef<RGB8>`, `ImgRef<BGRA8>`, or `ImgRef<BGR8>`.
+    /// Properly handles non-contiguous stride from imgref.
+    ///
+    /// # Example
+    /// ```rust
+    /// use webpx::{EncoderConfig, Unstoppable};
+    /// use rgb::RGBA8;
+    ///
+    /// let pixels: Vec<RGBA8> = vec![RGBA8::new(255, 0, 0, 255); 4 * 4];
+    /// let img = imgref::Img::new(pixels.as_slice(), 4, 4);
+    /// let config = EncoderConfig::new().quality(85.0);
+    /// let webp = config.encode_img(img, Unstoppable)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    pub fn encode_img<P: EncodePixel>(
+        &self,
+        img: imgref::ImgRef<'_, P>,
+        stop: impl Stop,
+    ) -> Result<Vec<u8>> {
+        crate::Encoder::from_img(img).config(self.clone()).encode(stop)
+    }
+
     /// Encode RGBA byte data to WebP.
     ///
     /// # Arguments
