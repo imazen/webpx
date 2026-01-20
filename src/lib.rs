@@ -14,6 +14,8 @@
 //! ## Quick Start
 //!
 //! ```rust
+//! use webpx::Unstoppable;
+//!
 //! // Create a small 2x2 RGBA image (red, green, blue, white)
 //! let rgba_data: Vec<u8> = vec![
 //!     255, 0, 0, 255,    // red
@@ -23,7 +25,7 @@
 //! ];
 //!
 //! // Encode to WebP (lossy, quality 85)
-//! let webp_bytes = webpx::encode_rgba(&rgba_data, 2, 2, 85.0)?;
+//! let webp_bytes = webpx::encode_rgba(&rgba_data, 2, 2, 85.0, Unstoppable)?;
 //!
 //! // Decode back to RGBA
 //! let (pixels, width, height) = webpx::decode_rgba(&webp_bytes)?;
@@ -36,14 +38,14 @@
 //! For more control, use the builder pattern:
 //!
 //! ```rust,no_run
-//! use webpx::{Encoder, Preset};
+//! use webpx::{Encoder, Preset, Unstoppable};
 //!
 //! let rgba_data: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
 //! let webp_bytes = Encoder::new(rgba_data, 640, 480)
 //!     .preset(Preset::Photo)  // Optimize for photos
 //!     .quality(85.0)          // 0-100, higher = better quality
 //!     .method(4)              // 0-6, higher = slower but smaller
-//!     .encode()?;
+//!     .encode(Unstoppable)?;
 //! # Ok::<(), webpx::Error>(())
 //! ```
 //!
@@ -101,6 +103,9 @@ pub mod compat;
 pub use config::{AlphaFilter, DecoderConfig, EncodeStats, EncoderConfig, ImageHint, Preset};
 pub use error::{DecodingError, EncodingError, Error, MuxError, Result};
 pub use types::{BitstreamFormat, ColorMode, ImageInfo, YuvPlanes, YuvPlanesRef};
+
+// Re-export enough crate types for cooperative cancellation
+pub use enough::{Stop, StopReason, Unstoppable};
 
 #[cfg(feature = "decode")]
 pub use decode::{decode_rgb, decode_rgba, decode_yuv, Decoder};

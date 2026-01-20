@@ -52,7 +52,7 @@ mod roundtrip {
         let original = generate_rgba(width, height, 128, 64, 192, 255);
 
         // Encode lossless
-        let webp = encode_lossless(&original, width, height).expect("encode failed");
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode failed");
 
         // Verify it's valid WebP
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -76,7 +76,7 @@ mod roundtrip {
         let original = generate_gradient_rgba(width, height);
 
         // Encode lossy at high quality
-        let webp = encode_rgba(&original, width, height, 95.0).expect("encode failed");
+        let webp = encode_rgba(&original, width, height, 95.0, Unstoppable).expect("encode failed");
 
         // Verify dimensions
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -111,7 +111,7 @@ mod roundtrip {
         let original = generate_rgb(width, height, 200, 100, 50);
 
         // Encode
-        let webp = encode_rgb(&original, width, height, 90.0).expect("encode failed");
+        let webp = encode_rgb(&original, width, height, 90.0, Unstoppable).expect("encode failed");
 
         // Verify
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -135,7 +135,7 @@ mod roundtrip {
             .preset(Preset::Photo)
             .quality(80.0)
             .method(4)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -149,7 +149,7 @@ mod roundtrip {
         let height = 48;
         let data = generate_rgba(width, height, 50, 100, 150, 255);
 
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode failed");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode failed");
 
         // Decode with builder
         let decoder = Decoder::new(&webp).expect("decoder creation failed");
@@ -168,7 +168,7 @@ mod roundtrip {
         let height = 100;
         let data = generate_rgba(width, height, 128, 128, 128, 255);
 
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode failed");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode failed");
 
         // Decode at half size
         let decoder = Decoder::new(&webp).expect("decoder creation failed");
@@ -188,7 +188,7 @@ mod roundtrip {
         let height = 100;
         let data = generate_rgba(width, height, 128, 128, 128, 255);
 
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode failed");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode failed");
 
         // Decode cropped region
         let decoder = Decoder::new(&webp).expect("decoder creation failed");
@@ -208,7 +208,7 @@ mod roundtrip {
         let height = 64;
         let data = generate_rgba(width, height, 100, 100, 100, 255);
 
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode failed");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode failed");
 
         let yuv = decode_yuv(&webp).expect("decode failed");
         assert_eq!(yuv.width, width);
@@ -229,7 +229,7 @@ mod edge_cases {
     fn test_1x1_image() {
         let data = vec![255u8, 0, 0, 255]; // Red pixel
 
-        let webp = encode_lossless(&data, 1, 1).expect("encode failed");
+        let webp = encode_lossless(&data, 1, 1, Unstoppable).expect("encode failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
         assert_eq!(info.width, 1);
@@ -246,7 +246,7 @@ mod edge_cases {
         for (width, height) in [(31, 17), (17, 31), (33, 33), (1, 100), (100, 1)] {
             let data = generate_rgba(width, height, 128, 64, 192, 255);
 
-            let webp = encode_lossless(&data, width, height)
+            let webp = encode_lossless(&data, width, height, Unstoppable)
                 .unwrap_or_else(|_| panic!("encode failed for {}x{}", width, height));
 
             let info = ImageInfo::from_webp(&webp)
@@ -285,7 +285,7 @@ mod edge_cases {
         let height = 1080;
         let data = generate_rgba(width, height, 64, 128, 192, 255);
 
-        let webp = encode_rgba(&data, width, height, 50.0).expect("encode failed");
+        let webp = encode_rgba(&data, width, height, 50.0, Unstoppable).expect("encode failed");
 
         let info = ImageInfo::from_webp(&webp).expect("invalid webp");
         assert_eq!(info.width, width);
@@ -301,12 +301,12 @@ mod edge_cases {
         let data = vec![0u8; 100];
 
         // Zero dimensions should fail
-        assert!(encode_rgba(&data, 0, 10, 85.0).is_err());
-        assert!(encode_rgba(&data, 10, 0, 85.0).is_err());
+        assert!(encode_rgba(&data, 0, 10, 85.0, Unstoppable).is_err());
+        assert!(encode_rgba(&data, 10, 0, 85.0, Unstoppable).is_err());
 
         // Exceeding max dimension should fail
-        assert!(encode_rgba(&data, 20000, 10, 85.0).is_err());
-        assert!(encode_rgba(&data, 10, 20000, 85.0).is_err());
+        assert!(encode_rgba(&data, 20000, 10, 85.0, Unstoppable).is_err());
+        assert!(encode_rgba(&data, 10, 20000, 85.0, Unstoppable).is_err());
     }
 
     #[test]
@@ -314,7 +314,7 @@ mod edge_cases {
         let small_buffer = vec![0u8; 10];
 
         // Buffer too small for 100x100 RGBA
-        assert!(encode_rgba(&small_buffer, 100, 100, 85.0).is_err());
+        assert!(encode_rgba(&small_buffer, 100, 100, 85.0, Unstoppable).is_err());
     }
 
     #[test]
@@ -345,7 +345,7 @@ mod presets {
             let webp = Encoder::new(&data, width, height)
                 .preset(preset)
                 .quality(75.0)
-                .encode()
+                .encode(Unstoppable)
                 .unwrap_or_else(|e| panic!("encode with {:?} preset failed: {}", preset, e));
 
             let info = ImageInfo::from_webp(&webp)
@@ -365,7 +365,7 @@ mod presets {
         for quality in [0.0, 25.0, 50.0, 75.0, 100.0] {
             let webp = Encoder::new(&data, width, height)
                 .quality(quality)
-                .encode()
+                .encode(Unstoppable)
                 .unwrap_or_else(|e| panic!("encode with q={} failed: {}", quality, e));
 
             let info = ImageInfo::from_webp(&webp).expect("invalid webp");
@@ -974,6 +974,85 @@ mod error_tests {
         let e4 = Error::OutOfMemory;
         assert_eq!(e3, e4);
     }
+
+    #[test]
+    fn test_stopped_error() {
+        use webpx::StopReason;
+
+        let stopped = Error::Stopped(StopReason::Cancelled);
+        assert_eq!(format!("{}", stopped), "operation cancelled");
+
+        let timed_out = Error::Stopped(StopReason::TimedOut);
+        assert_eq!(format!("{}", timed_out), "operation timed out");
+    }
+}
+
+mod stop_tests {
+    use super::generate_gradient_rgba;
+    use core::sync::atomic::{AtomicBool, Ordering};
+    use webpx::{encode_rgba, Error, Stop, StopReason};
+
+    /// A Stop implementation that cancels immediately.
+    struct ImmediateCanceller;
+
+    impl Stop for ImmediateCanceller {
+        fn check(&self) -> Result<(), StopReason> {
+            Err(StopReason::Cancelled)
+        }
+    }
+
+    /// A Stop implementation that cancels after N checks.
+    struct DelayedCanceller {
+        cancel_after: usize,
+        counter: AtomicBool,
+        checks: std::sync::atomic::AtomicUsize,
+    }
+
+    impl DelayedCanceller {
+        fn new(cancel_after: usize) -> Self {
+            Self {
+                cancel_after,
+                counter: AtomicBool::new(false),
+                checks: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Stop for DelayedCanceller {
+        fn check(&self) -> Result<(), StopReason> {
+            let count = self.checks.fetch_add(1, Ordering::SeqCst);
+            if count >= self.cancel_after {
+                self.counter.store(true, Ordering::SeqCst);
+                Err(StopReason::Cancelled)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn test_encode_cancelled_immediately() {
+        let data = generate_gradient_rgba(32, 32);
+        let result = encode_rgba(&data, 32, 32, 85.0, ImmediateCanceller);
+
+        match result {
+            Err(Error::Stopped(StopReason::Cancelled)) => {} // expected
+            other => panic!("expected Stopped(Cancelled), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_encode_cancelled_during_progress() {
+        // Use a larger image so progress callbacks are called
+        let data = generate_gradient_rgba(256, 256);
+        let stopper = DelayedCanceller::new(1); // Cancel after first progress callback
+        let result = encode_rgba(&data, 256, 256, 85.0, &stopper);
+
+        match result {
+            Err(Error::Stopped(StopReason::Cancelled)) => {} // expected
+            other => panic!("expected Stopped(Cancelled), got {:?}", other),
+        }
+    }
 }
 
 #[cfg(feature = "icc")]
@@ -1032,7 +1111,7 @@ mod icc_tests {
         let webp = Encoder::new(&data, width, height)
             .quality(85.0)
             .icc_profile(&icc_original)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode with ICC failed");
 
         // Extract ICC
@@ -1050,7 +1129,7 @@ mod icc_tests {
         let data = generate_rgba(width, height, 100, 150, 200, 255);
 
         // Encode without ICC
-        let webp_no_icc = encode_rgba(&data, width, height, 85.0).expect("encode failed");
+        let webp_no_icc = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode failed");
 
         // Verify no ICC
         let existing = get_icc_profile(&webp_no_icc).expect("get ICC failed");
@@ -1078,7 +1157,7 @@ mod icc_tests {
         let webp_with_icc = Encoder::new(&data, width, height)
             .quality(85.0)
             .icc_profile(&icc)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode with ICC failed");
 
         // Verify ICC present
@@ -1111,7 +1190,7 @@ mod metadata_tests {
         let height = 32;
         let data = generate_rgba(width, height, 100, 150, 200, 255);
 
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode failed");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode failed");
 
         // Verify no EXIF initially
         assert!(get_exif(&webp).expect("get EXIF failed").is_none());
@@ -1133,7 +1212,7 @@ mod metadata_tests {
         let height = 32;
         let data = generate_rgba(width, height, 100, 150, 200, 255);
 
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode failed");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode failed");
 
         // Verify no XMP initially
         assert!(get_xmp(&webp).expect("get XMP failed").is_none());
@@ -1160,7 +1239,7 @@ mod streaming_tests {
         let height = 64;
         let original = generate_rgba(width, height, 128, 64, 192, 255);
 
-        let webp = encode_lossless(&original, width, height).expect("encode failed");
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode failed");
 
         // Create streaming decoder
         let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder creation failed");
@@ -1189,7 +1268,7 @@ mod streaming_tests {
         let height = 32;
         let original = generate_rgba(width, height, 100, 200, 50, 255);
 
-        let webp = encode_lossless(&original, width, height).expect("encode failed");
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode failed");
 
         let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder creation failed");
 
@@ -1235,7 +1314,7 @@ mod streaming_tests {
 }
 
 mod types_tests {
-    use webpx::{BitstreamFormat, ColorMode, ImageInfo, YuvPlanes, YuvPlanesRef};
+    use webpx::{BitstreamFormat, ColorMode, ImageInfo, Unstoppable, YuvPlanes, YuvPlanesRef};
 
     #[test]
     fn test_color_mode_bytes_per_pixel() {
@@ -1328,7 +1407,7 @@ mod types_tests {
     fn test_image_info_lossy_format() {
         use super::generate_gradient_rgba;
         let data = generate_gradient_rgba(32, 32);
-        let webp = webpx::encode_rgba(&data, 32, 32, 85.0).expect("encode");
+        let webp = webpx::encode_rgba(&data, 32, 32, 85.0, Unstoppable).expect("encode");
         let info = ImageInfo::from_webp(&webp).expect("info");
         assert_eq!(info.format, BitstreamFormat::Lossy);
         assert!(!info.has_animation);
@@ -1339,7 +1418,7 @@ mod types_tests {
     fn test_image_info_lossless_format() {
         use super::generate_rgba;
         let data = generate_rgba(32, 32, 100, 150, 200, 255);
-        let webp = webpx::encode_lossless(&data, 32, 32).expect("encode");
+        let webp = webpx::encode_lossless(&data, 32, 32, Unstoppable).expect("encode");
         let info = ImageInfo::from_webp(&webp).expect("info");
         assert_eq!(info.format, BitstreamFormat::Lossless);
     }
@@ -1348,7 +1427,7 @@ mod types_tests {
     fn test_image_info_clone_eq() {
         use super::generate_rgba;
         let data = generate_rgba(32, 32, 100, 150, 200, 255);
-        let webp = webpx::encode_rgba(&data, 32, 32, 85.0).expect("encode");
+        let webp = webpx::encode_rgba(&data, 32, 32, 85.0, Unstoppable).expect("encode");
         let info1 = ImageInfo::from_webp(&webp).expect("info");
         let info2 = info1.clone();
         assert_eq!(info1, info2);
@@ -1364,7 +1443,7 @@ mod decoder_tests {
         let width = 32;
         let height = 32;
         let data = generate_rgb(width, height, 100, 150, 200);
-        let webp = encode_rgb(&data, width, height, 85.0).expect("encode");
+        let webp = encode_rgb(&data, width, height, 85.0, Unstoppable).expect("encode");
 
         let decoder = Decoder::new(&webp).expect("decoder");
         let img = decoder.decode_rgb().expect("decode_rgb");
@@ -1377,7 +1456,7 @@ mod decoder_tests {
         let width = 32;
         let height = 32;
         let data = generate_rgba(width, height, 100, 150, 200, 255);
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
 
         let decoder = Decoder::new(&webp).expect("decoder");
         let yuv = decoder.decode_yuv().expect("decode_yuv");
@@ -1390,7 +1469,7 @@ mod decoder_tests {
         let width = 64;
         let height = 64;
         let data = generate_rgba(width, height, 100, 150, 200, 255);
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
 
         let config = DecoderConfig::new()
             .bypass_filtering(true)
@@ -1411,7 +1490,7 @@ mod decoder_tests {
         let width = 100;
         let height = 100;
         let data = generate_rgba(width, height, 100, 150, 200, 255);
-        let webp = encode_rgba(&data, width, height, 85.0).expect("encode");
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
 
         // Crop then scale
         let decoder = Decoder::new(&webp).expect("decoder");
@@ -1431,7 +1510,7 @@ mod decoder_tests {
         let width = 100;
         let height = 100;
         let data = generate_rgb(width, height, 100, 150, 200);
-        let webp = encode_rgb(&data, width, height, 85.0).expect("encode");
+        let webp = encode_rgb(&data, width, height, 85.0, Unstoppable).expect("encode");
 
         let decoder = Decoder::new(&webp).expect("decoder");
         let (decoded, w, h) = decoder.scale(50, 50).decode_rgb_raw().expect("decode");
@@ -1452,7 +1531,7 @@ mod streaming_advanced_tests {
         let width = 64;
         let height = 64;
         let original = generate_rgba(width, height, 100, 150, 200, 255);
-        let webp = encode_lossless(&original, width, height).expect("encode");
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode");
 
         // Pre-allocate buffer
         let mut buffer = vec![0u8; (width * height * 4) as usize];
@@ -1470,7 +1549,7 @@ mod streaming_advanced_tests {
         let width = 32;
         let height = 32;
         let original = generate_rgba(width, height, 100, 150, 200, 255);
-        let webp = encode_lossless(&original, width, height).expect("encode");
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode");
 
         let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
 
@@ -1489,7 +1568,7 @@ mod streaming_advanced_tests {
         let width = 64;
         let height = 64;
         let original = generate_rgba(width, height, 100, 150, 200, 255);
-        let webp = encode_lossless(&original, width, height).expect("encode");
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode");
 
         let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
 
@@ -1520,7 +1599,7 @@ mod streaming_advanced_tests {
         let width = 64;
         let height = 64;
         let original = generate_rgba(width, height, 100, 150, 200, 255);
-        let webp = encode_lossless(&original, width, height).expect("encode");
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode");
 
         let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
 
@@ -1548,7 +1627,7 @@ mod streaming_advanced_tests {
         let width = 32;
         let height = 32;
         let original = generate_rgba(width, height, 100, 150, 200, 255);
-        let webp = encode_lossless(&original, width, height).expect("encode");
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode");
 
         for mode in [
             ColorMode::Rgba,
@@ -1654,7 +1733,7 @@ mod encoder_advanced_tests {
 
         let webp = Encoder::new_rgb(&data, width, height)
             .quality(85.0)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode");
 
         let info = ImageInfo::from_webp(&webp).expect("info");
@@ -1679,7 +1758,7 @@ mod encoder_advanced_tests {
         let planes_ref = (&planes).into();
         let webp = Encoder::new_yuv(planes_ref)
             .quality(85.0)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode");
 
         let info = ImageInfo::from_webp(&webp).expect("info");
@@ -1701,7 +1780,7 @@ mod encoder_advanced_tests {
         let img = ImgVec::new(pixels, width, height);
         let webp = Encoder::from_rgba(img.as_ref())
             .quality(85.0)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode");
 
         let info = ImageInfo::from_webp(&webp).expect("info");
@@ -1723,7 +1802,7 @@ mod encoder_advanced_tests {
         let img = ImgVec::new(pixels, width, height);
         let webp = Encoder::from_rgb(img.as_ref())
             .quality(85.0)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode");
 
         let info = ImageInfo::from_webp(&webp).expect("info");
@@ -1747,7 +1826,7 @@ mod encoder_advanced_tests {
             .exact(false)
             .target_size(0)
             .sharp_yuv(true)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode");
 
         let info = ImageInfo::from_webp(&webp).expect("info");
@@ -1766,7 +1845,7 @@ mod encoder_advanced_tests {
 
         let webp = Encoder::new(&data, width, height)
             .config(config)
-            .encode()
+            .encode(Unstoppable)
             .expect("encode");
 
         let info = ImageInfo::from_webp(&webp).expect("info");

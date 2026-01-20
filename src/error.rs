@@ -2,6 +2,7 @@
 
 use alloc::string::String;
 use core::fmt;
+use enough::StopReason;
 
 /// Result type for webpx operations.
 pub type Result<T> = core::result::Result<T, Error>;
@@ -30,6 +31,8 @@ pub enum Error {
     NeedMoreData,
     /// Invalid WebP data
     InvalidWebP,
+    /// Operation was stopped via cooperative cancellation
+    Stopped(StopReason),
 }
 
 impl fmt::Display for Error {
@@ -45,7 +48,14 @@ impl fmt::Display for Error {
             Error::AnimationError(msg) => write!(f, "animation error: {}", msg),
             Error::NeedMoreData => write!(f, "need more data"),
             Error::InvalidWebP => write!(f, "invalid WebP data"),
+            Error::Stopped(reason) => write!(f, "{}", reason),
         }
+    }
+}
+
+impl From<StopReason> for Error {
+    fn from(reason: StopReason) -> Self {
+        Error::Stopped(reason)
     }
 }
 

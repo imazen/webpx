@@ -2,6 +2,7 @@
 
 use crate::error::{Error, Result};
 use alloc::vec::Vec;
+use enough::Stop;
 
 /// Content-aware encoding presets.
 ///
@@ -742,6 +743,37 @@ impl EncoderConfig {
         height: u32,
     ) -> Result<(Vec<u8>, EncodeStats)> {
         crate::encode::encode_with_config_stats(data, width, height, 3, self)
+    }
+
+    /// Encode RGBA pixel data with cooperative cancellation support.
+    ///
+    /// The encoding can be cancelled by the `stop` parameter. If cancelled,
+    /// returns `Error::Stopped(StopReason)`.
+    ///
+    /// # Arguments
+    /// - `data`: RGBA pixel data (4 bytes per pixel)
+    /// - `width`: Image width in pixels
+    /// - `height`: Image height in pixels
+    /// - `stop`: Cooperative cancellation token
+    pub fn encode_rgba_stoppable(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        stop: &impl Stop,
+    ) -> Result<Vec<u8>> {
+        crate::encode::encode_with_config_stoppable(data, width, height, 4, self, stop)
+    }
+
+    /// Encode RGB pixel data with cooperative cancellation support.
+    pub fn encode_rgb_stoppable(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        stop: &impl Stop,
+    ) -> Result<Vec<u8>> {
+        crate::encode::encode_with_config_stoppable(data, width, height, 3, self, stop)
     }
 
     // === Validation ===

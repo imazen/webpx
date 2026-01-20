@@ -22,6 +22,7 @@ streaming = []        # Incremental decode/encode
 libwebp-sys = "0.14.1"
 rgb = "0.8.52"
 imgref = "1.12.0"
+enough = "0.3.1"
 
 [dev-dependencies]
 criterion = { version = "0.6", default-features = false, features = ["plotters", "cargo_bench_support"] }

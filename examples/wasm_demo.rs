@@ -6,7 +6,7 @@
 //! cargo build --example wasm_demo --target wasm32-unknown-emscripten --release
 //! ```
 
-use webpx::{decode_rgba, encode_rgba, ImageInfo};
+use webpx::{decode_rgba, encode_rgba, ImageInfo, Unstoppable};
 
 /// Encode RGBA data to WebP and return the size.
 #[no_mangle]
@@ -19,7 +19,7 @@ pub extern "C" fn webp_encode_test() -> i32 {
         rgba.extend_from_slice(&[255, 0, 0, 255]); // Red
     }
 
-    match encode_rgba(&rgba, width, height, 85.0) {
+    match encode_rgba(&rgba, width, height, 85.0, Unstoppable) {
         Ok(webp) => webp.len() as i32,
         Err(_) => -1,
     }
@@ -60,7 +60,7 @@ pub extern "C" fn webp_roundtrip_test() -> i32 {
     }
 
     // Encode
-    let webp = match encode_rgba(&rgba, width, height, 95.0) {
+    let webp = match encode_rgba(&rgba, width, height, 95.0, Unstoppable) {
         Ok(w) => w,
         Err(_) => return -1,
     };

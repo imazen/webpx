@@ -4,9 +4,30 @@ use crate::config::{EncodeStats, EncoderConfig, Preset};
 use crate::error::{EncodingError, Error, Result};
 use crate::types::YuvPlanesRef;
 use alloc::vec::Vec;
-use core::ptr;
+use enough::Stop;
 use imgref::ImgRef;
 use rgb::{RGB8, RGBA8};
+
+/// Context for progress hook callback.
+struct StopContext<'a, S: Stop> {
+    stop: &'a S,
+}
+
+/// Progress hook that checks the Stop trait.
+///
+/// Returns 1 to continue, 0 to abort.
+extern "C" fn progress_hook<S: Stop>(
+    _percent: core::ffi::c_int,
+    picture: *const libwebp_sys::WebPPicture,
+) -> core::ffi::c_int {
+    // SAFETY: user_data is set to a valid StopContext pointer before encoding
+    let ctx = unsafe { &*((*picture).user_data as *const StopContext<S>) };
+    if ctx.stop.should_stop() {
+        0 // abort
+    } else {
+        1 // continue
+    }
+}
 
 /// Encode RGBA pixels to WebP.
 ///
@@ -16,42 +37,27 @@ use rgb::{RGB8, RGBA8};
 /// * `width` - Image width in pixels
 /// * `height` - Image height in pixels
 /// * `quality` - Quality factor (0.0 = smallest, 100.0 = best)
+/// * `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
 ///
 /// # Example
 ///
 /// ```rust,no_run
+/// use webpx::Unstoppable;
+///
 /// let rgba: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
-/// let webp = webpx::encode_rgba(rgba, 640, 480, 85.0)?;
+/// let webp = webpx::encode_rgba(rgba, 640, 480, 85.0, Unstoppable)?;
 /// # Ok::<(), webpx::Error>(())
 /// ```
-pub fn encode_rgba(data: &[u8], width: u32, height: u32, quality: f32) -> Result<Vec<u8>> {
-    validate_dimensions(width, height)?;
-    validate_buffer_size(data.len(), width, height, 4)?;
-
-    let mut output: *mut u8 = ptr::null_mut();
-    let size = unsafe {
-        libwebp_sys::WebPEncodeRGBA(
-            data.as_ptr(),
-            width as i32,
-            height as i32,
-            (width * 4) as i32, // stride
-            quality,
-            &mut output,
-        )
-    };
-
-    if size == 0 || output.is_null() {
-        return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
-    }
-
-    let result = unsafe {
-        let slice = core::slice::from_raw_parts(output, size);
-        let vec = slice.to_vec();
-        libwebp_sys::WebPFree(output as *mut _);
-        vec
-    };
-
-    Ok(result)
+pub fn encode_rgba(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: f32,
+    stop: impl Stop,
+) -> Result<Vec<u8>> {
+    EncoderConfig::new()
+        .quality(quality)
+        .encode_rgba_stoppable(data, width, height, &stop)
 }
 
 /// Encode RGB pixels to WebP (no alpha).
@@ -62,34 +68,17 @@ pub fn encode_rgba(data: &[u8], width: u32, height: u32, quality: f32) -> Result
 /// * `width` - Image width in pixels
 /// * `height` - Image height in pixels
 /// * `quality` - Quality factor (0.0 = smallest, 100.0 = best)
-pub fn encode_rgb(data: &[u8], width: u32, height: u32, quality: f32) -> Result<Vec<u8>> {
-    validate_dimensions(width, height)?;
-    validate_buffer_size(data.len(), width, height, 3)?;
-
-    let mut output: *mut u8 = ptr::null_mut();
-    let size = unsafe {
-        libwebp_sys::WebPEncodeRGB(
-            data.as_ptr(),
-            width as i32,
-            height as i32,
-            (width * 3) as i32, // stride
-            quality,
-            &mut output,
-        )
-    };
-
-    if size == 0 || output.is_null() {
-        return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
-    }
-
-    let result = unsafe {
-        let slice = core::slice::from_raw_parts(output, size);
-        let vec = slice.to_vec();
-        libwebp_sys::WebPFree(output as *mut _);
-        vec
-    };
-
-    Ok(result)
+/// * `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
+pub fn encode_rgb(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: f32,
+    stop: impl Stop,
+) -> Result<Vec<u8>> {
+    EncoderConfig::new()
+        .quality(quality)
+        .encode_rgb_stoppable(data, width, height, &stop)
 }
 
 /// Encode to lossless WebP.
@@ -101,33 +90,11 @@ pub fn encode_rgb(data: &[u8], width: u32, height: u32, quality: f32) -> Result<
 /// * `data` - RGBA pixel data (4 bytes per pixel)
 /// * `width` - Image width in pixels
 /// * `height` - Image height in pixels
-pub fn encode_lossless(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
-    validate_dimensions(width, height)?;
-    validate_buffer_size(data.len(), width, height, 4)?;
-
-    let mut output: *mut u8 = ptr::null_mut();
-    let size = unsafe {
-        libwebp_sys::WebPEncodeLosslessRGBA(
-            data.as_ptr(),
-            width as i32,
-            height as i32,
-            (width * 4) as i32,
-            &mut output,
-        )
-    };
-
-    if size == 0 || output.is_null() {
-        return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
-    }
-
-    let result = unsafe {
-        let slice = core::slice::from_raw_parts(output, size);
-        let vec = slice.to_vec();
-        libwebp_sys::WebPFree(output as *mut _);
-        vec
-    };
-
-    Ok(result)
+/// * `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
+pub fn encode_lossless(data: &[u8], width: u32, height: u32, stop: impl Stop) -> Result<Vec<u8>> {
+    EncoderConfig::new()
+        .lossless(true)
+        .encode_rgba_stoppable(data, width, height, &stop)
 }
 
 /// Internal: Encode with full config (called by EncoderConfig).
@@ -305,6 +272,111 @@ pub(crate) fn encode_with_config_stats(
     result
 }
 
+/// Internal: Encode with config and cooperative cancellation support.
+pub(crate) fn encode_with_config_stoppable<S: Stop>(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    bpp: u8,
+    config: &EncoderConfig,
+    stop: &S,
+) -> Result<Vec<u8>> {
+    validate_dimensions(width, height)?;
+    validate_buffer_size(data.len(), width, height, bpp as u32)?;
+
+    // Check for early cancellation
+    stop.check()?;
+
+    let webp_config = config.to_libwebp()?;
+
+    // Initialize picture
+    let mut picture = libwebp_sys::WebPPicture::new()
+        .map_err(|_| Error::InvalidConfig("failed to init picture".into()))?;
+
+    picture.width = width as i32;
+    picture.height = height as i32;
+    picture.use_argb = 1;
+
+    // Import pixel data
+    let import_ok = if bpp == 4 {
+        unsafe {
+            libwebp_sys::WebPPictureImportRGBA(&mut picture, data.as_ptr(), (width * 4) as i32)
+        }
+    } else {
+        unsafe {
+            libwebp_sys::WebPPictureImportRGB(&mut picture, data.as_ptr(), (width * 3) as i32)
+        }
+    };
+
+    if import_ok == 0 {
+        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
+        return Err(Error::EncodeFailed(EncodingError::OutOfMemory));
+    }
+
+    // Setup memory writer
+    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
+    unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
+    let mut writer = unsafe { writer.assume_init() };
+
+    picture.writer = Some(libwebp_sys::WebPMemoryWrite);
+    picture.custom_ptr = &mut writer as *mut _ as *mut _;
+
+    // Setup progress hook for cancellation
+    let ctx = StopContext { stop };
+    picture.progress_hook = Some(progress_hook::<S>);
+    picture.user_data = &ctx as *const _ as *mut _;
+
+    // Encode
+    let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
+
+    let result = if ok == 0 {
+        let error_code = picture.error_code as i32;
+        unsafe {
+            libwebp_sys::WebPPictureFree(&mut picture);
+            libwebp_sys::WebPMemoryWriterClear(&mut writer);
+        }
+        // Check if this was a user abort (cancellation)
+        if error_code == 10 {
+            // VP8_ENC_ERROR_USER_ABORT
+            // Get the actual stop reason
+            if let Err(reason) = stop.check() {
+                return Err(Error::Stopped(reason));
+            }
+            // Fallback if stop doesn't report stopped (shouldn't happen)
+            Err(Error::EncodeFailed(EncodingError::UserAbort))
+        } else {
+            Err(Error::EncodeFailed(EncodingError::from(error_code)))
+        }
+    } else {
+        let webp_data = unsafe {
+            let slice = core::slice::from_raw_parts(writer.mem, writer.size);
+            slice.to_vec()
+        };
+        unsafe {
+            libwebp_sys::WebPPictureFree(&mut picture);
+            libwebp_sys::WebPMemoryWriterClear(&mut writer);
+        }
+        Ok(webp_data)
+    };
+
+    // Embed metadata if present
+    #[cfg(feature = "icc")]
+    if let Ok(mut webp_data) = result {
+        if let Some(ref icc) = config.icc_profile {
+            webp_data = crate::mux::embed_icc(&webp_data, icc)?;
+        }
+        if let Some(ref exif) = config.exif_data {
+            webp_data = crate::mux::embed_exif(&webp_data, exif)?;
+        }
+        if let Some(ref xmp) = config.xmp_data {
+            webp_data = crate::mux::embed_xmp(&webp_data, xmp)?;
+        }
+        return Ok(webp_data);
+    }
+
+    result
+}
+
 /// WebP encoder with full configuration options.
 ///
 /// This is a convenience wrapper around [`EncoderConfig`]. For new code,
@@ -313,13 +385,13 @@ pub(crate) fn encode_with_config_stats(
 /// # Example
 ///
 /// ```rust,no_run
-/// use webpx::{Encoder, Preset};
+/// use webpx::{Encoder, Preset, Unstoppable};
 ///
 /// let rgba: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
 /// let webp = Encoder::new(rgba, 640, 480)
 ///     .preset(Preset::Photo)
 ///     .quality(85.0)
-///     .encode()?;
+///     .encode(Unstoppable)?;
 /// # Ok::<(), webpx::Error>(())
 /// ```
 pub struct Encoder<'a> {
@@ -477,9 +549,15 @@ impl<'a> Encoder<'a> {
         self
     }
 
-    /// Encode to WebP bytes.
-    pub fn encode(self) -> Result<Vec<u8>> {
+    /// Encode to WebP bytes with cooperative cancellation support.
+    ///
+    /// # Arguments
+    /// - `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
+    pub fn encode<S: Stop>(self, stop: S) -> Result<Vec<u8>> {
         validate_dimensions(self.width, self.height)?;
+
+        // Check for early cancellation
+        stop.check()?;
 
         let webp_config = self.config.to_libwebp()?;
 
@@ -547,16 +625,30 @@ impl<'a> Encoder<'a> {
         picture.writer = Some(libwebp_sys::WebPMemoryWrite);
         picture.custom_ptr = &mut writer as *mut _ as *mut _;
 
+        // Setup progress hook for cancellation
+        let ctx = StopContext { stop: &stop };
+        picture.progress_hook = Some(progress_hook::<S>);
+        picture.user_data = &ctx as *const _ as *mut _;
+
         // Encode
         let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
 
         let result = if ok == 0 {
-            let error = EncodingError::from(picture.error_code as i32);
+            let error_code = picture.error_code as i32;
             unsafe {
                 libwebp_sys::WebPPictureFree(&mut picture);
                 libwebp_sys::WebPMemoryWriterClear(&mut writer);
             }
-            Err(Error::EncodeFailed(error))
+            // Check if this was a user abort (cancellation)
+            if error_code == 10 {
+                // VP8_ENC_ERROR_USER_ABORT
+                if let Err(reason) = stop.check() {
+                    return Err(Error::Stopped(reason));
+                }
+                Err(Error::EncodeFailed(EncodingError::UserAbort))
+            } else {
+                Err(Error::EncodeFailed(EncodingError::from(error_code)))
+            }
         } else {
             let webp_data = unsafe {
                 let slice = core::slice::from_raw_parts(writer.mem, writer.size);
