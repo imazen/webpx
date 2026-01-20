@@ -387,7 +387,7 @@ impl<'a> Encoder<'a> {
     ///
     /// For non-contiguous data with stride, use [`Self::new_rgba_stride`].
     #[must_use]
-    pub fn new(data: &'a [u8], width: u32, height: u32) -> Self {
+    pub fn new_rgba(data: &'a [u8], width: u32, height: u32) -> Self {
         Self {
             data: EncoderInput::Rgba {
                 data,
@@ -399,6 +399,13 @@ impl<'a> Encoder<'a> {
             #[cfg(feature = "icc")]
             icc_profile: None,
         }
+    }
+
+    /// Alias for [`Self::new_rgba`] for backwards compatibility.
+    #[must_use]
+    #[doc(hidden)]
+    pub fn new(data: &'a [u8], width: u32, height: u32) -> Self {
+        Self::new_rgba(data, width, height)
     }
 
     /// Create a new encoder for RGBA data with explicit stride.
