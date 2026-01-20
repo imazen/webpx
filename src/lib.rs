@@ -71,7 +71,7 @@ pub mod compat;
 
 // Re-exports
 pub use config::{AlphaFilter, DecoderConfig, EncodeStats, EncoderConfig, ImageHint, Preset};
-pub use error::{Error, Result};
+pub use error::{DecodingError, EncodingError, Error, MuxError, Result};
 pub use types::{ColorMode, ImageInfo, YuvPlanes};
 
 #[cfg(feature = "decode")]

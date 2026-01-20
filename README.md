@@ -156,6 +156,28 @@ webpx = { version = "0.1", features = ["animation", "icc", "streaming"] }
 | `Icon` | Small colorful images |
 | `Text` | Text-heavy images |
 
+## Platform Support
+
+This crate uses FFI bindings to libwebp, which compiles native C code.
+
+| Platform | Support |
+|----------|---------|
+| Linux (x64, ARM64) | ✅ Full |
+| macOS (x64, ARM64) | ✅ Full |
+| Windows (x64, ARM64) | ✅ Full |
+| WebAssembly | ⚠️ Limited |
+
+### WebAssembly
+
+The underlying `libwebp-sys` compiles C code, so `wasm32-unknown-unknown` is **not supported**. For WebAssembly targets, you need emscripten:
+
+```bash
+# Use wasm32-unknown-emscripten (requires emscripten SDK)
+cargo build --target wasm32-unknown-emscripten
+```
+
+Alternatively, consider pure-Rust WebP implementations if you need `wasm32-unknown-unknown` support.
+
 ## Minimum Rust Version
 
 Rust 1.80 or later.

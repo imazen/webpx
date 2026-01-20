@@ -354,6 +354,626 @@ mod presets {
             assert_eq!(info.height, height);
         }
     }
+
+    #[test]
+    fn test_quality_values() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        // Test various quality values
+        for quality in [0.0, 25.0, 50.0, 75.0, 100.0] {
+            let webp = Encoder::new(&data, width, height)
+                .quality(quality)
+                .encode()
+                .unwrap_or_else(|e| panic!("encode with q={} failed: {}", quality, e));
+
+            let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+            assert_eq!(info.width, width);
+            assert_eq!(info.height, height);
+        }
+    }
+}
+
+mod encoder_config_tests {
+    use super::*;
+    use webpx::{AlphaFilter, EncoderConfig, ImageHint};
+
+    #[test]
+    fn test_image_hints() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        for hint in [
+            ImageHint::Default,
+            ImageHint::Picture,
+            ImageHint::Photo,
+            ImageHint::Graph,
+        ] {
+            let config = EncoderConfig::new().quality(75.0).hint(hint);
+
+            let webp = config
+                .encode_rgba(&data, width, height)
+                .unwrap_or_else(|e| panic!("encode with {:?} hint failed: {}", hint, e));
+
+            let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+            assert_eq!(info.width, width);
+            assert_eq!(info.height, height);
+        }
+    }
+
+    #[test]
+    fn test_alpha_filter_modes() {
+        let width = 32;
+        let height = 32;
+        // Create image with variable alpha
+        let mut data = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                data.push(128); // R
+                data.push(128); // G
+                data.push(128); // B
+                data.push(((x + y) * 4) as u8); // Variable alpha
+            }
+        }
+
+        for filter in [AlphaFilter::None, AlphaFilter::Fast, AlphaFilter::Best] {
+            let config = EncoderConfig::new()
+                .quality(75.0)
+                .alpha_filter(filter)
+                .alpha_quality(90);
+
+            let webp = config
+                .encode_rgba(&data, width, height)
+                .unwrap_or_else(|e| panic!("encode with {:?} alpha filter failed: {}", filter, e));
+
+            let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+            assert_eq!(info.width, width);
+            assert_eq!(info.height, height);
+            assert!(info.has_alpha, "should have alpha");
+        }
+    }
+
+    #[test]
+    fn test_preprocessing_levels() {
+        let width = 64;
+        let height = 64;
+        let data = generate_gradient_rgba(width, height);
+
+        for preprocessing in [0, 1, 2, 4, 7] {
+            let config = EncoderConfig::new()
+                .quality(75.0)
+                .preprocessing(preprocessing);
+
+            let webp = config.encode_rgba(&data, width, height).unwrap_or_else(|e| {
+                panic!("encode with preprocessing={} failed: {}", preprocessing, e)
+            });
+
+            let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+            assert_eq!(info.width, width);
+        }
+    }
+
+    #[test]
+    fn test_partitions() {
+        let width = 64;
+        let height = 64;
+        let data = generate_gradient_rgba(width, height);
+
+        // Test partition values 0-3 (1, 2, 4, 8 partitions)
+        for partitions in 0..=3 {
+            let config = EncoderConfig::new()
+                .quality(75.0)
+                .partitions(partitions)
+                .partition_limit(50);
+
+            let webp = config.encode_rgba(&data, width, height).unwrap_or_else(|e| {
+                panic!("encode with partitions={} failed: {}", partitions, e)
+            });
+
+            let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+            assert_eq!(info.width, width);
+        }
+    }
+
+    #[test]
+    fn test_delta_palette_lossless() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new_lossless().delta_palette(true);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with delta_palette failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+
+        // Verify lossless roundtrip
+        let (decoded, _, _) = decode_rgba(&webp).expect("decode failed");
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_quality_range() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new().quality(75.0).quality_range(30, 80);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with quality_range failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+    }
+
+    #[test]
+    fn test_max_compression_config() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::max_compression();
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("max_compression encode failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+    }
+
+    #[test]
+    fn test_max_compression_lossless_config() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::max_compression_lossless();
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("max_compression_lossless encode failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+
+        // Verify lossless
+        let (decoded, _, _) = decode_rgba(&webp).expect("decode failed");
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_lossless_levels() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        // Test all lossless compression levels 0-9
+        for level in 0..=9 {
+            let config = EncoderConfig::new_lossless_level(level);
+            let webp = config.encode_rgba(&data, width, height).unwrap_or_else(|e| {
+                panic!("encode with lossless level {} failed: {}", level, e)
+            });
+
+            let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+            assert_eq!(info.width, width);
+
+            // All lossless levels should produce exact roundtrip
+            let (decoded, _, _) = decode_rgba(&webp).expect("decode failed");
+            assert_eq!(decoded, data, "lossless level {} should be exact", level);
+        }
+    }
+
+    #[test]
+    fn test_encoder_config_accessors() {
+        let config = EncoderConfig::new()
+            .quality(85.0)
+            .preset(Preset::Photo)
+            .lossless(true)
+            .method(5);
+
+        assert_eq!(config.get_quality(), 85.0);
+        assert_eq!(config.get_preset(), Preset::Photo);
+        assert!(config.is_lossless());
+        assert_eq!(config.get_method(), 5);
+    }
+
+    #[test]
+    fn test_sharp_yuv() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new().quality(75.0).sharp_yuv(true);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with sharp_yuv failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+    }
+
+    #[test]
+    fn test_filter_settings() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new()
+            .quality(75.0)
+            .filter_strength(80)
+            .filter_sharpness(3)
+            .filter_type(1)
+            .autofilter(true)
+            .sns_strength(80);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with filter settings failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+    }
+
+    #[test]
+    fn test_target_size() {
+        let width = 64;
+        let height = 64;
+        let data = generate_gradient_rgba(width, height);
+
+        // Request a small target size
+        let config = EncoderConfig::new().target_size(500);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with target_size failed");
+
+        // File should be close to target (with some tolerance)
+        assert!(
+            webp.len() < 2000,
+            "file size {} should be near target",
+            webp.len()
+        );
+    }
+
+    #[test]
+    fn test_pass_and_segments() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new()
+            .quality(75.0)
+            .pass(6)
+            .segments(4);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with pass/segments failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+    }
+
+    #[test]
+    fn test_low_memory_mode() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new().quality(75.0).low_memory(true);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with low_memory failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+    }
+
+    #[test]
+    fn test_exact_mode() {
+        let width = 32;
+        let height = 32;
+        // Create image with transparent areas
+        let mut data = vec![0u8; (width * height * 4) as usize];
+        for i in 0..(width * height) as usize {
+            data[i * 4] = 100; // R
+            data[i * 4 + 1] = 150; // G
+            data[i * 4 + 2] = 200; // B
+            data[i * 4 + 3] = if i % 2 == 0 { 0 } else { 255 }; // Alternating alpha
+        }
+
+        // With exact mode, RGB values under transparent pixels are preserved
+        let config = EncoderConfig::new_lossless().exact(true);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with exact failed");
+
+        let (decoded, _, _) = decode_rgba(&webp).expect("decode failed");
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_config_validate() {
+        let config = EncoderConfig::new().quality(75.0);
+        assert!(config.validate().is_ok());
+
+        let config_lossless = EncoderConfig::new_lossless();
+        assert!(config_lossless.validate().is_ok());
+    }
+
+    #[test]
+    fn test_near_lossless() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        // Near-lossless with some preprocessing
+        let config = EncoderConfig::new_lossless().near_lossless(60);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with near_lossless failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+    }
+
+    #[test]
+    fn test_with_preset_constructor() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::with_preset(Preset::Photo, 85.0);
+
+        let webp = config
+            .encode_rgba(&data, width, height)
+            .expect("encode with_preset failed");
+
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+    }
+}
+
+mod encode_stats_tests {
+    use super::*;
+    use webpx::EncoderConfig;
+
+    #[test]
+    fn test_encode_rgba_with_stats() {
+        let width = 64;
+        let height = 64;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new().quality(75.0);
+
+        let (webp, stats) = config
+            .encode_rgba_with_stats(&data, width, height)
+            .expect("encode_with_stats failed");
+
+        // Verify webp is valid
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+
+        // Verify stats contain reasonable values
+        assert!(stats.coded_size > 0, "coded_size should be > 0");
+        assert_eq!(stats.coded_size as usize, webp.len());
+
+        // PSNR values should be positive for lossy encoding
+        assert!(stats.psnr[4] > 0.0, "overall PSNR should be > 0");
+    }
+
+    #[test]
+    fn test_encode_rgb_with_stats() {
+        let width = 64;
+        let height = 64;
+        let data = generate_rgb(width, height, 100, 150, 200);
+
+        let config = EncoderConfig::new().quality(75.0);
+
+        let (webp, stats) = config
+            .encode_rgb_with_stats(&data, width, height)
+            .expect("encode_rgb_with_stats failed");
+
+        // Verify webp is valid
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+
+        // Verify stats
+        assert!(stats.coded_size > 0);
+    }
+
+    #[test]
+    fn test_encode_lossless_with_stats() {
+        let width = 32;
+        let height = 32;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new_lossless();
+
+        let (webp, stats) = config
+            .encode_rgba_with_stats(&data, width, height)
+            .expect("encode_lossless_with_stats failed");
+
+        // Verify webp is valid
+        let info = ImageInfo::from_webp(&webp).expect("invalid webp");
+        assert_eq!(info.width, width);
+
+        // For lossless, check lossless-specific stats
+        assert!(stats.lossless_size > 0, "lossless_size should be > 0");
+        assert!(stats.coded_size > 0);
+    }
+
+    #[test]
+    fn test_stats_segment_info() {
+        let width = 64;
+        let height = 64;
+        let data = generate_gradient_rgba(width, height);
+
+        let config = EncoderConfig::new().quality(50.0).segments(4);
+
+        let (_, stats) = config
+            .encode_rgba_with_stats(&data, width, height)
+            .expect("encode_with_stats failed");
+
+        // At least some segments should have data
+        let total_blocks: u32 = stats.block_count.iter().sum();
+        assert!(total_blocks > 0, "should have some blocks");
+    }
+}
+
+mod error_tests {
+    use webpx::{DecodingError, EncodingError, Error, MuxError};
+
+    #[test]
+    fn test_error_display() {
+        let errors = [
+            (Error::InvalidInput("test".into()), "invalid input: test"),
+            (
+                Error::EncodeFailed(EncodingError::OutOfMemory),
+                "encode failed: out of memory",
+            ),
+            (
+                Error::DecodeFailed(DecodingError::BitstreamError),
+                "decode failed: bitstream error",
+            ),
+            (Error::InvalidConfig("bad".into()), "invalid config: bad"),
+            (Error::OutOfMemory, "out of memory"),
+            (Error::IccError("icc fail".into()), "ICC error: icc fail"),
+            (
+                Error::MuxError(MuxError::BadData),
+                "mux error: bad data",
+            ),
+            (
+                Error::AnimationError("anim fail".into()),
+                "animation error: anim fail",
+            ),
+            (Error::NeedMoreData, "need more data"),
+            (Error::InvalidWebP, "invalid WebP data"),
+        ];
+
+        for (error, expected) in errors {
+            assert_eq!(format!("{}", error), expected);
+        }
+    }
+
+    #[test]
+    fn test_encoding_error_from_i32() {
+        assert_eq!(EncodingError::from(0), EncodingError::Ok);
+        assert_eq!(EncodingError::from(1), EncodingError::OutOfMemory);
+        assert_eq!(EncodingError::from(2), EncodingError::BitstreamOutOfMemory);
+        assert_eq!(EncodingError::from(3), EncodingError::NullParameter);
+        assert_eq!(EncodingError::from(4), EncodingError::InvalidConfiguration);
+        assert_eq!(EncodingError::from(5), EncodingError::BadDimension);
+        assert_eq!(EncodingError::from(6), EncodingError::Partition0Overflow);
+        assert_eq!(EncodingError::from(7), EncodingError::PartitionOverflow);
+        assert_eq!(EncodingError::from(8), EncodingError::BadWrite);
+        assert_eq!(EncodingError::from(9), EncodingError::FileTooBig);
+        assert_eq!(EncodingError::from(10), EncodingError::UserAbort);
+        assert_eq!(EncodingError::from(999), EncodingError::Last);
+    }
+
+    #[test]
+    fn test_encoding_error_display() {
+        let errors = [
+            (EncodingError::Ok, "ok"),
+            (EncodingError::OutOfMemory, "out of memory"),
+            (EncodingError::BitstreamOutOfMemory, "bitstream out of memory"),
+            (EncodingError::NullParameter, "null parameter"),
+            (EncodingError::InvalidConfiguration, "invalid configuration"),
+            (EncodingError::BadDimension, "bad dimension"),
+            (EncodingError::Partition0Overflow, "partition0 overflow"),
+            (EncodingError::PartitionOverflow, "partition overflow"),
+            (EncodingError::BadWrite, "bad write"),
+            (EncodingError::FileTooBig, "file too big"),
+            (EncodingError::UserAbort, "user abort"),
+            (EncodingError::Last, "unknown error"),
+        ];
+
+        for (error, expected) in errors {
+            assert_eq!(format!("{}", error), expected);
+        }
+    }
+
+    #[test]
+    fn test_decoding_error_from_i32() {
+        assert_eq!(DecodingError::from(0), DecodingError::Ok);
+        assert_eq!(DecodingError::from(1), DecodingError::OutOfMemory);
+        assert_eq!(DecodingError::from(2), DecodingError::InvalidParam);
+        assert_eq!(DecodingError::from(3), DecodingError::BitstreamError);
+        assert_eq!(DecodingError::from(4), DecodingError::UnsupportedFeature);
+        assert_eq!(DecodingError::from(5), DecodingError::Suspended);
+        assert_eq!(DecodingError::from(6), DecodingError::UserAbort);
+        assert_eq!(DecodingError::from(999), DecodingError::NotEnoughData);
+    }
+
+    #[test]
+    fn test_decoding_error_display() {
+        let errors = [
+            (DecodingError::Ok, "ok"),
+            (DecodingError::OutOfMemory, "out of memory"),
+            (DecodingError::InvalidParam, "invalid param"),
+            (DecodingError::BitstreamError, "bitstream error"),
+            (DecodingError::UnsupportedFeature, "unsupported feature"),
+            (DecodingError::Suspended, "suspended"),
+            (DecodingError::UserAbort, "user abort"),
+            (DecodingError::NotEnoughData, "not enough data"),
+        ];
+
+        for (error, expected) in errors {
+            assert_eq!(format!("{}", error), expected);
+        }
+    }
+
+    #[test]
+    fn test_mux_error_from_i32() {
+        assert_eq!(MuxError::from(1), MuxError::Ok);
+        assert_eq!(MuxError::from(0), MuxError::NotFound);
+        assert_eq!(MuxError::from(-1), MuxError::InvalidArgument);
+        assert_eq!(MuxError::from(-2), MuxError::BadData);
+        assert_eq!(MuxError::from(-3), MuxError::MemoryError);
+        assert_eq!(MuxError::from(-999), MuxError::NotEnoughData);
+    }
+
+    #[test]
+    fn test_mux_error_display() {
+        let errors = [
+            (MuxError::Ok, "ok"),
+            (MuxError::NotFound, "not found"),
+            (MuxError::InvalidArgument, "invalid argument"),
+            (MuxError::BadData, "bad data"),
+            (MuxError::MemoryError, "memory error"),
+            (MuxError::NotEnoughData, "not enough data"),
+        ];
+
+        for (error, expected) in errors {
+            assert_eq!(format!("{}", error), expected);
+        }
+    }
+
+    #[test]
+    fn test_error_clone_and_eq() {
+        let e1 = Error::InvalidInput("test".into());
+        let e2 = e1.clone();
+        assert_eq!(e1, e2);
+
+        let e3 = Error::OutOfMemory;
+        let e4 = Error::OutOfMemory;
+        assert_eq!(e3, e4);
+    }
 }
 
 #[cfg(feature = "icc")]
