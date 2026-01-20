@@ -24,7 +24,10 @@ rgb = "0.8.52"
 imgref = "1.12.0"
 
 [dev-dependencies]
-criterion = "0.6"
+criterion = { version = "0.6", default-features = false, features = ["plotters", "cargo_bench_support"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion = { version = "0.6", features = ["rayon"] }
 
 [[bench]]
 name = "codec"

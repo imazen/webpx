@@ -169,14 +169,24 @@ This crate uses FFI bindings to libwebp, which compiles native C code.
 
 ### WebAssembly
 
-The underlying `libwebp-sys` compiles C code, so `wasm32-unknown-unknown` is **not supported**. For WebAssembly targets, you need emscripten:
+The underlying `libwebp-sys` compiles C code, so `wasm32-unknown-unknown` is **not supported**. For WebAssembly targets, use `wasm32-unknown-emscripten`:
 
 ```bash
-# Use wasm32-unknown-emscripten (requires emscripten SDK)
-cargo build --target wasm32-unknown-emscripten
+# Install emscripten SDK (one-time setup)
+git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
+cd ~/emsdk && ./emsdk install latest && ./emsdk activate latest
+
+# Add Rust target
+rustup target add wasm32-unknown-emscripten
+
+# Build (source emsdk_env.sh first)
+source ~/emsdk/emsdk_env.sh
+cargo build --target wasm32-unknown-emscripten --release
 ```
 
-Alternatively, consider pure-Rust WebP implementations if you need `wasm32-unknown-unknown` support.
+This produces `.wasm` and `.js` files that work with Node.js or browsers.
+
+For `wasm32-unknown-unknown` (no emscripten), consider [`image-webp`](https://crates.io/crates/image-webp) which is pure Rust but only supports lossless encoding.
 
 ## Minimum Rust Version
 
