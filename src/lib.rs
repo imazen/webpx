@@ -113,7 +113,7 @@ pub mod compat;
 // Re-exports
 pub use config::{AlphaFilter, DecoderConfig, EncodeStats, EncoderConfig, ImageHint, Preset};
 pub use error::{DecodingError, EncodingError, Error, MuxError, Result};
-pub use types::{BitstreamFormat, ColorMode, ImageInfo, PixelLayout, YuvPlanes, YuvPlanesRef};
+pub use types::{BitstreamFormat, ColorMode, ImageInfo, YuvPlanes, YuvPlanesRef};
 
 // Re-export enough crate types for cooperative cancellation
 pub use enough::{Stop, StopReason, Unstoppable};

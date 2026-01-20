@@ -5,12 +5,9 @@ use rgb::alt::{BGR8, BGRA8};
 use rgb::{RGB8, RGBA8};
 use whereat::*;
 
-/// Pixel layout describing channel order for byte-oriented APIs.
-///
-/// This is similar to `PixelLayout` in jpegli-rs. The name avoids collision
-/// with the many `PixelFormat` enums in other crates.
+/// Pixel layout describing channel order (implementation detail).
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum PixelLayout {
     /// RGBA - 4 bytes per pixel (red, green, blue, alpha)
     Rgba,

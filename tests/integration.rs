@@ -3063,20 +3063,4 @@ mod typed_pixel_tests {
             assert_eq!(decoded[idx + 3], pixel.a, "alpha mismatch at pixel {}", i);
         }
     }
-
-    #[test]
-    fn test_pixel_layout_bytes_per_pixel() {
-        assert_eq!(PixelLayout::Rgba.bytes_per_pixel(), 4);
-        assert_eq!(PixelLayout::Bgra.bytes_per_pixel(), 4);
-        assert_eq!(PixelLayout::Rgb.bytes_per_pixel(), 3);
-        assert_eq!(PixelLayout::Bgr.bytes_per_pixel(), 3);
-    }
-
-    #[test]
-    fn test_pixel_layout_has_alpha() {
-        assert!(PixelLayout::Rgba.has_alpha());
-        assert!(PixelLayout::Bgra.has_alpha());
-        assert!(!PixelLayout::Rgb.has_alpha());
-        assert!(!PixelLayout::Bgr.has_alpha());
-    }
 }
