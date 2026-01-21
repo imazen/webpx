@@ -473,8 +473,133 @@ fn main() {
         i += 1;
     }
 
-    run_encode(&cfg);
+    if cfg.mode.starts_with("time-") {
+        run_timing(&cfg);
+    } else {
+        run_encode(&cfg);
+    }
 
     io::stdout().flush().unwrap();
     io::stderr().flush().unwrap();
+}
+
+// Time measurement helper
+fn run_timing(cfg: &Config) {
+    match cfg.mode.as_str() {
+        "time-decode-file" => {
+            // Decode timing for arbitrary WebP file specified in --content
+            let webp = fs::read(&cfg.content).expect("File not found");
+            let info = ImageInfo::from_webp(&webp).unwrap();
+            let pixels = info.width as u64 * info.height as u64;
+
+            // Warmup
+            for _ in 0..3 {
+                let _ = decode_rgba(&webp);
+            }
+
+            let iterations = 20;
+            let start = std::time::Instant::now();
+            for _ in 0..iterations {
+                let _ = decode_rgba(&webp);
+            }
+            let elapsed = start.elapsed();
+            let per_op = elapsed / iterations;
+            let mpix_per_sec = (pixels as f64 / 1_000_000.0) / per_op.as_secs_f64();
+
+            let name = std::path::Path::new(&cfg.content)
+                .file_stem()
+                .map(|s| s.to_string_lossy().chars().take(16).collect::<String>())
+                .unwrap_or_default();
+            eprintln!(
+                "{} {}x{}: {:.2}ms, {:.1} Mpix/s",
+                name,
+                info.width, info.height,
+                per_op.as_secs_f64() * 1000.0,
+                mpix_per_sec
+            );
+        }
+        "time-decode-lossy" | "time-decode-lossless" => {
+            let base = if cfg.mode.contains("lossy") { "lossy" } else { "lossless" };
+            let filename = format!(
+                "mem_data/{}x{}_{}{}.webp",
+                cfg.width,
+                cfg.height,
+                base,
+                if cfg.content != "gradient" {
+                    format!("_{}", cfg.content)
+                } else {
+                    String::new()
+                }
+            );
+            let webp = fs::read(&filename).expect("Run prepare-* first");
+
+            // Warmup
+            for _ in 0..3 {
+                let _ = decode_rgba(&webp);
+            }
+
+            // Measure
+            let iterations = 20;
+            let start = std::time::Instant::now();
+            for _ in 0..iterations {
+                let _ = decode_rgba(&webp);
+            }
+            let elapsed = start.elapsed();
+            let per_op = elapsed / iterations;
+
+            let pixels = cfg.width as u64 * cfg.height as u64;
+            let mpix_per_sec = (pixels as f64 / 1_000_000.0) / per_op.as_secs_f64();
+
+            eprintln!(
+                "{}x{} {} {}: {:.2}ms, {:.1} Mpix/s",
+                cfg.width, cfg.height,
+                cfg.mode.strip_prefix("time-").unwrap(),
+                cfg.content,
+                per_op.as_secs_f64() * 1000.0,
+                mpix_per_sec
+            );
+        }
+        "time-encode-lossy" | "time-encode-lossless" => {
+            let rgba = match cfg.content.as_str() {
+                "noise" => generate_noise_rgba(cfg.width, cfg.height, 12345),
+                "solid" => generate_solid_rgba(cfg.width, cfg.height),
+                _ => generate_gradient_rgba(cfg.width, cfg.height),
+            };
+            let is_lossless = cfg.mode.contains("lossless");
+
+            // Warmup
+            for _ in 0..2 {
+                let enc = Encoder::new_rgba(&rgba, cfg.width, cfg.height)
+                    .lossless(is_lossless)
+                    .method(cfg.method);
+                let _ = enc.encode(Unstoppable);
+            }
+
+            // Measure (fewer iterations since encode is slower)
+            let iterations = if cfg.width >= 1024 { 5 } else { 10 };
+            let start = std::time::Instant::now();
+            for _ in 0..iterations {
+                let enc = Encoder::new_rgba(&rgba, cfg.width, cfg.height)
+                    .lossless(is_lossless)
+                    .method(cfg.method);
+                let _ = enc.encode(Unstoppable);
+            }
+            let elapsed = start.elapsed();
+            let per_op = elapsed / iterations;
+
+            let pixels = cfg.width as u64 * cfg.height as u64;
+            let mpix_per_sec = (pixels as f64 / 1_000_000.0) / per_op.as_secs_f64();
+
+            eprintln!(
+                "{}x{} {} m{} {}: {:.2}ms, {:.1} Mpix/s",
+                cfg.width, cfg.height,
+                cfg.mode.strip_prefix("time-").unwrap(),
+                cfg.method,
+                cfg.content,
+                per_op.as_secs_f64() * 1000.0,
+                mpix_per_sec
+            );
+        }
+        _ => {}
+    }
 }

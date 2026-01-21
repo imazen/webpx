@@ -74,6 +74,45 @@ Larger test files available at `~/work/codec-corpus/image-rs/test-images/webp/`.
 
 None currently.
 
+## Profiling Guidelines
+
+When profiling memory or CPU time, always test with multiple content types:
+
+1. **Synthetic test images:**
+   - `gradient` - Smooth color transitions (best case for lossy)
+   - `solid` - Single color (best case for lossless, also fast decode)
+   - `noise` - Random pixels (worst case, stresses encoder/decoder)
+
+2. **Real images:**
+   - Use `~/work/codec-corpus/clic2025-1024/` for 1024×1024 photos
+   - Real photos typically fall between gradient and noise
+
+3. **Tools:**
+   - Memory: `heaptrack` (not dhat - need to capture C library allocations)
+   - CPU time: Simple timing with warmup iterations, or criterion benchmarks
+
+4. **What to measure:**
+   - Multiple sizes (256, 512, 1024, 2048)
+   - Both lossy and lossless
+   - Multiple methods (0, 4, 6 at minimum)
+   - All content types above
+
+5. **Reporting:**
+   - Always report content type alongside measurements
+   - Derive min/typ/max from content type variation
+   - Validate formulas against real images before finalizing
+
+Example measurement commands:
+```bash
+# Memory profiling
+heaptrack ./target/release/examples/mem_formula --size 1024 --mode decode-only-lossy --content noise
+heaptrack_print heaptrack.*.zst | grep "peak heap"
+
+# CPU timing
+./target/release/examples/mem_formula --size 1024 --mode time-decode-lossy --content gradient
+./target/release/examples/mem_formula --size 1024 --mode time-encode-lossy --method 4 --content noise
+```
+
 ## User Feedback Log
 
 See FEEDBACK.md (create if needed).

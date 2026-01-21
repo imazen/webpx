@@ -260,6 +260,61 @@ At 1024×1024:
 
 ---
 
+## CPU Timing
+
+### Timing Methodology
+
+Timing measurements use simple `Instant::now()` with warmup iterations and multiple samples.
+Content type has a **dramatic impact** on CPU time, much more than on memory.
+
+### Decode Timing (1024×1024)
+
+| Content | Lossy Source | Lossless Source |
+|---------|--------------|-----------------|
+| Solid | 3.7ms (284 Mpix/s) | 6.7ms (156 Mpix/s) |
+| Gradient | 8.4ms (125 Mpix/s) | 7.0ms (150 Mpix/s) |
+| **Real photos** | **11-14ms (75-95 Mpix/s)** | **17-19ms (55-62 Mpix/s)** |
+| Noise | 35ms (30 Mpix/s) | 15ms (71 Mpix/s) |
+
+**Key finding:** Content type causes up to **4× variation** in lossy decode time!
+
+### Encode Timing (1024×1024 Method 4)
+
+| Content | Lossy | Lossless |
+|---------|-------|----------|
+| Solid | 29ms (37 Mpix/s) | 7ms (148 Mpix/s) |
+| Gradient | 25ms (43 Mpix/s) | 135ms (7.8 Mpix/s) |
+| **Real photos** | **65-83ms (13-16 Mpix/s)** | **327-355ms (3.4 Mpix/s)** |
+| Noise | 117ms (9 Mpix/s) | 86ms (12 Mpix/s) |
+
+### Time Factors
+
+Time factors are relative to lossy encode M4 of gradient images (1.0 = 24.7ms at 1024×1024):
+
+**Decode:**
+- Min (solid): 0.15×
+- Typical (real photos): 0.6×
+- Max (noise): 1.4×
+
+**Encode Method Impact (lossy):**
+
+| Method | Time Factor | Mpix/s |
+|--------|-------------|--------|
+| M0 | 0.28× | 154 |
+| M1-2 | 0.35-0.40× | 106-128 |
+| M3-4 | 1.0× | 42 |
+| M5-6 | 1.1× | 37 |
+
+**Lossless Method Impact:**
+
+| Method | Time Factor | Mpix/s |
+|--------|-------------|--------|
+| M0 | 0.51× | 82 |
+| M1-4 | 5.3× | 7.8 |
+| M5-6 | 10.8× | 3.9 |
+
+---
+
 ## API Usage
 
 ### Getting Encode Estimates
@@ -286,14 +341,16 @@ println!("  Max (noise):  {:.1} MB", est.peak_memory_bytes_max as f64 / 1e6);
 use webpx::heuristics::{estimate_decode, estimate_decode_zerocopy};
 
 // Standard decode (allocates output buffer)
-let est = estimate_decode(1920, 1080, 4, false); // lossy source
+let est = estimate_decode(1920, 1080, 4);
 
 println!("Decode estimates for 1920×1080:");
 println!("  Output buffer: {:.1} MB", est.output_bytes as f64 / 1e6);
 println!("  Peak memory:   {:.1} MB", est.peak_memory_bytes as f64 / 1e6);
+println!("  Time factor:   {:.2}x (min {:.2}x, max {:.2}x)",
+    est.time_factor, est.time_factor_min, est.time_factor_max);
 
 // Zero-copy decode (caller provides output buffer)
-let est_zc = estimate_decode_zerocopy(1920, 1080, false);
+let est_zc = estimate_decode_zerocopy(1920, 1080);
 println!("  Zero-copy peak: {:.1} MB", est_zc.peak_memory_bytes as f64 / 1e6);
 ```
 

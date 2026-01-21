@@ -112,14 +112,13 @@ const LOSSLESS_M1_FIXED_OVERHEAD: u64 = 1_500_000;
 
 /// Bytes per pixel for decoding (internal buffers).
 /// This is roughly: YUV decode buffer + color conversion workspace.
+/// Measured: Nearly identical for lossy and lossless (~15 bytes/pixel).
 const DECODE_BYTES_PER_PIXEL: f64 = 15.0;
 
-/// Fixed overhead for lossy decoding (~76KB).
-const DECODE_LOSSY_FIXED_OVERHEAD: u64 = 76_000;
-
-/// Fixed overhead for lossless decoding (~133KB).
-/// Slightly higher than lossy due to VP8L-specific data structures.
-const DECODE_LOSSLESS_FIXED_OVERHEAD: u64 = 133_000;
+/// Fixed overhead for decoding (~133KB).
+/// Uses conservative (lossless) estimate since lossy is only ~76KB.
+/// The difference is negligible at typical image sizes.
+const DECODE_FIXED_OVERHEAD: u64 = 133_000;
 
 /// Resource estimation for encoding operations.
 #[derive(Debug, Clone, Copy)]
@@ -160,33 +159,39 @@ pub struct EncodeEstimate {
 
 /// Resource estimation for decoding operations.
 ///
-/// Based on heaptrack measurements of libwebp 1.5 memory usage.
+/// Based on heaptrack and timing measurements of libwebp 1.5.
 ///
-/// Key finding: Decode memory is nearly identical for lossy and lossless
-/// sources (~15 bytes/pixel total). Content type has minimal impact (~5%).
+/// Key findings:
+/// - Memory is nearly identical for lossy and lossless (~15 bytes/pixel)
+/// - Memory varies only ~5% with content type
+/// - **Time varies dramatically with content type** (up to 4× for lossy)
+/// - Lossless decode of real photos is ~38% slower than lossy
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct DecodeEstimate {
     /// Minimum expected peak memory (best case: simple images).
-    ///
-    /// Decode memory varies only ~5% with content type, so min ≈ typical.
     pub peak_memory_bytes_min: u64,
 
     /// Typical peak memory in bytes during decoding.
-    ///
-    /// Based on heaptrack measurements with gradient test images.
     pub peak_memory_bytes: u64,
 
     /// Maximum expected peak memory (worst case: noise images).
-    ///
-    /// Decode memory is relatively stable; max is only ~5% above typical.
     pub peak_memory_bytes_max: u64,
 
     /// Estimated heap allocations during decoding.
     pub estimated_allocations: u32,
 
-    /// Relative time factor (1.0 = baseline).
+    /// Minimum time factor (best case: solid color).
+    /// Relative to lossy encode M4 baseline (1.0).
+    pub time_factor_min: f32,
+
+    /// Typical time factor (real photographs).
+    /// Relative to lossy encode M4 baseline (1.0).
     pub time_factor: f32,
+
+    /// Maximum time factor (worst case: noise/high-entropy).
+    /// Relative to lossy encode M4 baseline (1.0).
+    pub time_factor_max: f32,
 
     /// Output buffer size in bytes.
     pub output_bytes: u64,
@@ -321,60 +326,55 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
 
 /// Estimate resources for decoding an image.
 ///
-/// Based on heaptrack measurements of libwebp 1.5.
+/// Based on heaptrack and timing measurements of libwebp 1.5.
 ///
-/// # Key findings:
-/// - Decode memory is nearly identical for lossy and lossless (~15 bytes/pixel)
-/// - Content type has minimal impact (~5% variation)
-/// - Output buffer dominates: ~4 bytes/pixel for RGBA output
-/// - Internal buffers: ~11 bytes/pixel
+/// # Key findings (1024×1024 real photos):
+/// - Memory: ~15 bytes/pixel, nearly identical for lossy/lossless
+/// - Time: Lossy decode ~13ms, Lossless decode ~18ms (using conservative estimate)
+/// - Content type causes up to 4× variation in decode time
 ///
 /// # Arguments
 ///
 /// * `width` - Image width in pixels
 /// * `height` - Image height in pixels
 /// * `output_bpp` - Bytes per pixel of output (3 for RGB, 4 for RGBA)
-/// * `is_lossless` - Whether the source is losslessly compressed
 ///
 /// # Example
 ///
 /// ```rust
 /// use webpx::heuristics::estimate_decode;
 ///
-/// let est = estimate_decode(1920, 1080, 4, false);
+/// let est = estimate_decode(1920, 1080, 4);
 /// println!("Output buffer: {:.1} MB", est.output_bytes as f64 / 1_000_000.0);
 /// println!("Peak memory: {:.1} MB", est.peak_memory_bytes as f64 / 1_000_000.0);
+/// println!("Time factor: {:.2}x (min {:.2}x, max {:.2}x)",
+///     est.time_factor, est.time_factor_min, est.time_factor_max);
 /// ```
 #[must_use]
-pub fn estimate_decode(
-    width: u32,
-    height: u32,
-    output_bpp: u8,
-    is_lossless: bool,
-) -> DecodeEstimate {
+pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> DecodeEstimate {
     let pixels = (width as u64) * (height as u64);
     let output_bytes = pixels * (output_bpp as u64);
 
-    // Measured decode memory formula: overhead + pixels × 15 bytes
-    // Lossy and lossless have nearly identical bytes/pixel, only overhead differs
-    let fixed_overhead = if is_lossless {
-        DECODE_LOSSLESS_FIXED_OVERHEAD
-    } else {
-        DECODE_LOSSY_FIXED_OVERHEAD
-    };
+    // Memory: Conservative estimate using lossless overhead
+    // Measured formula: ~133 KB + pixels × 15 bytes
+    let peak_memory_bytes =
+        DECODE_FIXED_OVERHEAD + (pixels as f64 * DECODE_BYTES_PER_PIXEL) as u64;
 
-    let peak_memory_bytes = fixed_overhead + (pixels as f64 * DECODE_BYTES_PER_PIXEL) as u64;
-
-    // Content-dependent multipliers (measured):
-    // - Min (gradient/solid): 1.0x (baseline)
-    // - Typical (photos): 1.0x (decode is very stable)
-    // - Max (noise): 1.05x (only ~5% variation)
+    // Memory varies only ~5% with content type
     let peak_memory_bytes_min = peak_memory_bytes;
     let peak_memory_bytes_max = (peak_memory_bytes as f64 * 1.05) as u64;
 
-    // Time factor: decode is generally faster than encode
-    // Lossless decode is slightly slower due to entropy decoding
-    let time_factor = if is_lossless { 0.3 } else { 0.2 };
+    // Time factors relative to lossy encode M4 (1.0 = 24.7ms at 1024×1024)
+    // Measured decode times at 1024×1024:
+    //   Solid:       lossy 3.7ms (0.15×), lossless 6.7ms (0.27×)
+    //   Gradient:    lossy 8.4ms (0.34×), lossless 7.0ms (0.28×)
+    //   Real photos: lossy 13ms (0.53×),  lossless 18ms (0.73×)
+    //   Noise:       lossy 35ms (1.4×),   lossless 15ms (0.60×)
+    //
+    // Using conservative estimates (lossless real photos as typical):
+    let time_factor_min = 0.15; // solid color (fastest)
+    let time_factor = 0.6; // real photos (conservative: between lossy 0.53 and lossless 0.73)
+    let time_factor_max = 1.4; // noise (lossy worst case)
 
     // Allocations: minimal for decode (measured ~10-15)
     let estimated_allocations = 12;
@@ -384,7 +384,9 @@ pub fn estimate_decode(
         peak_memory_bytes,
         peak_memory_bytes_max,
         estimated_allocations,
+        time_factor_min,
         time_factor,
+        time_factor_max,
         output_bytes,
     }
 }
@@ -395,36 +397,28 @@ pub fn estimate_decode(
 /// to a caller-provided buffer, avoiding the output buffer allocation.
 ///
 /// # Measured savings (heaptrack, libwebp 1.5):
-/// - Lossy: saves exactly the output buffer size
-/// - Lossless: internal allocations may still dominate (less savings observed)
+/// - Lossy sources: saves exactly the output buffer size
+/// - Lossless sources: internal VP8L allocations dominate (negligible savings)
+///
+/// Since we can't know the source type, this uses a conservative estimate.
 ///
 /// # Example
 ///
 /// ```rust
 /// use webpx::heuristics::estimate_decode_zerocopy;
 ///
-/// let est = estimate_decode_zerocopy(1920, 1080, false);
+/// let est = estimate_decode_zerocopy(1920, 1080);
 /// println!("Peak memory (zero-copy): {:.1} MB", est.peak_memory_bytes as f64 / 1_000_000.0);
 /// ```
 #[must_use]
-pub fn estimate_decode_zerocopy(width: u32, height: u32, is_lossless: bool) -> DecodeEstimate {
-    let mut est = estimate_decode(width, height, 4, is_lossless);
+pub fn estimate_decode_zerocopy(width: u32, height: u32) -> DecodeEstimate {
+    let mut est = estimate_decode(width, height, 4);
 
-    // Zero-copy path: output buffer is pre-allocated by caller
-    // For lossy, this saves exactly the output buffer size
-    // For lossless, internal VP8L allocations may still dominate
-    let savings = if is_lossless {
-        // Lossless: internal allocations mean less savings
-        // Measured: negligible difference
-        0
-    } else {
-        // Lossy: saves the full output buffer
-        est.output_bytes
-    };
-
-    est.peak_memory_bytes_min = est.peak_memory_bytes_min.saturating_sub(savings);
-    est.peak_memory_bytes = est.peak_memory_bytes.saturating_sub(savings);
-    est.peak_memory_bytes_max = est.peak_memory_bytes_max.saturating_sub(savings);
+    // Zero-copy savings are source-dependent:
+    // - Lossy: saves full output buffer
+    // - Lossless: negligible savings (internal VP8L allocations dominate)
+    // Since we don't know source type, use conservative estimate (no savings)
+    // Callers who know they have lossy source can subtract output_bytes themselves
 
     // Fewer allocations since output isn't allocated
     est.estimated_allocations = 8;
@@ -503,15 +497,9 @@ pub fn estimate_animation_encode(
 /// * `width` - Frame width in pixels
 /// * `height` - Frame height in pixels
 /// * `frame_count` - Number of frames
-/// * `is_lossless` - Whether the animation uses lossless compression
 #[must_use]
-pub fn estimate_animation_decode(
-    width: u32,
-    height: u32,
-    frame_count: u32,
-    is_lossless: bool,
-) -> DecodeEstimate {
-    let single_frame = estimate_decode(width, height, 4, is_lossless);
+pub fn estimate_animation_decode(width: u32, height: u32, frame_count: u32) -> DecodeEstimate {
+    let single_frame = estimate_decode(width, height, 4);
 
     // Animation decoder holds previous frame for blending
     let frame_bytes = (width as u64) * (height as u64) * 4;
@@ -520,7 +508,9 @@ pub fn estimate_animation_decode(
     let peak_memory_max = single_frame.peak_memory_bytes_max + frame_bytes;
 
     // Time is linear with frame count
+    let time_factor_min = single_frame.time_factor_min * frame_count as f32;
     let time_factor = single_frame.time_factor * frame_count as f32;
+    let time_factor_max = single_frame.time_factor_max * frame_count as f32;
 
     // Allocations: per-frame output
     let estimated_allocations = frame_count * 2 + 5;
@@ -533,7 +523,9 @@ pub fn estimate_animation_decode(
         peak_memory_bytes: peak_memory,
         peak_memory_bytes_max: peak_memory_max,
         estimated_allocations,
+        time_factor_min,
         time_factor,
+        time_factor_max,
         output_bytes,
     }
 }
@@ -679,56 +671,72 @@ mod tests {
     #[test]
     fn test_decode_less_than_encode() {
         let encode = estimate_encode(1024, 1024, 4, &EncoderConfig::default());
-        let decode = estimate_decode(1024, 1024, 4, false);
+        let decode = estimate_decode(1024, 1024, 4);
 
         // Decode should use less memory than encode
         assert!(decode.peak_memory_bytes < encode.peak_memory_bytes);
     }
 
     #[test]
-    fn test_zerocopy_saves_memory() {
-        let normal = estimate_decode(1024, 1024, 4, false);
-        let zerocopy = estimate_decode_zerocopy(1024, 1024, false);
+    fn test_zerocopy_api() {
+        let normal = estimate_decode(1024, 1024, 4);
+        let zerocopy = estimate_decode_zerocopy(1024, 1024);
 
-        // Zero-copy should save the output buffer size (for lossy)
-        let output_size = 1024 * 1024 * 4;
-        assert!(normal.peak_memory_bytes - zerocopy.peak_memory_bytes >= output_size / 2);
+        // Zero-copy uses conservative estimate (no savings assumed)
+        // since we don't know if source is lossy or lossless
+        assert!(zerocopy.peak_memory_bytes <= normal.peak_memory_bytes);
+        assert!(zerocopy.estimated_allocations < normal.estimated_allocations);
     }
 
     #[test]
     fn test_decode_estimate_accuracy() {
-        // Test against heaptrack measurements (libwebp 1.5, gradient images)
-        // Measured: 1024x1024 lossy decode = 15.81 MB
-        let lossy = estimate_decode(1024, 1024, 4, false);
-        let measured_lossy = 15_810_000u64;
-        let error_lossy =
-            (lossy.peak_memory_bytes as f64 - measured_lossy as f64).abs() / measured_lossy as f64;
+        // Test against heaptrack measurements (libwebp 1.5)
+        // Using conservative lossless estimate: 133 KB + pixels × 15 bytes
+        // 1024x1024 = 1,048,576 pixels
+        // Expected: 133,000 + 1,048,576 × 15 = 15,861,640 bytes ≈ 15.86 MB
+        let est = estimate_decode(1024, 1024, 4);
+        let measured = 15_910_000u64; // lossless decode measurement
+        let error = (est.peak_memory_bytes as f64 - measured as f64).abs() / measured as f64;
         assert!(
-            error_lossy < 0.10,
-            "Lossy decode 1024x1024: estimated {} vs measured {}, error {:.1}%",
-            lossy.peak_memory_bytes,
-            measured_lossy,
-            error_lossy * 100.0
+            error < 0.10,
+            "Decode 1024x1024: estimated {} vs measured {}, error {:.1}%",
+            est.peak_memory_bytes,
+            measured,
+            error * 100.0
+        );
+    }
+
+    #[test]
+    fn test_decode_time_factors() {
+        // Time factors should reflect measured values
+        let est = estimate_decode(1024, 1024, 4);
+
+        // Min (solid): ~0.15× of lossy encode M4
+        assert!(
+            (est.time_factor_min - 0.15).abs() < 0.05,
+            "time_factor_min: {}",
+            est.time_factor_min
         );
 
-        // Measured: 1024x1024 lossless decode = 15.91 MB
-        let lossless = estimate_decode(1024, 1024, 4, true);
-        let measured_lossless = 15_910_000u64;
-        let error_lossless = (lossless.peak_memory_bytes as f64 - measured_lossless as f64).abs()
-            / measured_lossless as f64;
+        // Typical (real photos): ~0.6×
         assert!(
-            error_lossless < 0.10,
-            "Lossless decode 1024x1024: estimated {} vs measured {}, error {:.1}%",
-            lossless.peak_memory_bytes,
-            measured_lossless,
-            error_lossless * 100.0
+            (est.time_factor - 0.6).abs() < 0.1,
+            "time_factor: {}",
+            est.time_factor
+        );
+
+        // Max (noise): ~1.4×
+        assert!(
+            (est.time_factor_max - 1.4).abs() < 0.2,
+            "time_factor_max: {}",
+            est.time_factor_max
         );
     }
 
     #[test]
     fn test_decode_min_max_range() {
-        // Decode min/max should have ~5% variation (much less than encode)
-        let est = estimate_decode(1024, 1024, 4, false);
+        // Decode memory min/max should have ~5% variation
+        let est = estimate_decode(1024, 1024, 4);
         let ratio = est.peak_memory_bytes_max as f64 / est.peak_memory_bytes_min as f64;
         assert!(
             (ratio - 1.05).abs() < 0.01,
