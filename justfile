@@ -48,6 +48,39 @@ mem-profile-print:
 mem-profile-quick:
     cargo run --release --all-features --example alloc_profile
 
+# Collect memory formula data (run specific config with heaptrack)
+mem-formula size="512" mode="lossy" quality="85" method="4":
+    cargo build --release --all-features --example mem_formula
+    heaptrack ./target/release/examples/mem_formula --size {{size}} --mode {{mode}} --quality {{quality}} --method {{method}}
+
+# Run batch memory formula collection
+mem-formula-batch:
+    cargo build --release --all-features --example mem_formula
+    ./target/release/examples/mem_formula --batch
+
+# Generate memory formula sweep configs
+mem-formula-sweep:
+    cargo build --release --all-features --example mem_formula
+    ./target/release/examples/mem_formula --sweep
+
+# Comprehensive heaptrack data collection for formula derivation
+mem-formula-collect:
+    #!/usr/bin/env bash
+    set -e
+    cargo build --release --all-features --example mem_formula
+    mkdir -p mem_data
+    for size in 128 256 512 1024 2048; do
+        for mode in lossy lossless; do
+            for method in 0 4 6; do
+                echo "=== size=$size mode=$mode method=$method ==="
+                heaptrack ./target/release/examples/mem_formula \
+                    --size $size --mode $mode --method $method 2>&1 | \
+                    tee -a mem_data/results_${mode}.txt | grep -E "(peak heap|Config:)"
+            done
+        done
+    done
+    echo "Results saved to mem_data/"
+
 # Run quick encoder benchmarks only
 bench-encode:
     cargo bench --all-features --bench profile -- encode/
