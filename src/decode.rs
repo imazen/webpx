@@ -135,8 +135,8 @@ pub fn decode_bgr(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
-    let (ptr, width, height) =
-        P::decode_new(data).ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
+    let (ptr, width, height) = P::decode_new(data)
+        .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
     let bpp = P::LAYOUT.bytes_per_pixel();
     let pixel_count = (width as usize) * (height as usize);
@@ -146,11 +146,7 @@ pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
         // Copy from libwebp buffer to our Vec<P>
         let byte_slice = core::slice::from_raw_parts(ptr, byte_size);
         let mut vec: Vec<P> = Vec::with_capacity(pixel_count);
-        core::ptr::copy_nonoverlapping(
-            byte_slice.as_ptr(),
-            vec.as_mut_ptr() as *mut u8,
-            byte_size,
-        );
+        core::ptr::copy_nonoverlapping(byte_slice.as_ptr(), vec.as_mut_ptr() as *mut u8, byte_size);
         vec.set_len(pixel_count);
         libwebp_sys::WebPFree(ptr as *mut _);
         vec
@@ -182,8 +178,8 @@ pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn decode_append<P: DecodePixel>(data: &[u8], output: &mut Vec<P>) -> Result<(u32, u32)> {
-    let (ptr, width, height) =
-        P::decode_new(data).ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
+    let (ptr, width, height) = P::decode_new(data)
+        .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
     let bpp = P::LAYOUT.bytes_per_pixel();
     let pixel_count = (width as usize) * (height as usize);
