@@ -287,31 +287,38 @@ Content type has a **dramatic impact** on CPU time, much more than on memory.
 | **Real photos** | **65-83ms (13-16 Mpix/s)** | **327-355ms (3.4 Mpix/s)** |
 | Noise | 117ms (9 Mpix/s) | 86ms (12 Mpix/s) |
 
-### Time Factors
+### Throughput Summary
 
-Time factors are relative to lossy encode M4 of gradient images (1.0 = 24.7ms at 1024×1024):
+Throughput in megapixels per second (higher = faster):
 
-**Decode:**
-- Min (solid): 0.15×
-- Typical (real photos): 0.6×
-- Max (noise): 1.4×
+**Decode Throughput:**
 
-**Encode Method Impact (lossy):**
+| Content | Mpix/s |
+|---------|--------|
+| Solid (best) | ~200 |
+| Real photos (typical) | ~100 |
+| Noise (worst) | ~30 |
 
-| Method | Time Factor | Mpix/s |
-|--------|-------------|--------|
-| M0 | 0.28× | 154 |
-| M1-2 | 0.35-0.40× | 106-128 |
-| M3-4 | 1.0× | 42 |
-| M5-6 | 1.1× | 37 |
+**Lossy Encode Throughput (by method):**
 
-**Lossless Method Impact:**
+| Method | Mpix/s |
+|--------|--------|
+| M0 | ~160 |
+| M1-2 | 106-128 |
+| M3-4 | ~40 |
+| M5-6 | ~37 |
 
-| Method | Time Factor | Mpix/s |
-|--------|-------------|--------|
-| M0 | 0.51× | 82 |
-| M1-4 | 5.3× | 7.8 |
-| M5-6 | 10.8× | 3.9 |
+Content impact: Real photos ~15 Mpix/s, noise ~9 Mpix/s at M4.
+
+**Lossless Encode Throughput (by method):**
+
+| Method | Mpix/s |
+|--------|--------|
+| M0 | ~80 |
+| M1-4 | ~6-8 |
+| M5-6 | ~4 |
+
+Content impact: Solid ~150 Mpix/s, real photos ~3 Mpix/s at M4.
 
 ---
 
@@ -329,10 +336,11 @@ let config = EncoderConfig::default()
 
 let est = estimate_encode(1920, 1080, 4, &config);
 
-println!("Memory estimates for 1920×1080 lossy encode:");
-println!("  Min (smooth): {:.1} MB", est.peak_memory_bytes_min as f64 / 1e6);
-println!("  Typical:      {:.1} MB", est.peak_memory_bytes as f64 / 1e6);
-println!("  Max (noise):  {:.1} MB", est.peak_memory_bytes_max as f64 / 1e6);
+println!("Estimates for 1920×1080 lossy encode:");
+println!("  Memory (typical): {:.1} MB", est.peak_memory_bytes as f64 / 1e6);
+println!("  Time (typical):   {:.0} ms", est.estimated_time_ms);
+println!("  Time range:       {:.0}-{:.0} ms",
+    est.estimated_time_ms_min, est.estimated_time_ms_max);
 ```
 
 ### Getting Decode Estimates
@@ -346,8 +354,9 @@ let est = estimate_decode(1920, 1080, 4);
 println!("Decode estimates for 1920×1080:");
 println!("  Output buffer: {:.1} MB", est.output_bytes as f64 / 1e6);
 println!("  Peak memory:   {:.1} MB", est.peak_memory_bytes as f64 / 1e6);
-println!("  Time factor:   {:.2}x (min {:.2}x, max {:.2}x)",
-    est.time_factor, est.time_factor_min, est.time_factor_max);
+println!("  Time (typical): {:.0} ms", est.estimated_time_ms);
+println!("  Time range:     {:.0}-{:.0} ms",
+    est.estimated_time_ms_min, est.estimated_time_ms_max);
 
 // Zero-copy decode (caller provides output buffer)
 let est_zc = estimate_decode_zerocopy(1920, 1080);
@@ -357,8 +366,9 @@ println!("  Zero-copy peak: {:.1} MB", est_zc.peak_memory_bytes as f64 / 1e6);
 ### Choosing the Right Estimate
 
 - **Memory budgeting:** Use `peak_memory_bytes_max` for safety
-- **Progress bars:** Use `peak_memory_bytes` (typical)
-- **Capacity planning:** Use `peak_memory_bytes` with 20% headroom
+- **Time budgeting:** Use `estimated_time_ms_max` for worst case
+- **Progress bars:** Use `estimated_time_ms` (typical)
+- **Capacity planning:** Use typical estimates with 20% headroom
 
 ---
 

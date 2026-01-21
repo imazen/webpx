@@ -120,6 +120,49 @@ const DECODE_BYTES_PER_PIXEL: f64 = 15.0;
 /// The difference is negligible at typical image sizes.
 const DECODE_FIXED_OVERHEAD: u64 = 133_000;
 
+// =============================================================================
+// Throughput constants (measured timing, libwebp 1.5)
+// Time scales roughly linearly with pixel count.
+// =============================================================================
+
+/// Decode throughput for simple images (solid color) in Mpix/s.
+/// Measured: ~190 Mpix/s at 256×256, ~120 Mpix/s at 2048×2048.
+/// Using conservative large-image estimate.
+const DECODE_THROUGHPUT_MAX_MPIXELS: f64 = 200.0;
+
+/// Decode throughput for typical real photos in Mpix/s.
+/// Measured: ~100 Mpix/s for real photos across sizes.
+const DECODE_THROUGHPUT_TYP_MPIXELS: f64 = 100.0;
+
+/// Decode throughput for high-entropy content (noise) in Mpix/s.
+/// Measured: ~30 Mpix/s for noise images (lossy worst case).
+const DECODE_THROUGHPUT_MIN_MPIXELS: f64 = 30.0;
+
+/// Lossy encode throughput (M4) for gradient/simple content in Mpix/s.
+/// Measured: ~40 Mpix/s at 1024×1024.
+const LOSSY_ENCODE_THROUGHPUT_MAX_MPIXELS: f64 = 40.0;
+
+/// Lossy encode throughput (M4) for typical real photos in Mpix/s.
+/// Measured: ~15 Mpix/s for real photos.
+const LOSSY_ENCODE_THROUGHPUT_TYP_MPIXELS: f64 = 15.0;
+
+/// Lossy encode throughput (M4) for high-entropy content in Mpix/s.
+/// Measured: ~9 Mpix/s for noise images.
+const LOSSY_ENCODE_THROUGHPUT_MIN_MPIXELS: f64 = 9.0;
+
+/// Lossless encode throughput (M4) for simple content in Mpix/s.
+/// Solid color images compress very fast: ~150 Mpix/s.
+const LOSSLESS_ENCODE_THROUGHPUT_MAX_MPIXELS: f64 = 150.0;
+
+/// Lossless encode throughput (M4) for typical content in Mpix/s.
+/// Real photos are the typical workload and are slowest for lossless: ~3-4 Mpix/s.
+/// (Note: unlike lossy, photos are slower than noise for lossless encoding.)
+const LOSSLESS_ENCODE_THROUGHPUT_TYP_MPIXELS: f64 = 3.5;
+
+/// Lossless encode throughput (M4) for worst case in Mpix/s.
+/// Real photos are the worst case for lossless: ~3 Mpix/s.
+const LOSSLESS_ENCODE_THROUGHPUT_MIN_MPIXELS: f64 = 3.0;
+
 /// Resource estimation for encoding operations.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -146,10 +189,20 @@ pub struct EncodeEstimate {
     /// Fewer allocations = better latency (less GC pressure).
     pub estimated_allocations: u32,
 
-    /// Relative time factor (1.0 = baseline lossy q85 m4).
+    /// Estimated encode time in milliseconds (best case: simple content).
     ///
-    /// Multiply by baseline time to get estimated time.
-    pub time_factor: f32,
+    /// Based on measured throughput. For lossy M4, ~40 Mpix/s.
+    pub estimated_time_ms_min: f32,
+
+    /// Estimated encode time in milliseconds (typical: real photographs).
+    ///
+    /// Based on measured throughput with real photo content.
+    pub estimated_time_ms: f32,
+
+    /// Estimated encode time in milliseconds (worst case: noise/high-entropy).
+    ///
+    /// Based on measured throughput with high-entropy content.
+    pub estimated_time_ms_max: f32,
 
     /// Estimated output size in bytes.
     ///
@@ -181,17 +234,20 @@ pub struct DecodeEstimate {
     /// Estimated heap allocations during decoding.
     pub estimated_allocations: u32,
 
-    /// Minimum time factor (best case: solid color).
-    /// Relative to lossy encode M4 baseline (1.0).
-    pub time_factor_min: f32,
+    /// Estimated decode time in milliseconds (best case: solid color).
+    ///
+    /// Based on measured throughput of ~200 Mpix/s for simple images.
+    pub estimated_time_ms_min: f32,
 
-    /// Typical time factor (real photographs).
-    /// Relative to lossy encode M4 baseline (1.0).
-    pub time_factor: f32,
+    /// Estimated decode time in milliseconds (typical: real photographs).
+    ///
+    /// Based on measured throughput of ~100 Mpix/s for real photos.
+    pub estimated_time_ms: f32,
 
-    /// Maximum time factor (worst case: noise/high-entropy).
-    /// Relative to lossy encode M4 baseline (1.0).
-    pub time_factor_max: f32,
+    /// Estimated decode time in milliseconds (worst case: noise/high-entropy).
+    ///
+    /// Based on measured throughput of ~30 Mpix/s for high-entropy content.
+    pub estimated_time_ms_max: f32,
 
     /// Output buffer size in bytes.
     pub output_bytes: u64,
@@ -216,7 +272,8 @@ pub struct DecodeEstimate {
 ///
 /// let est = estimate_encode(1920, 1080, 4, &EncoderConfig::default());
 /// println!("Peak memory: {:.1} MB", est.peak_memory_bytes as f64 / 1_000_000.0);
-/// println!("Relative time: {:.1}x baseline", est.time_factor);
+/// println!("Estimated time: {:.0}ms (typical), {:.0}-{:.0}ms range",
+///     est.estimated_time_ms, est.estimated_time_ms_min, est.estimated_time_ms_max);
 /// ```
 #[must_use]
 pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig) -> EncodeEstimate {
@@ -256,37 +313,54 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
     };
     let estimated_output = (input_bytes as f64 * output_ratio) as u64;
 
-    // Time factor based on method and lossless flag
-    // Measured relative times (method 4 = 1.0):
-    // method 0: ~0.25x, method 6: ~1.1x
-    let method_factor = match config.method {
-        0 => 0.25,
-        1 => 0.4,
-        2 => 0.55,
-        3 => 0.75,
+    // Method speed factor relative to M4 (M4 = 1.0)
+    // Measured: M0 is ~4x faster, M6 is ~10% slower
+    let method_speed_factor = match config.method {
+        0 => 4.0,
+        1 => 2.5,
+        2 => 1.8,
+        3 => 1.3,
         4 => 1.0,
-        5 => 1.05,
-        6 => 1.1,
+        5 => 0.95,
+        6 => 0.9,
         _ => 1.0,
     };
 
-    // Lossless is ~5-10x slower than lossy
-    let lossless_factor = if config.lossless { 6.0 } else { 1.0 };
-
     // Near-lossless mode is slower
-    let quality_factor = if config.near_lossless < 100 { 1.3 } else { 1.0 };
+    let quality_speed_factor = if config.near_lossless < 100 { 0.77 } else { 1.0 };
 
-    // Preset factors
-    let preset_factor = match config.preset {
+    // Preset factors (minor impact)
+    let preset_speed_factor = match config.preset {
         Preset::Default => 1.0,
-        Preset::Photo => 1.05,
+        Preset::Photo => 0.95,
         Preset::Picture => 1.0,
         Preset::Drawing => 1.0,
-        Preset::Icon => 0.95,
-        Preset::Text => 0.95,
+        Preset::Icon => 1.05,
+        Preset::Text => 1.05,
     };
 
-    let time_factor = method_factor * lossless_factor * quality_factor * preset_factor;
+    // Calculate time from throughput (Mpix/s)
+    // Time = pixels / (throughput * 1_000_000) * 1000 ms = pixels / (throughput * 1000)
+    let pixels_f = pixels as f64;
+    let speed_adjust = method_speed_factor * quality_speed_factor * preset_speed_factor;
+
+    let (throughput_max, throughput_typ, throughput_min) = if config.lossless {
+        (
+            LOSSLESS_ENCODE_THROUGHPUT_MAX_MPIXELS * speed_adjust,
+            LOSSLESS_ENCODE_THROUGHPUT_TYP_MPIXELS * speed_adjust,
+            LOSSLESS_ENCODE_THROUGHPUT_MIN_MPIXELS * speed_adjust,
+        )
+    } else {
+        (
+            LOSSY_ENCODE_THROUGHPUT_MAX_MPIXELS * speed_adjust,
+            LOSSY_ENCODE_THROUGHPUT_TYP_MPIXELS * speed_adjust,
+            LOSSY_ENCODE_THROUGHPUT_MIN_MPIXELS * speed_adjust,
+        )
+    };
+
+    let estimated_time_ms_min = (pixels_f / (throughput_max * 1000.0)) as f32;
+    let estimated_time_ms = (pixels_f / (throughput_typ * 1000.0)) as f32;
+    let estimated_time_ms_max = (pixels_f / (throughput_min * 1000.0)) as f32;
 
     // Allocations: measured ~20-30 per encode for most sizes
     let estimated_allocations = 25;
@@ -319,7 +393,9 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
         peak_memory_bytes: peak_memory_bytes_typ,
         peak_memory_bytes_max,
         estimated_allocations,
-        time_factor: time_factor as f32,
+        estimated_time_ms_min,
+        estimated_time_ms,
+        estimated_time_ms_max,
         estimated_output_bytes: estimated_output,
     }
 }
@@ -347,8 +423,8 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
 /// let est = estimate_decode(1920, 1080, 4);
 /// println!("Output buffer: {:.1} MB", est.output_bytes as f64 / 1_000_000.0);
 /// println!("Peak memory: {:.1} MB", est.peak_memory_bytes as f64 / 1_000_000.0);
-/// println!("Time factor: {:.2}x (min {:.2}x, max {:.2}x)",
-///     est.time_factor, est.time_factor_min, est.time_factor_max);
+/// println!("Estimated time: {:.0}ms (typical), {:.0}-{:.0}ms range",
+///     est.estimated_time_ms, est.estimated_time_ms_min, est.estimated_time_ms_max);
 /// ```
 #[must_use]
 pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> DecodeEstimate {
@@ -364,17 +440,15 @@ pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> DecodeEstimat
     let peak_memory_bytes_min = peak_memory_bytes;
     let peak_memory_bytes_max = (peak_memory_bytes as f64 * 1.05) as u64;
 
-    // Time factors relative to lossy encode M4 (1.0 = 24.7ms at 1024×1024)
-    // Measured decode times at 1024×1024:
-    //   Solid:       lossy 3.7ms (0.15×), lossless 6.7ms (0.27×)
-    //   Gradient:    lossy 8.4ms (0.34×), lossless 7.0ms (0.28×)
-    //   Real photos: lossy 13ms (0.53×),  lossless 18ms (0.73×)
-    //   Noise:       lossy 35ms (1.4×),   lossless 15ms (0.60×)
-    //
-    // Using conservative estimates (lossless real photos as typical):
-    let time_factor_min = 0.15; // solid color (fastest)
-    let time_factor = 0.6; // real photos (conservative: between lossy 0.53 and lossless 0.73)
-    let time_factor_max = 1.4; // noise (lossy worst case)
+    // Time estimates from measured throughput (Mpix/s)
+    // Time = pixels / (throughput * 1_000_000) * 1000 ms
+    //      = pixels / (throughput * 1000)
+    let pixels_f = pixels as f64;
+    let estimated_time_ms_min =
+        (pixels_f / (DECODE_THROUGHPUT_MAX_MPIXELS * 1000.0)) as f32; // fast: solid
+    let estimated_time_ms = (pixels_f / (DECODE_THROUGHPUT_TYP_MPIXELS * 1000.0)) as f32; // typical: photos
+    let estimated_time_ms_max =
+        (pixels_f / (DECODE_THROUGHPUT_MIN_MPIXELS * 1000.0)) as f32; // slow: noise
 
     // Allocations: minimal for decode (measured ~10-15)
     let estimated_allocations = 12;
@@ -384,9 +458,9 @@ pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> DecodeEstimat
         peak_memory_bytes,
         peak_memory_bytes_max,
         estimated_allocations,
-        time_factor_min,
-        time_factor,
-        time_factor_max,
+        estimated_time_ms_min,
+        estimated_time_ms,
+        estimated_time_ms_max,
         output_bytes,
     }
 }
@@ -463,7 +537,10 @@ pub fn estimate_animation_encode(
     let peak_memory = single_frame.peak_memory_bytes + frame_bytes / 2 + 200_000;
 
     // Time is linear with frame count
-    let time_factor = single_frame.time_factor * frame_count as f32;
+    let frame_count_f = frame_count as f32;
+    let estimated_time_ms_min = single_frame.estimated_time_ms_min * frame_count_f;
+    let estimated_time_ms = single_frame.estimated_time_ms * frame_count_f;
+    let estimated_time_ms_max = single_frame.estimated_time_ms_max * frame_count_f;
 
     // Allocations: base + per-frame
     let estimated_allocations = single_frame.estimated_allocations + (frame_count - 1) * 5;
@@ -483,7 +560,9 @@ pub fn estimate_animation_encode(
         peak_memory_bytes: (peak_memory as f64 * typ_mult) as u64,
         peak_memory_bytes_max: (peak_memory as f64 * max_mult) as u64,
         estimated_allocations,
-        time_factor,
+        estimated_time_ms_min,
+        estimated_time_ms,
+        estimated_time_ms_max,
         estimated_output_bytes: estimated_output,
     }
 }
@@ -508,9 +587,10 @@ pub fn estimate_animation_decode(width: u32, height: u32, frame_count: u32) -> D
     let peak_memory_max = single_frame.peak_memory_bytes_max + frame_bytes;
 
     // Time is linear with frame count
-    let time_factor_min = single_frame.time_factor_min * frame_count as f32;
-    let time_factor = single_frame.time_factor * frame_count as f32;
-    let time_factor_max = single_frame.time_factor_max * frame_count as f32;
+    let frame_count_f = frame_count as f32;
+    let estimated_time_ms_min = single_frame.estimated_time_ms_min * frame_count_f;
+    let estimated_time_ms = single_frame.estimated_time_ms * frame_count_f;
+    let estimated_time_ms_max = single_frame.estimated_time_ms_max * frame_count_f;
 
     // Allocations: per-frame output
     let estimated_allocations = frame_count * 2 + 5;
@@ -523,9 +603,9 @@ pub fn estimate_animation_decode(width: u32, height: u32, frame_count: u32) -> D
         peak_memory_bytes: peak_memory,
         peak_memory_bytes_max: peak_memory_max,
         estimated_allocations,
-        time_factor_min,
-        time_factor,
-        time_factor_max,
+        estimated_time_ms_min,
+        estimated_time_ms,
+        estimated_time_ms_max,
         output_bytes,
     }
 }
@@ -707,29 +787,37 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_time_factors() {
-        // Time factors should reflect measured values
+    fn test_decode_time_estimates() {
+        // Time estimates should reflect measured throughput values
+        // 1024×1024 = 1,048,576 pixels
         let est = estimate_decode(1024, 1024, 4);
+        let pixels = 1024.0 * 1024.0;
 
-        // Min (solid): ~0.15× of lossy encode M4
+        // Min (solid): ~200 Mpix/s → ~5.2ms
+        let expected_min = pixels / (200.0 * 1000.0);
         assert!(
-            (est.time_factor_min - 0.15).abs() < 0.05,
-            "time_factor_min: {}",
-            est.time_factor_min
+            (est.estimated_time_ms_min - expected_min as f32).abs() < 1.0,
+            "estimated_time_ms_min: {} vs expected {}",
+            est.estimated_time_ms_min,
+            expected_min
         );
 
-        // Typical (real photos): ~0.6×
+        // Typical (real photos): ~100 Mpix/s → ~10.5ms
+        let expected_typ = pixels / (100.0 * 1000.0);
         assert!(
-            (est.time_factor - 0.6).abs() < 0.1,
-            "time_factor: {}",
-            est.time_factor
+            (est.estimated_time_ms - expected_typ as f32).abs() < 2.0,
+            "estimated_time_ms: {} vs expected {}",
+            est.estimated_time_ms,
+            expected_typ
         );
 
-        // Max (noise): ~1.4×
+        // Max (noise): ~30 Mpix/s → ~35ms
+        let expected_max = pixels / (30.0 * 1000.0);
         assert!(
-            (est.time_factor_max - 1.4).abs() < 0.2,
-            "time_factor_max: {}",
-            est.time_factor_max
+            (est.estimated_time_ms_max - expected_max as f32).abs() < 5.0,
+            "estimated_time_ms_max: {} vs expected {}",
+            est.estimated_time_ms_max,
+            expected_max
         );
     }
 
