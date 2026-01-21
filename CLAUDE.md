@@ -30,13 +30,15 @@ Initial implementation complete. All core features working:
 Use justfile commands for common tasks:
 
 ```bash
-just test      # Run all tests
-just clippy    # Run clippy
-just fmt       # Format code
-just ci        # Full CI check (fmt, clippy, test)
-just bench     # Run benchmarks
-just coverage  # Generate coverage report
-just doc       # Build and open docs
+just test       # Run all tests
+just clippy     # Run clippy
+just fmt        # Format code
+just semver     # Check semver compatibility
+just ci         # Full CI check (fmt, clippy, test, semver)
+just prepublish # Pre-publish check (ci + doc)
+just bench      # Run benchmarks
+just coverage   # Generate coverage report
+just doc        # Build and open docs
 ```
 
 Or directly:
@@ -45,7 +47,22 @@ Or directly:
 cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt
+cargo semver-checks check-release --all-features
 ```
+
+## Publishing Checklist
+
+Before publishing a new version:
+
+1. Run `just prepublish` to verify all checks pass
+2. Update version in `Cargo.toml`
+3. Commit version bump
+4. Tag with `git tag vX.Y.Z`
+5. Push: `git push && git push origin vX.Y.Z`
+6. Verify CI passes on GitHub
+7. Publish: `cargo publish`
+
+**IMPORTANT:** `cargo-semver-checks` runs in CI and must pass before release. It detects breaking API changes that require a major version bump.
 
 ## Test Fixtures
 
@@ -66,9 +83,10 @@ Larger test files available at `~/work/codec-corpus/image-rs/test-images/webp/`.
 
 ## Test Coverage
 
-124 tests total (88.92% line coverage):
-- 12 unit tests in src/
-- 112+ integration tests in tests/integration.rs
+236 tests total:
+- 25 unit tests in src/
+- 179 integration tests in tests/integration.rs (including 20 real-data corpus tests)
+- 32 doc tests
 
 ## Known Issues
 

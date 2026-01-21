@@ -102,9 +102,17 @@ coverage:
     cargo llvm-cov --all-features --html
     @echo "Coverage report: target/llvm-cov/html/index.html"
 
+# Check semver compatibility against published version
+semver:
+    cargo semver-checks check-release --all-features
+
 # Full CI check (run before committing)
-ci: fmt-check clippy test
+ci: fmt-check clippy test semver
     @echo "All CI checks passed!"
+
+# Pre-publish check (run before cargo publish)
+prepublish: ci doc
+    @echo "Ready to publish!"
 
 # Clean build artifacts
 clean:
