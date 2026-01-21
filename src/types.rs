@@ -63,6 +63,132 @@ impl EncodePixel for BGR8 {
     const LAYOUT: PixelLayout = PixelLayout::Bgr;
 }
 
+/// Sealed marker trait for pixel types that can be decoded into.
+///
+/// This trait is an implementation detail and should not be referenced directly.
+/// Use concrete types like [`RGB8`], [`RGBA8`], [`BGR8`], [`BGRA8`] with
+/// decode functions.
+#[doc(hidden)]
+pub trait DecodePixel: Copy + 'static + private::Sealed {
+    /// The pixel layout corresponding to this type.
+    const LAYOUT: PixelLayout;
+
+    /// Decode WebP data into a newly allocated buffer.
+    ///
+    /// # Safety
+    /// This calls libwebp FFI functions.
+    #[doc(hidden)]
+    fn decode_new(data: &[u8]) -> Option<(*mut u8, i32, i32)>;
+
+    /// Decode WebP data into an existing buffer.
+    ///
+    /// # Safety
+    /// - `output` must be a valid pointer to a buffer of at least `output_len` bytes
+    /// - The buffer must remain valid for the duration of the call
+    #[doc(hidden)]
+    unsafe fn decode_into(data: &[u8], output: *mut u8, output_len: usize, stride: i32) -> bool;
+}
+
+impl DecodePixel for RGBA8 {
+    const LAYOUT: PixelLayout = PixelLayout::Rgba;
+
+    fn decode_new(data: &[u8]) -> Option<(*mut u8, i32, i32)> {
+        let mut width: i32 = 0;
+        let mut height: i32 = 0;
+        let ptr = unsafe {
+            libwebp_sys::WebPDecodeRGBA(data.as_ptr(), data.len(), &mut width, &mut height)
+        };
+        if ptr.is_null() {
+            None
+        } else {
+            Some((ptr, width, height))
+        }
+    }
+
+    unsafe fn decode_into(data: &[u8], output: *mut u8, output_len: usize, stride: i32) -> bool {
+        // SAFETY: Caller guarantees output is valid for output_len bytes
+        let result = unsafe {
+            libwebp_sys::WebPDecodeRGBAInto(data.as_ptr(), data.len(), output, output_len, stride)
+        };
+        !result.is_null()
+    }
+}
+
+impl DecodePixel for BGRA8 {
+    const LAYOUT: PixelLayout = PixelLayout::Bgra;
+
+    fn decode_new(data: &[u8]) -> Option<(*mut u8, i32, i32)> {
+        let mut width: i32 = 0;
+        let mut height: i32 = 0;
+        let ptr = unsafe {
+            libwebp_sys::WebPDecodeBGRA(data.as_ptr(), data.len(), &mut width, &mut height)
+        };
+        if ptr.is_null() {
+            None
+        } else {
+            Some((ptr, width, height))
+        }
+    }
+
+    unsafe fn decode_into(data: &[u8], output: *mut u8, output_len: usize, stride: i32) -> bool {
+        // SAFETY: Caller guarantees output is valid for output_len bytes
+        let result = unsafe {
+            libwebp_sys::WebPDecodeBGRAInto(data.as_ptr(), data.len(), output, output_len, stride)
+        };
+        !result.is_null()
+    }
+}
+
+impl DecodePixel for RGB8 {
+    const LAYOUT: PixelLayout = PixelLayout::Rgb;
+
+    fn decode_new(data: &[u8]) -> Option<(*mut u8, i32, i32)> {
+        let mut width: i32 = 0;
+        let mut height: i32 = 0;
+        let ptr = unsafe {
+            libwebp_sys::WebPDecodeRGB(data.as_ptr(), data.len(), &mut width, &mut height)
+        };
+        if ptr.is_null() {
+            None
+        } else {
+            Some((ptr, width, height))
+        }
+    }
+
+    unsafe fn decode_into(data: &[u8], output: *mut u8, output_len: usize, stride: i32) -> bool {
+        // SAFETY: Caller guarantees output is valid for output_len bytes
+        let result = unsafe {
+            libwebp_sys::WebPDecodeRGBInto(data.as_ptr(), data.len(), output, output_len, stride)
+        };
+        !result.is_null()
+    }
+}
+
+impl DecodePixel for BGR8 {
+    const LAYOUT: PixelLayout = PixelLayout::Bgr;
+
+    fn decode_new(data: &[u8]) -> Option<(*mut u8, i32, i32)> {
+        let mut width: i32 = 0;
+        let mut height: i32 = 0;
+        let ptr = unsafe {
+            libwebp_sys::WebPDecodeBGR(data.as_ptr(), data.len(), &mut width, &mut height)
+        };
+        if ptr.is_null() {
+            None
+        } else {
+            Some((ptr, width, height))
+        }
+    }
+
+    unsafe fn decode_into(data: &[u8], output: *mut u8, output_len: usize, stride: i32) -> bool {
+        // SAFETY: Caller guarantees output is valid for output_len bytes
+        let result = unsafe {
+            libwebp_sys::WebPDecodeBGRInto(data.as_ptr(), data.len(), output, output_len, stride)
+        };
+        !result.is_null()
+    }
+}
+
 mod private {
     use super::*;
 

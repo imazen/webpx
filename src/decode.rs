@@ -2,7 +2,7 @@
 
 use crate::config::DecoderConfig;
 use crate::error::{DecodingError, Error, Result};
-use crate::types::{ImageInfo, YuvPlanes};
+use crate::types::{DecodePixel, ImageInfo, YuvPlanes};
 use alloc::vec::Vec;
 use imgref::ImgVec;
 use rgb::alt::{BGR8, BGRA8};
@@ -117,6 +117,184 @@ pub fn decode_bgr(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     };
 
     Ok((pixels, width as u32, height as u32))
+}
+
+/// Decode WebP data to typed pixels.
+///
+/// Returns the decoded pixels as the specified pixel type and dimensions.
+/// Supports [`RGBA8`], [`RGB8`], [`BGRA8`], and [`BGR8`].
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use rgb::RGBA8;
+///
+/// let webp_data: &[u8] = &[0u8; 100]; // placeholder
+/// let (pixels, width, height) = webpx::decode::<RGBA8>(webp_data)?;
+/// // pixels is Vec<RGBA8>
+/// # Ok::<(), webpx::At<webpx::Error>>(())
+/// ```
+pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
+    let (ptr, width, height) =
+        P::decode_new(data).ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
+
+    let bpp = P::LAYOUT.bytes_per_pixel();
+    let pixel_count = (width as usize) * (height as usize);
+    let byte_size = pixel_count * bpp;
+
+    let pixels = unsafe {
+        // Copy from libwebp buffer to our Vec<P>
+        let byte_slice = core::slice::from_raw_parts(ptr, byte_size);
+        let mut vec: Vec<P> = Vec::with_capacity(pixel_count);
+        core::ptr::copy_nonoverlapping(
+            byte_slice.as_ptr(),
+            vec.as_mut_ptr() as *mut u8,
+            byte_size,
+        );
+        vec.set_len(pixel_count);
+        libwebp_sys::WebPFree(ptr as *mut _);
+        vec
+    };
+
+    Ok((pixels, width as u32, height as u32))
+}
+
+/// Decode WebP data, appending typed pixels to an existing Vec.
+///
+/// This is useful when you want to reuse an existing buffer or
+/// decode multiple images into the same Vec.
+///
+/// # Arguments
+/// * `data` - WebP encoded data
+/// * `output` - Vec to append decoded pixels to
+///
+/// # Returns
+/// Width and height of the decoded image.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use rgb::RGBA8;
+///
+/// let webp_data: &[u8] = &[0u8; 100]; // placeholder
+/// let mut pixels: Vec<RGBA8> = Vec::new();
+/// let (width, height) = webpx::decode_append::<RGBA8>(webp_data, &mut pixels)?;
+/// # Ok::<(), webpx::At<webpx::Error>>(())
+/// ```
+pub fn decode_append<P: DecodePixel>(data: &[u8], output: &mut Vec<P>) -> Result<(u32, u32)> {
+    let (ptr, width, height) =
+        P::decode_new(data).ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
+
+    let bpp = P::LAYOUT.bytes_per_pixel();
+    let pixel_count = (width as usize) * (height as usize);
+    let byte_size = pixel_count * bpp;
+
+    unsafe {
+        let byte_slice = core::slice::from_raw_parts(ptr, byte_size);
+        let start = output.len();
+        output.reserve(pixel_count);
+        core::ptr::copy_nonoverlapping(
+            byte_slice.as_ptr(),
+            (output.as_mut_ptr() as *mut u8).add(start * bpp),
+            byte_size,
+        );
+        output.set_len(start + pixel_count);
+        libwebp_sys::WebPFree(ptr as *mut _);
+    };
+
+    Ok((width as u32, height as u32))
+}
+
+/// Decode WebP data to an imgref image.
+///
+/// Returns the decoded image as an [`ImgVec`] with the specified pixel type.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use rgb::RGBA8;
+///
+/// let webp_data: &[u8] = &[0u8; 100]; // placeholder
+/// let img: imgref::ImgVec<RGBA8> = webpx::decode_to_img(webp_data)?;
+/// // Access via img.pixels(), img.width(), img.height()
+/// # Ok::<(), webpx::At<webpx::Error>>(())
+/// ```
+pub fn decode_to_img<P: DecodePixel>(data: &[u8]) -> Result<ImgVec<P>> {
+    let (pixels, width, height) = decode::<P>(data)?;
+    Ok(ImgVec::new(pixels, width as usize, height as usize))
+}
+
+/// Decode WebP data directly into a typed pixel slice.
+///
+/// This function decodes directly into the provided buffer, avoiding
+/// allocation overhead. The buffer must be pre-allocated with sufficient space.
+///
+/// # Arguments
+/// * `data` - WebP encoded data
+/// * `output` - Pre-allocated output buffer (must be at least width * height pixels)
+/// * `stride_pixels` - Row stride in pixels (must be >= width)
+///
+/// # Returns
+/// Width and height of the decoded image.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use rgb::RGBA8;
+///
+/// let webp_data: &[u8] = &[0u8; 100]; // placeholder
+/// let info = webpx::ImageInfo::from_webp(&webp_data)?;
+/// let mut buffer: Vec<RGBA8> = vec![RGBA8::default(); info.width as usize * info.height as usize];
+/// let (w, h) = webpx::decode_into::<RGBA8>(&webp_data, &mut buffer, info.width)?;
+/// # Ok::<(), webpx::At<webpx::Error>>(())
+/// ```
+pub fn decode_into<P: DecodePixel>(
+    data: &[u8],
+    output: &mut [P],
+    stride_pixels: u32,
+) -> Result<(u32, u32)> {
+    let info = ImageInfo::from_webp(data)?;
+    let width = info.width;
+    let height = info.height;
+    let bpp = P::LAYOUT.bytes_per_pixel();
+
+    // Validate buffer
+    let required_pixels = (stride_pixels as usize) * (height as usize);
+    if output.len() < required_pixels {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "output buffer too small: got {} pixels, need {} (stride {} × height {})",
+            output.len(),
+            required_pixels,
+            stride_pixels,
+            height
+        ))));
+    }
+    if stride_pixels < width {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "stride too small: got {}, minimum {}",
+            stride_pixels,
+            width
+        ))));
+    }
+
+    let stride_bytes = (stride_pixels as usize) * bpp;
+    let output_bytes = output.len() * bpp;
+
+    // SAFETY: We've validated the buffer size and stride above
+    let ok = unsafe {
+        P::decode_into(
+            data,
+            output.as_mut_ptr() as *mut u8,
+            output_bytes,
+            stride_bytes as i32,
+        )
+    };
+
+    if !ok {
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+
+    Ok((width, height))
 }
 
 /// Decode WebP data directly into a pre-allocated RGBA buffer (zero-copy).

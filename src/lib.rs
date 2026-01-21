@@ -125,9 +125,12 @@ pub use whereat::{at, at_crate, At, ResultAtExt};
 
 #[cfg(feature = "decode")]
 pub use decode::{
-    decode_bgr, decode_bgr_into, decode_bgra, decode_bgra_into, decode_rgb, decode_rgb_into,
-    decode_rgba, decode_rgba_into, decode_yuv, Decoder,
+    decode, decode_append, decode_bgr, decode_bgr_into, decode_bgra, decode_bgra_into,
+    decode_into, decode_rgb, decode_rgb_into, decode_rgba, decode_rgba_into, decode_to_img,
+    decode_yuv, Decoder,
 };
+#[cfg(feature = "decode")]
+pub use types::DecodePixel;
 
 #[cfg(feature = "encode")]
 pub use encode::Encoder;
