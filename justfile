@@ -32,10 +32,21 @@ bench:
 bench-profile:
     cargo bench --all-features --bench profile
 
-# Run allocation profiler (generates dhat-heap.json)
-alloc-profile:
+# Run memory profiler with heaptrack (captures ALL allocations including C code)
+mem-profile:
+    cargo build --release --all-features --example alloc_profile
+    heaptrack ./target/release/examples/alloc_profile
+    @echo ""
+    @echo "Analyze with: heaptrack_print heaptrack.alloc_profile.*.zst"
+    @echo "Or GUI: heaptrack_gui heaptrack.alloc_profile.*.zst"
+
+# Print heaptrack results (peak memory consumers)
+mem-profile-print:
+    heaptrack_print heaptrack.alloc_profile.*.zst | head -150
+
+# Quick memory profiler (without heaptrack, just RSS tracking)
+mem-profile-quick:
     cargo run --release --all-features --example alloc_profile
-    @echo "View allocation data at: https://nnethercote.github.io/dh_view/dh_view.html"
 
 # Run quick encoder benchmarks only
 bench-encode:
