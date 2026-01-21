@@ -79,3 +79,18 @@ jobs:
         run: cargo doc --all-features --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+
+  wasm:
+    name: WASM (emscripten)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.51'
+      - uses: Swatinem/rust-cache@v2
+      - name: Build for WASM
+        run: cargo build --target wasm32-unknown-emscripten --all-features
