@@ -81,7 +81,7 @@ fn get_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Option<Vec<u8>>> {
     let found = unsafe {
         libwebp_sys::WebPDemuxGetChunk(
             demux,
-            fourcc.as_ptr() as *const i8,
+            fourcc.as_ptr() as *const core::ffi::c_char,
             1, // First chunk
             chunk_iter.as_mut_ptr(),
         )
@@ -148,7 +148,7 @@ fn embed_chunk(webp_data: &[u8], fourcc: &[u8; 4], chunk_data: &[u8]) -> Result<
     let err = unsafe {
         libwebp_sys::WebPMuxSetChunk(
             mux,
-            fourcc.as_ptr() as *const i8,
+            fourcc.as_ptr() as *const core::ffi::c_char,
             &chunk,
             1, // copy_data = true
         )
@@ -207,7 +207,9 @@ fn remove_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Vec<u8>> {
     }
 
     // Delete the chunk (ignore NotFound error)
-    let err = unsafe { libwebp_sys::WebPMuxDeleteChunk(mux, fourcc.as_ptr() as *const i8) };
+    let err = unsafe {
+        libwebp_sys::WebPMuxDeleteChunk(mux, fourcc.as_ptr() as *const core::ffi::c_char)
+    };
 
     if err != libwebp_sys::WebPMuxError::WEBP_MUX_OK
         && err != libwebp_sys::WebPMuxError::WEBP_MUX_NOT_FOUND

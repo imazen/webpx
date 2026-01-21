@@ -37,8 +37,8 @@ struct Config {
     quality: f32,
     method: u8,
     near_lossless: u8,
-    bpp: u8,            // 3 for RGB, 4 for RGBA
-    content: String,    // gradient, noise, solid
+    bpp: u8,         // 3 for RGB, 4 for RGBA
+    content: String, // gradient, noise, solid
 }
 
 impl Default for Config {
@@ -116,7 +116,14 @@ fn run_encode(cfg: &Config) {
 
     eprintln!(
         "Config: {}x{} mode={} q={} m={} nl={} bpp={} content={}",
-        cfg.width, cfg.height, cfg.mode, cfg.quality, cfg.method, cfg.near_lossless, cfg.bpp, cfg.content
+        cfg.width,
+        cfg.height,
+        cfg.mode,
+        cfg.quality,
+        cfg.method,
+        cfg.near_lossless,
+        cfg.bpp,
+        cfg.content
     );
     eprintln!("Pixels: {} Input: {} bytes", pixels, input_bytes);
 
@@ -219,13 +226,25 @@ fn run_encode(cfg: &Config) {
             let filename = format!("mem_data/{}x{}_lossy.webp", cfg.width, cfg.height);
             let webp = fs::read(&filename).expect("Run with --mode prepare-lossy first");
             let (decoded, w, h) = decode_rgba(&webp).unwrap();
-            eprintln!("Decoded from {}: {}x{}, {} bytes", filename, w, h, decoded.len());
+            eprintln!(
+                "Decoded from {}: {}x{}, {} bytes",
+                filename,
+                w,
+                h,
+                decoded.len()
+            );
         }
         "decode-only-lossless" => {
             let filename = format!("mem_data/{}x{}_lossless.webp", cfg.width, cfg.height);
             let webp = fs::read(&filename).expect("Run with --mode prepare-lossless first");
             let (decoded, w, h) = decode_rgba(&webp).unwrap();
-            eprintln!("Decoded from {}: {}x{}, {} bytes", filename, w, h, decoded.len());
+            eprintln!(
+                "Decoded from {}: {}x{}, {} bytes",
+                filename,
+                w,
+                h,
+                decoded.len()
+            );
         }
         // Zero-copy decode variants (decode into pre-allocated buffer)
         "decode-into-lossy" => {
@@ -235,7 +254,13 @@ fn run_encode(cfg: &Config) {
             let stride = info.width as usize * 4;
             let mut buffer = vec![0u8; stride * info.height as usize];
             let (w, h) = decode_rgba_into(&webp, &mut buffer, stride as u32).unwrap();
-            eprintln!("Decoded into buffer from {}: {}x{}, {} bytes", filename, w, h, buffer.len());
+            eprintln!(
+                "Decoded into buffer from {}: {}x{}, {} bytes",
+                filename,
+                w,
+                h,
+                buffer.len()
+            );
         }
         "decode-into-lossless" => {
             let filename = format!("mem_data/{}x{}_lossless.webp", cfg.width, cfg.height);
@@ -244,7 +269,13 @@ fn run_encode(cfg: &Config) {
             let stride = info.width as usize * 4;
             let mut buffer = vec![0u8; stride * info.height as usize];
             let (w, h) = decode_rgba_into(&webp, &mut buffer, stride as u32).unwrap();
-            eprintln!("Decoded into buffer from {}: {}x{}, {} bytes", filename, w, h, buffer.len());
+            eprintln!(
+                "Decoded into buffer from {}: {}x{}, {} bytes",
+                filename,
+                w,
+                h,
+                buffer.len()
+            );
         }
         // Decoder builder API
         "decoder-builder-lossy" => {
@@ -253,7 +284,10 @@ fn run_encode(cfg: &Config) {
             let img = Decoder::new(&webp).unwrap().decode_rgba().unwrap();
             let (w, h) = (img.width(), img.height());
             let pixel_bytes = img.pixels().len() * 4;
-            eprintln!("Decoder builder from {}: {}x{}, {} bytes", filename, w, h, pixel_bytes);
+            eprintln!(
+                "Decoder builder from {}: {}x{}, {} bytes",
+                filename, w, h, pixel_bytes
+            );
         }
         "decoder-builder-lossless" => {
             let filename = format!("mem_data/{}x{}_lossless.webp", cfg.width, cfg.height);
@@ -261,7 +295,10 @@ fn run_encode(cfg: &Config) {
             let img = Decoder::new(&webp).unwrap().decode_rgba().unwrap();
             let (w, h) = (img.width(), img.height());
             let pixel_bytes = img.pixels().len() * 4;
-            eprintln!("Decoder builder from {}: {}x{}, {} bytes", filename, w, h, pixel_bytes);
+            eprintln!(
+                "Decoder builder from {}: {}x{}, {} bytes",
+                filename, w, h, pixel_bytes
+            );
         }
         _ => {
             eprintln!("Unknown mode: {}", cfg.mode);
@@ -513,13 +550,18 @@ fn run_timing(cfg: &Config) {
             eprintln!(
                 "{} {}x{}: {:.2}ms, {:.1} Mpix/s",
                 name,
-                info.width, info.height,
+                info.width,
+                info.height,
                 per_op.as_secs_f64() * 1000.0,
                 mpix_per_sec
             );
         }
         "time-decode-lossy" | "time-decode-lossless" => {
-            let base = if cfg.mode.contains("lossy") { "lossy" } else { "lossless" };
+            let base = if cfg.mode.contains("lossy") {
+                "lossy"
+            } else {
+                "lossless"
+            };
             let filename = format!(
                 "mem_data/{}x{}_{}{}.webp",
                 cfg.width,
@@ -552,7 +594,8 @@ fn run_timing(cfg: &Config) {
 
             eprintln!(
                 "{}x{} {} {}: {:.2}ms, {:.1} Mpix/s",
-                cfg.width, cfg.height,
+                cfg.width,
+                cfg.height,
                 cfg.mode.strip_prefix("time-").unwrap(),
                 cfg.content,
                 per_op.as_secs_f64() * 1000.0,
@@ -592,7 +635,8 @@ fn run_timing(cfg: &Config) {
 
             eprintln!(
                 "{}x{} {} m{} {}: {:.2}ms, {:.1} Mpix/s",
-                cfg.width, cfg.height,
+                cfg.width,
+                cfg.height,
                 cfg.mode.strip_prefix("time-").unwrap(),
                 cfg.method,
                 cfg.content,

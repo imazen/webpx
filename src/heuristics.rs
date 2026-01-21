@@ -302,7 +302,11 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
     };
 
     // Near-lossless mode is slower
-    let quality_speed_factor = if config.near_lossless < 100 { 0.77 } else { 1.0 };
+    let quality_speed_factor = if config.near_lossless < 100 {
+        0.77
+    } else {
+        1.0
+    };
 
     // Preset factors (minor impact)
     let preset_speed_factor = match config.preset {
@@ -408,8 +412,7 @@ pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> DecodeEstimat
 
     // Memory: Conservative estimate using lossless overhead
     // Measured formula: ~133 KB + pixels × 15 bytes
-    let peak_memory_bytes =
-        DECODE_FIXED_OVERHEAD + (pixels as f64 * DECODE_BYTES_PER_PIXEL) as u64;
+    let peak_memory_bytes = DECODE_FIXED_OVERHEAD + (pixels as f64 * DECODE_BYTES_PER_PIXEL) as u64;
 
     // Memory varies only ~5% with content type
     let peak_memory_bytes_min = peak_memory_bytes;
@@ -419,11 +422,9 @@ pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> DecodeEstimat
     // Time = pixels / (throughput * 1_000_000) * 1000 ms
     //      = pixels / (throughput * 1000)
     let pixels_f = pixels as f64;
-    let time_ms_min =
-        (pixels_f / (DECODE_THROUGHPUT_MAX_MPIXELS * 1000.0)) as f32; // fast: solid
+    let time_ms_min = (pixels_f / (DECODE_THROUGHPUT_MAX_MPIXELS * 1000.0)) as f32; // fast: solid
     let time_ms = (pixels_f / (DECODE_THROUGHPUT_TYP_MPIXELS * 1000.0)) as f32; // typical: photos
-    let time_ms_max =
-        (pixels_f / (DECODE_THROUGHPUT_MIN_MPIXELS * 1000.0)) as f32; // slow: noise
+    let time_ms_max = (pixels_f / (DECODE_THROUGHPUT_MIN_MPIXELS * 1000.0)) as f32; // slow: noise
 
     // Allocations: minimal for decode (measured ~10-15)
     let allocations = 12;
@@ -596,8 +597,7 @@ mod tests {
         // 1024x1024 method 4: measured 14.01 MB with gradient
         let est = estimate_encode(1024, 1024, 4, &EncoderConfig::default());
         let measured = 14_010_000u64;
-        let error =
-            (est.peak_memory_bytes_min as f64 - measured as f64).abs() / measured as f64;
+        let error = (est.peak_memory_bytes_min as f64 - measured as f64).abs() / measured as f64;
         assert!(
             error < 0.10,
             "Lossy 1024x1024 m4 min: estimated {} vs measured {}, error {:.1}%",
@@ -612,8 +612,7 @@ mod tests {
         // 1024x1024 method 0: measured 13.52 MB with gradient
         let est = estimate_encode(1024, 1024, 4, &EncoderConfig::default().method(0));
         let measured = 13_520_000u64;
-        let error =
-            (est.peak_memory_bytes_min as f64 - measured as f64).abs() / measured as f64;
+        let error = (est.peak_memory_bytes_min as f64 - measured as f64).abs() / measured as f64;
         assert!(
             error < 0.10,
             "Lossy 1024x1024 m0 min: estimated {} vs measured {}, error {:.1}%",
@@ -696,11 +695,7 @@ mod tests {
 
         // Method 0 should use ~30-45% less memory than method 4
         let ratio = m0.peak_memory_bytes as f64 / m4.peak_memory_bytes as f64;
-        assert!(
-            ratio < 0.75,
-            "Expected m0 < 75% of m4, got ratio {}",
-            ratio
-        );
+        assert!(ratio < 0.75, "Expected m0 < 75% of m4, got ratio {}", ratio);
     }
 
     #[test]

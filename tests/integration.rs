@@ -3333,14 +3333,17 @@ mod real_data_tests {
     use std::path::PathBuf;
 
     /// Get the codec-corpus WebP test images directory.
-    fn corpus_dir() -> PathBuf {
-        PathBuf::from(env!("HOME"))
-            .join("work/codec-corpus/image-rs/test-images/webp")
+    fn corpus_dir() -> Option<PathBuf> {
+        // Try HOME (Unix) then USERPROFILE (Windows)
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .ok()?;
+        Some(PathBuf::from(home).join("work/codec-corpus/image-rs/test-images/webp"))
     }
 
     /// Load a file from the corpus, returning None if not found (allows tests to skip).
     fn load_corpus_file(subpath: &str) -> Option<Vec<u8>> {
-        let path = corpus_dir().join(subpath);
+        let path = corpus_dir()?.join(subpath);
         std::fs::read(&path).ok()
     }
 
@@ -3552,7 +3555,10 @@ mod real_data_tests {
             .unwrap();
 
         let info2 = ImageInfo::from_webp(&reencoded).unwrap();
-        assert!(info2.has_alpha || !has_transparency, "Alpha should be preserved if present");
+        assert!(
+            info2.has_alpha || !has_transparency,
+            "Alpha should be preserved if present"
+        );
     }
 
     #[test]
@@ -3576,7 +3582,9 @@ mod real_data_tests {
         // XMP is XML, verify it starts with XML declaration or xpacket
         let xmp_str = String::from_utf8_lossy(&xmp_data);
         assert!(
-            xmp_str.contains("xpacket") || xmp_str.contains("<?xml") || xmp_str.contains("x:xmpmeta"),
+            xmp_str.contains("xpacket")
+                || xmp_str.contains("<?xml")
+                || xmp_str.contains("x:xmpmeta"),
             "XMP should contain XML content"
         );
 
@@ -3631,7 +3639,11 @@ mod real_data_tests {
                 "Frame {} has wrong size",
                 i
             );
-            assert!(frame.timestamp_ms > 0 || i == 0, "Frame {} should have timestamp", i);
+            assert!(
+                frame.timestamp_ms > 0 || i == 0,
+                "Frame {} should have timestamp",
+                i
+            );
         }
 
         // Re-encode as animation
@@ -3651,7 +3663,9 @@ mod real_data_tests {
     #[cfg(feature = "animation")]
     fn test_corpus_animated_rgba_rgb_mismatch() {
         // This file advertises RGBA but frames are actually RGB
-        let Some(data) = load_corpus_file("extended_images/advertises_rgba_but_frames_are_rgb.webp") else {
+        let Some(data) =
+            load_corpus_file("extended_images/advertises_rgba_but_frames_are_rgb.webp")
+        else {
             eprintln!("Skipping: corpus file not found");
             return;
         };
@@ -3922,7 +3936,12 @@ mod real_data_tests {
             let (decoded, dw, dh) = decode_rgba(&encoded).unwrap();
             assert_eq!(dw, w, "Preset {:?} width mismatch", preset);
             assert_eq!(dh, h, "Preset {:?} height mismatch", preset);
-            assert_eq!(decoded.len(), pixels.len(), "Preset {:?} size mismatch", preset);
+            assert_eq!(
+                decoded.len(),
+                pixels.len(),
+                "Preset {:?} size mismatch",
+                preset
+            );
         }
     }
 
@@ -3949,7 +3968,11 @@ mod real_data_tests {
         }
 
         // Should be complete
-        assert!(matches!(status, DecodeStatus::Complete), "Expected Complete, got {:?}", status);
+        assert!(
+            matches!(status, DecodeStatus::Complete),
+            "Expected Complete, got {:?}",
+            status
+        );
 
         // Get dimensions
         let (w, h) = decoder.dimensions().unwrap();
