@@ -11,54 +11,91 @@
 //! # Accuracy
 //!
 //! Estimates are based on empirical measurements using heaptrack and may vary
-//! by ±20% depending on image content, hardware, and configuration.
+//! by ±15% depending on image content, hardware, and configuration.
 //!
-//! # Measured Data (libwebp 1.4, gradient test images)
+//! # Measured Data (libwebp 1.5, gradient test images)
 //!
-//! ## Lossy Encoding (q85, method 4)
-//!
-//! | Size | Pixels | Peak Memory | Bytes/Pixel |
-//! |------|--------|-------------|-------------|
-//! | 128x128 | 16K | 275 KB | 17.2 |
-//! | 256x256 | 65K | 772 KB | 12.1 |
-//! | 512x512 | 262K | 2.79 MB | 11.2 |
-//! | 1024x1024 | 1M | 10.87 MB | 10.9 |
-//! | 2048x2048 | 4M | 42.47 MB | 10.6 |
-//!
-//! **Formula: `peak ≈ 100KB + pixels × 11 bytes`**
-//!
-//! ## Lossless Encoding
+//! ## Lossy Encoding (q85, all methods)
 //!
 //! | Size | Pixels | Peak Memory | Bytes/Pixel |
 //! |------|--------|-------------|-------------|
-//! | 128x128 | 16K | 2.93 MB | 187 |
-//! | 256x256 | 65K | 11.12 MB | 178 |
-//! | 512x512 | 262K | 15.30 MB | 61 |
-//! | 1024x1024 | 1M | 32.39 MB | 32 |
-//! | 2048x2048 | 4M | 124.94 MB | 31 |
+//! | 128x128 | 16K | 0.32 MB | 20.2 |
+//! | 256x256 | 65K | 0.95 MB | 15.1 |
+//! | 512x512 | 262K | 3.58 MB | 14.3 |
+//! | 1024x1024 | 1M | 14.01 MB | 14.0 |
+//! | 2048x2048 | 4M | 55.06 MB | 13.8 |
 //!
-//! **Formula: `peak ≈ 3MB + pixels × 30 bytes`** (conservative)
+//! **Formula: `peak ≈ 150KB + pixels × 14 bytes`**
+//! Method has <5% impact on lossy memory usage.
 //!
-//! ## Method Impact on Memory (negligible)
+//! ## Lossless Encoding - Method 0 (fastest)
 //!
-//! Method 0 vs 6: only ~3% difference in peak memory.
+//! | Size | Pixels | Peak Memory | Bytes/Pixel |
+//! |------|--------|-------------|-------------|
+//! | 512x512 | 262K | 6.98 MB | 27.9 |
+//! | 1024x1024 | 1M | 24.51 MB | 24.5 |
+//! | 2048x2048 | 4M | 97.66 MB | 24.4 |
+//!
+//! **Formula: `peak ≈ 0.6MB + pixels × 24 bytes`**
+//!
+//! ## Lossless Encoding - Method 4-6 (higher quality)
+//!
+//! | Size | Pixels | Peak Memory | Bytes/Pixel |
+//! |------|--------|-------------|-------------|
+//! | 512x512 | 262K | 16.09 MB | 64.4 |
+//! | 1024x1024 | 1M | 35.54 MB | 35.5 |
+//! | 2048x2048 | 4M | 137.52 MB | 34.4 |
+//!
+//! **Formula: `peak ≈ 10MB + pixels × 32 bytes`**
+//!
+//! ## Method Impact on Memory
+//!
+//! - Lossy: Method has <5% impact on memory
+//! - Lossless: Method 0 uses 30-45% LESS memory than method 4-6
 
 use crate::config::{EncoderConfig, Preset};
 
-/// Bytes per pixel for lossy encoding (empirically measured).
-/// Converges to ~10.5 for large images, use 11 for safety margin.
-const LOSSY_BYTES_PER_PIXEL: f64 = 11.0;
+// =============================================================================
+// Lossy encoding constants
+// Measured: Methods 0-2 vs 3-6 differ by ~3%, so we use a single baseline
+// =============================================================================
 
-/// Fixed overhead for lossy encoding in bytes.
-const LOSSY_FIXED_OVERHEAD: u64 = 100_000;
+/// Bytes per pixel for lossy encoding methods 0-2.
+const LOSSY_M0_BYTES_PER_PIXEL: f64 = 13.4;
 
-/// Bytes per pixel for lossless encoding (empirically measured).
-/// Converges to ~31 for large images, use 30 for the linear term.
-const LOSSLESS_BYTES_PER_PIXEL: f64 = 30.0;
+/// Fixed overhead for lossy encoding methods 0-2 (~115KB).
+const LOSSY_M0_FIXED_OVERHEAD: u64 = 115_000;
 
-/// Fixed overhead for lossless encoding in bytes.
-/// Lossless has significant fixed costs for hash tables.
-const LOSSLESS_FIXED_OVERHEAD: u64 = 3_000_000;
+/// Bytes per pixel for lossy encoding methods 3-6.
+const LOSSY_M3_BYTES_PER_PIXEL: f64 = 13.7;
+
+/// Fixed overhead for lossy encoding methods 3-6 (~220KB).
+const LOSSY_M3_FIXED_OVERHEAD: u64 = 220_000;
+
+// =============================================================================
+// Lossless encoding constants - METHOD 0 (fastest, least memory)
+// =============================================================================
+
+/// Bytes per pixel for lossless method 0 encoding.
+const LOSSLESS_M0_BYTES_PER_PIXEL: f64 = 24.0;
+
+/// Fixed overhead for lossless method 0 encoding (~0.6MB).
+const LOSSLESS_M0_FIXED_OVERHEAD: u64 = 600_000;
+
+// =============================================================================
+// Lossless encoding constants - METHODS 1-6 (higher quality tiers)
+// At large sizes (1024+), methods 1-6 converge to similar memory usage.
+// The main distinction is method 0 vs methods 1+.
+// =============================================================================
+
+/// Bytes per pixel for lossless methods 1-6 encoding.
+/// Converges to ~34 bytes/pixel at large sizes.
+const LOSSLESS_M1_BYTES_PER_PIXEL: f64 = 34.0;
+
+/// Fixed overhead for lossless methods 1-6 encoding (~1.5MB).
+/// Note: At smaller sizes (<512px), actual usage may be higher due to
+/// non-linear hash table sizing effects.
+const LOSSLESS_M1_FIXED_OVERHEAD: u64 = 1_500_000;
 
 /// Resource estimation for encoding operations.
 #[derive(Debug, Clone, Copy)]
@@ -129,15 +166,25 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
     let pixels = (width as u64) * (height as u64);
     let input_bytes = pixels * (bpp as u64);
 
-    // Peak memory based on empirical measurements
+    // Peak memory based on empirical heaptrack measurements
     let peak_memory_bytes = if config.lossless {
-        // Lossless: ~3MB fixed + 30 bytes/pixel
-        // Measured: 128x128=2.93MB, 1024x1024=32.39MB, 2048x2048=124.94MB
-        LOSSLESS_FIXED_OVERHEAD + (pixels as f64 * LOSSLESS_BYTES_PER_PIXEL) as u64
+        // Lossless memory varies significantly by method:
+        // - Method 0: ~0.6MB + 24 bytes/pixel (fastest, ~40% less memory)
+        // - Methods 1-6: ~1.5MB + 34 bytes/pixel (converge at large sizes)
+        if config.method == 0 {
+            LOSSLESS_M0_FIXED_OVERHEAD + (pixels as f64 * LOSSLESS_M0_BYTES_PER_PIXEL) as u64
+        } else {
+            LOSSLESS_M1_FIXED_OVERHEAD + (pixels as f64 * LOSSLESS_M1_BYTES_PER_PIXEL) as u64
+        }
     } else {
-        // Lossy: ~100KB fixed + 11 bytes/pixel
-        // Measured: 128x128=275KB, 1024x1024=10.87MB, 2048x2048=42.47MB
-        LOSSY_FIXED_OVERHEAD + (pixels as f64 * LOSSY_BYTES_PER_PIXEL) as u64
+        // Lossy memory is relatively stable across methods (~3% variation):
+        // - Methods 0-2: ~115KB + 13.4 bytes/pixel
+        // - Methods 3-6: ~220KB + 13.7 bytes/pixel
+        if config.method <= 2 {
+            LOSSY_M0_FIXED_OVERHEAD + (pixels as f64 * LOSSY_M0_BYTES_PER_PIXEL) as u64
+        } else {
+            LOSSY_M3_FIXED_OVERHEAD + (pixels as f64 * LOSSY_M3_BYTES_PER_PIXEL) as u64
+        }
     };
 
     // Output estimate based on quality and compression type
@@ -225,14 +272,16 @@ pub fn estimate_decode(
     let pixels = (width as u64) * (height as u64);
     let output_bytes = pixels * (output_bpp as u64);
 
-    // Decode memory is similar to encode for the same image
-    // (libwebp uses similar internal structures)
+    // Decode memory is typically less than encode
+    // Using method 1+ constants as baseline since decode doesn't know encode method
     let peak_memory_bytes = if is_lossless {
         // Lossless decode needs hash tables for backward references
-        LOSSLESS_FIXED_OVERHEAD / 2 + (pixels as f64 * LOSSLESS_BYTES_PER_PIXEL / 2.0) as u64
+        // Roughly half the encode cost
+        LOSSLESS_M1_FIXED_OVERHEAD / 2
+            + (pixels as f64 * LOSSLESS_M1_BYTES_PER_PIXEL / 2.0) as u64
     } else {
         // Lossy decode is lighter than encode
-        LOSSY_FIXED_OVERHEAD + (pixels as f64 * LOSSY_BYTES_PER_PIXEL / 2.0) as u64
+        LOSSY_M3_FIXED_OVERHEAD + (pixels as f64 * LOSSY_M3_BYTES_PER_PIXEL / 2.0) as u64
     };
 
     // Time factor: decode is generally faster than encode
@@ -375,15 +424,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lossy_encode_formula() {
-        // Test against measured data points
-        // 1024x1024: measured 10.87 MB
+    fn test_lossy_encode_formula_m4() {
+        // Test against measured data points (heaptrack, libwebp 1.5)
+        // 1024x1024 method 4: measured 14.01 MB
         let est = estimate_encode(1024, 1024, 4, &EncoderConfig::default());
-        let measured = 10_870_000u64;
+        let measured = 14_010_000u64;
         let error = (est.peak_memory_bytes as f64 - measured as f64).abs() / measured as f64;
         assert!(
-            error < 0.15,
-            "Lossy 1024x1024: estimated {} vs measured {}, error {:.1}%",
+            error < 0.10,
+            "Lossy 1024x1024 m4: estimated {} vs measured {}, error {:.1}%",
             est.peak_memory_bytes,
             measured,
             error * 100.0
@@ -391,18 +440,81 @@ mod tests {
     }
 
     #[test]
-    fn test_lossless_encode_formula() {
-        // Test against measured data points
-        // 1024x1024: measured 32.39 MB
-        let est = estimate_encode(1024, 1024, 4, &EncoderConfig::default().lossless(true));
-        let measured = 32_390_000u64;
+    fn test_lossy_encode_formula_m0() {
+        // 1024x1024 method 0: measured 13.52 MB
+        let est = estimate_encode(1024, 1024, 4, &EncoderConfig::default().method(0));
+        let measured = 13_520_000u64;
         let error = (est.peak_memory_bytes as f64 - measured as f64).abs() / measured as f64;
         assert!(
-            error < 0.15,
-            "Lossless 1024x1024: estimated {} vs measured {}, error {:.1}%",
+            error < 0.10,
+            "Lossy 1024x1024 m0: estimated {} vs measured {}, error {:.1}%",
             est.peak_memory_bytes,
             measured,
             error * 100.0
+        );
+    }
+
+    #[test]
+    fn test_lossless_encode_formula_m4() {
+        // 1024x1024 method 4: measured 35.54 MB
+        let est = estimate_encode(
+            1024,
+            1024,
+            4,
+            &EncoderConfig::default().lossless(true).method(4),
+        );
+        let measured = 35_540_000u64;
+        let error = (est.peak_memory_bytes as f64 - measured as f64).abs() / measured as f64;
+        assert!(
+            error < 0.10,
+            "Lossless 1024x1024 m4: estimated {} vs measured {}, error {:.1}%",
+            est.peak_memory_bytes,
+            measured,
+            error * 100.0
+        );
+    }
+
+    #[test]
+    fn test_lossless_encode_formula_m0() {
+        // 1024x1024 method 0: measured 24.51 MB
+        let est = estimate_encode(
+            1024,
+            1024,
+            4,
+            &EncoderConfig::default().lossless(true).method(0),
+        );
+        let measured = 24_510_000u64;
+        let error = (est.peak_memory_bytes as f64 - measured as f64).abs() / measured as f64;
+        assert!(
+            error < 0.10,
+            "Lossless 1024x1024 m0: estimated {} vs measured {}, error {:.1}%",
+            est.peak_memory_bytes,
+            measured,
+            error * 100.0
+        );
+    }
+
+    #[test]
+    fn test_lossless_m0_uses_less_memory() {
+        let m0 = estimate_encode(
+            1024,
+            1024,
+            4,
+            &EncoderConfig::default().lossless(true).method(0),
+        );
+        let m4 = estimate_encode(
+            1024,
+            1024,
+            4,
+            &EncoderConfig::default().lossless(true).method(4),
+        );
+
+        // Method 0 should use ~30-45% less memory than method 4
+        let ratio = m0.peak_memory_bytes as f64 / m4.peak_memory_bytes as f64;
+        assert!(
+            ratio < 0.75,
+            "Expected m0 < 75% of m4, got ratio {}",
+            ratio
         );
     }
 
@@ -411,7 +523,7 @@ mod tests {
         let lossy = estimate_encode(512, 512, 4, &EncoderConfig::default());
         let lossless = estimate_encode(512, 512, 4, &EncoderConfig::default().lossless(true));
 
-        // Lossless should use ~3x more memory
+        // Lossless should use more memory than lossy
         assert!(lossless.peak_memory_bytes > lossy.peak_memory_bytes * 2);
     }
 
