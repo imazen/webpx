@@ -186,7 +186,7 @@ mod roundtrip {
         let height = 32;
         let data = generate_rgba(width, height, 100, 150, 200, 255);
 
-        let webp = Encoder::new(&data, width, height)
+        let webp = Encoder::new_rgba(&data, width, height)
             .preset(Preset::Photo)
             .quality(80.0)
             .method(4)
@@ -397,7 +397,7 @@ mod presets {
             Preset::Icon,
             Preset::Text,
         ] {
-            let webp = Encoder::new(&data, width, height)
+            let webp = Encoder::new_rgba(&data, width, height)
                 .preset(preset)
                 .quality(75.0)
                 .encode(Unstoppable)
@@ -418,7 +418,7 @@ mod presets {
 
         // Test various quality values
         for quality in [0.0, 25.0, 50.0, 75.0, 100.0] {
-            let webp = Encoder::new(&data, width, height)
+            let webp = Encoder::new_rgba(&data, width, height)
                 .quality(quality)
                 .encode(Unstoppable)
                 .unwrap_or_else(|e| panic!("encode with q={} failed: {}", quality, e));
@@ -1166,7 +1166,7 @@ mod icc_tests {
         let icc_original = create_minimal_icc_profile();
 
         // Encode with ICC
-        let webp = Encoder::new(&data, width, height)
+        let webp = Encoder::new_rgba(&data, width, height)
             .quality(85.0)
             .icc_profile(&icc_original)
             .encode(Unstoppable)
@@ -1213,7 +1213,7 @@ mod icc_tests {
 
         // Create with ICC
         let icc = create_minimal_icc_profile();
-        let webp_with_icc = Encoder::new(&data, width, height)
+        let webp_with_icc = Encoder::new_rgba(&data, width, height)
             .quality(85.0)
             .icc_profile(&icc)
             .encode(Unstoppable)
@@ -2023,7 +2023,7 @@ mod encoder_advanced_tests {
             .collect();
 
         let img = ImgVec::new(pixels, width, height);
-        let webp = Encoder::from_rgba(img.as_ref())
+        let webp = Encoder::from_img(img.as_ref())
             .quality(85.0)
             .encode(Unstoppable)
             .expect("encode");
@@ -2045,7 +2045,7 @@ mod encoder_advanced_tests {
             .collect();
 
         let img = ImgVec::new(pixels, width, height);
-        let webp = Encoder::from_rgb(img.as_ref())
+        let webp = Encoder::from_img(img.as_ref())
             .quality(85.0)
             .encode(Unstoppable)
             .expect("encode");
@@ -2061,7 +2061,7 @@ mod encoder_advanced_tests {
         let height = 32;
         let data = generate_rgba(width, height, 100, 150, 200, 255);
 
-        let webp = Encoder::new(&data, width, height)
+        let webp = Encoder::new_rgba(&data, width, height)
             .preset(Preset::Photo)
             .quality(85.0)
             .method(4)
@@ -2088,7 +2088,7 @@ mod encoder_advanced_tests {
 
         let config = EncoderConfig::new().quality(90.0).method(5);
 
-        let webp = Encoder::new(&data, width, height)
+        let webp = Encoder::new_rgba(&data, width, height)
             .config(config)
             .encode(Unstoppable)
             .expect("encode");

@@ -338,9 +338,9 @@ let est = estimate_encode(1920, 1080, 4, &config);
 
 println!("Estimates for 1920×1080 lossy encode:");
 println!("  Memory (typical): {:.1} MB", est.peak_memory_bytes as f64 / 1e6);
-println!("  Time (typical):   {:.0} ms", est.estimated_time_ms);
+println!("  Time (typical):   {:.0} ms", est.time_ms);
 println!("  Time range:       {:.0}-{:.0} ms",
-    est.estimated_time_ms_min, est.estimated_time_ms_max);
+    est.time_ms_min, est.time_ms_max);
 ```
 
 ### Getting Decode Estimates
@@ -354,9 +354,9 @@ let est = estimate_decode(1920, 1080, 4);
 println!("Decode estimates for 1920×1080:");
 println!("  Output buffer: {:.1} MB", est.output_bytes as f64 / 1e6);
 println!("  Peak memory:   {:.1} MB", est.peak_memory_bytes as f64 / 1e6);
-println!("  Time (typical): {:.0} ms", est.estimated_time_ms);
+println!("  Time (typical): {:.0} ms", est.time_ms);
 println!("  Time range:     {:.0}-{:.0} ms",
-    est.estimated_time_ms_min, est.estimated_time_ms_max);
+    est.time_ms_min, est.time_ms_max);
 
 // Zero-copy decode (caller provides output buffer)
 let est_zc = estimate_decode_zerocopy(1920, 1080);
@@ -366,8 +366,8 @@ println!("  Zero-copy peak: {:.1} MB", est_zc.peak_memory_bytes as f64 / 1e6);
 ### Choosing the Right Estimate
 
 - **Memory budgeting:** Use `peak_memory_bytes_max` for safety
-- **Time budgeting:** Use `estimated_time_ms_max` for worst case
-- **Progress bars:** Use `estimated_time_ms` (typical)
+- **Time budgeting:** Use `time_ms_max` for worst case
+- **Progress bars:** Use `time_ms` (typical)
 - **Capacity planning:** Use typical estimates with 20% headroom
 
 ---

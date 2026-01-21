@@ -1,4 +1,16 @@
 //! WebP decoding functionality.
+//!
+//! # Stride Convention
+//!
+//! Functions with `_into` suffix that accept a stride parameter follow this convention:
+//! **The stride unit matches the output buffer type:**
+//!
+//! | Buffer type | Stride unit | Example |
+//! |-------------|-------------|---------|
+//! | `&mut [u8]` (raw bytes) | bytes | `decode_rgba_into(..., stride_bytes)` |
+//! | `&mut [P]` (typed pixels) | pixels | `decode_into::<P>(..., stride_pixels)` |
+//!
+//! Stride must always be >= width (in the appropriate unit).
 
 use crate::config::DecoderConfig;
 use crate::error::{DecodingError, Error, Result};
@@ -747,6 +759,60 @@ impl<'a> Decoder<'a> {
         } else {
             decode_bgr(self.data)
         }
+    }
+
+    /// Decode RGBA into a pre-allocated buffer (zero-copy).
+    ///
+    /// # Arguments
+    /// * `output` - Pre-allocated buffer (must be at least width * height * 4 bytes)
+    /// * `stride_bytes` - Row stride in bytes (must be >= width * 4)
+    ///
+    /// # Note
+    /// Cropping and scaling are not supported with `_into` methods.
+    /// Use `decode_rgba()` for those features.
+    pub fn decode_rgba_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+        if self.config.use_cropping || self.config.use_scaling {
+            return Err(at!(Error::InvalidConfig(
+                "cropping/scaling not supported with decode_into; use decode_rgba() instead".into()
+            )));
+        }
+        decode_rgba_into(self.data, output, stride_bytes)
+    }
+
+    /// Decode RGB into a pre-allocated buffer (zero-copy).
+    ///
+    /// See [`Self::decode_rgba_into`] for details.
+    pub fn decode_rgb_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+        if self.config.use_cropping || self.config.use_scaling {
+            return Err(at!(Error::InvalidConfig(
+                "cropping/scaling not supported with decode_into; use decode_rgb() instead".into()
+            )));
+        }
+        decode_rgb_into(self.data, output, stride_bytes)
+    }
+
+    /// Decode BGRA into a pre-allocated buffer (zero-copy).
+    ///
+    /// See [`Self::decode_rgba_into`] for details.
+    pub fn decode_bgra_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+        if self.config.use_cropping || self.config.use_scaling {
+            return Err(at!(Error::InvalidConfig(
+                "cropping/scaling not supported with decode_into; use decode_bgra() instead".into()
+            )));
+        }
+        decode_bgra_into(self.data, output, stride_bytes)
+    }
+
+    /// Decode BGR into a pre-allocated buffer (zero-copy).
+    ///
+    /// See [`Self::decode_rgba_into`] for details.
+    pub fn decode_bgr_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+        if self.config.use_cropping || self.config.use_scaling {
+            return Err(at!(Error::InvalidConfig(
+                "cropping/scaling not supported with decode_into; use decode_bgr() instead".into()
+            )));
+        }
+        decode_bgr_into(self.data, output, stride_bytes)
     }
 
     /// Decode to YUV planes.

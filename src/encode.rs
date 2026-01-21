@@ -1,4 +1,17 @@
 //! WebP encoding functionality.
+//!
+//! # Stride Convention
+//!
+//! Functions with `_stride` suffix accept an explicit row stride parameter.
+//! **The stride unit matches the data type:**
+//!
+//! | Data type | Stride unit | Example |
+//! |-----------|-------------|---------|
+//! | `&[u8]` (raw bytes) | bytes | `new_rgba_stride(..., stride_bytes)` |
+//! | `&[u32]` (ARGB packed) | pixels | `new_argb_stride(..., stride_pixels)` |
+//! | `&[P]` (typed pixels) | pixels | `from_pixels_stride(..., stride_pixels)` |
+//!
+//! Stride must always be >= width (in the appropriate unit).
 
 use crate::config::{EncodeStats, EncoderConfig, Preset};
 use crate::error::{EncodingError, Error, Result};
@@ -6,8 +19,6 @@ use crate::types::{EncodePixel, PixelLayout, YuvPlanesRef};
 use alloc::vec::Vec;
 use enough::Stop;
 use imgref::ImgRef;
-use rgb::alt::{BGR8, BGRA8};
-use rgb::{RGB8, RGBA8};
 use whereat::*;
 
 /// Context for progress hook callback.
@@ -237,7 +248,7 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
 /// use webpx::{Encoder, Preset, Unstoppable};
 ///
 /// let rgba: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
-/// let webp = Encoder::new(rgba, 640, 480)
+/// let webp = Encoder::new_rgba(rgba, 640, 480)
 ///     .preset(Preset::Photo)
 ///     .quality(85.0)
 ///     .encode(Unstoppable)?;
@@ -287,13 +298,6 @@ impl<'a> Encoder<'a> {
             #[cfg(feature = "icc")]
             icc_profile: None,
         }
-    }
-
-    /// Alias for [`Self::new_rgba`] for backwards compatibility.
-    #[must_use]
-    #[doc(hidden)]
-    pub fn new(data: &'a [u8], width: u32, height: u32) -> Self {
-        Self::new_rgba(data, width, height)
     }
 
     /// Create a new encoder for RGBA data with explicit stride.
@@ -543,34 +547,6 @@ impl<'a> Encoder<'a> {
             stride_bytes,
             P::LAYOUT,
         )
-    }
-
-    /// Alias for [`Self::from_img`] for backwards compatibility.
-    #[must_use]
-    #[doc(hidden)]
-    pub fn from_rgba(img: ImgRef<'a, RGBA8>) -> Self {
-        Self::from_img(img)
-    }
-
-    /// Alias for [`Self::from_img`] for backwards compatibility.
-    #[must_use]
-    #[doc(hidden)]
-    pub fn from_bgra(img: ImgRef<'a, BGRA8>) -> Self {
-        Self::from_img(img)
-    }
-
-    /// Alias for [`Self::from_img`] for backwards compatibility.
-    #[must_use]
-    #[doc(hidden)]
-    pub fn from_rgb(img: ImgRef<'a, RGB8>) -> Self {
-        Self::from_img(img)
-    }
-
-    /// Alias for [`Self::from_img`] for backwards compatibility.
-    #[must_use]
-    #[doc(hidden)]
-    pub fn from_bgr(img: ImgRef<'a, BGR8>) -> Self {
-        Self::from_img(img)
     }
 
     /// Create encoder from a slice of typed pixels.

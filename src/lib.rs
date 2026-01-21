@@ -43,7 +43,7 @@
 //! use webpx::{Encoder, Preset, Unstoppable};
 //!
 //! let rgba_data: &[u8] = &[0u8; 640 * 480 * 4]; // placeholder
-//! let webp_bytes = Encoder::new(rgba_data, 640, 480)
+//! let webp_bytes = Encoder::new_rgba(rgba_data, 640, 480)
 //!     .preset(Preset::Photo)  // Optimize for photos
 //!     .quality(85.0)          // 0-100, higher = better quality
 //!     .method(4)              // 0-6, higher = slower but smaller
@@ -130,8 +130,8 @@ pub use decode::{
     decode, decode_append, decode_bgr, decode_bgr_into, decode_bgra, decode_bgra_into, decode_into,
     decode_rgb, decode_rgb_into, decode_rgba, decode_rgba_into, decode_to_img, decode_yuv, Decoder,
 };
-#[cfg(feature = "decode")]
-pub use types::DecodePixel;
+// DecodePixel trait is intentionally not exported - it's a sealed implementation detail.
+// Users use concrete types (RGBA8, RGB8, etc.) with decode functions.
 
 #[cfg(feature = "encode")]
 pub use encode::Encoder;
