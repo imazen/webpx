@@ -10,8 +10,15 @@
 //!
 //! # Accuracy
 //!
-//! Estimates are based on empirical measurements using heaptrack and may vary
-//! by ±15% depending on image content, hardware, and configuration.
+//! Estimates are based on empirical measurements using heaptrack with gradient
+//! test images. **Gradient images represent the best case for memory usage.**
+//!
+//! For worst-case estimation (high-entropy content like noise or complex photos):
+//! - **Lossy**: Multiply estimate by 2.5x
+//! - **Lossless**: Multiply estimate by 1.5x
+//!
+//! RGB vs RGBA input has no measurable impact on memory usage (libwebp converts
+//! internally).
 //!
 //! # Measured Data (libwebp 1.5, gradient test images)
 //!
@@ -105,7 +112,16 @@ pub struct EncodeEstimate {
     ///
     /// Includes input buffer, libwebp internal state, and output buffer.
     /// Based on heaptrack measurements of actual libwebp allocations.
+    ///
+    /// **Note:** This is a typical-case estimate based on gradient images.
+    /// For worst-case (high-entropy content), use `peak_memory_bytes_worst_case`.
     pub peak_memory_bytes: u64,
+
+    /// Worst-case peak memory for high-entropy content (noise, complex photos).
+    ///
+    /// Lossy encoding with complex content can use ~2.5x more memory than
+    /// simple gradients. Lossless can use ~1.5x more.
+    pub peak_memory_bytes_worst_case: u64,
 
     /// Estimated heap allocations during encoding.
     ///
@@ -234,8 +250,15 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
     // Allocations: measured ~20-30 per encode for most sizes
     let estimated_allocations = 25;
 
+    // Worst-case multiplier based on content type measurements:
+    // - Lossy: noise/complex content uses ~2.25x more memory than gradient
+    // - Lossless: noise uses ~1.4x more memory than gradient
+    let worst_case_multiplier = if config.lossless { 1.5 } else { 2.5 };
+    let peak_memory_bytes_worst_case = (peak_memory_bytes as f64 * worst_case_multiplier) as u64;
+
     EncodeEstimate {
         peak_memory_bytes,
+        peak_memory_bytes_worst_case,
         estimated_allocations,
         time_factor: time_factor as f32,
         estimated_output_bytes: estimated_output,
@@ -371,8 +394,13 @@ pub fn estimate_animation_encode(
     // Output: sum of compressed frames
     let estimated_output = single_frame.estimated_output_bytes * (frame_count as u64);
 
+    // Worst-case for animation (same multiplier as single frame)
+    let worst_case_multiplier = if config.lossless { 1.5 } else { 2.5 };
+    let peak_memory_worst_case = (peak_memory as f64 * worst_case_multiplier) as u64;
+
     EncodeEstimate {
         peak_memory_bytes: peak_memory,
+        peak_memory_bytes_worst_case: peak_memory_worst_case,
         estimated_allocations,
         time_factor,
         estimated_output_bytes: estimated_output,

@@ -36,7 +36,8 @@ struct Config {
     quality: f32,
     method: u8,
     near_lossless: u8,
-    bpp: u8, // 3 for RGB, 4 for RGBA
+    bpp: u8,            // 3 for RGB, 4 for RGBA
+    content: String,    // gradient, noise, solid
 }
 
 impl Default for Config {
@@ -49,6 +50,7 @@ impl Default for Config {
             method: 4,
             near_lossless: 100,
             bpp: 4,
+            content: "gradient".to_string(),
         }
     }
 }
@@ -67,6 +69,29 @@ fn generate_gradient_rgba(width: u32, height: u32) -> Vec<u8> {
         }
     }
     data
+}
+
+fn generate_noise_rgba(width: u32, height: u32, seed: u64) -> Vec<u8> {
+    // Simple LCG for reproducible "random" noise
+    let mut state = seed;
+    let mut data = Vec::with_capacity((width * height * 4) as usize);
+    for _ in 0..(width * height) {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let r = (state >> 56) as u8;
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let g = (state >> 56) as u8;
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let b = (state >> 56) as u8;
+        data.push(r);
+        data.push(g);
+        data.push(b);
+        data.push(255);
+    }
+    data
+}
+
+fn generate_solid_rgba(width: u32, height: u32) -> Vec<u8> {
+    vec![128u8; (width * height * 4) as usize]
 }
 
 fn generate_gradient_rgb(width: u32, height: u32) -> Vec<u8> {
@@ -89,12 +114,16 @@ fn run_encode(cfg: &Config) {
     let input_bytes = pixels * (cfg.bpp as u64);
 
     eprintln!(
-        "Config: {}x{} mode={} q={} m={} nl={} bpp={}",
-        cfg.width, cfg.height, cfg.mode, cfg.quality, cfg.method, cfg.near_lossless, cfg.bpp
+        "Config: {}x{} mode={} q={} m={} nl={} bpp={} content={}",
+        cfg.width, cfg.height, cfg.mode, cfg.quality, cfg.method, cfg.near_lossless, cfg.bpp, cfg.content
     );
     eprintln!("Pixels: {} Input: {} bytes", pixels, input_bytes);
 
-    let rgba = generate_gradient_rgba(cfg.width, cfg.height);
+    let rgba = match cfg.content.as_str() {
+        "noise" => generate_noise_rgba(cfg.width, cfg.height, 12345),
+        "solid" => generate_solid_rgba(cfg.width, cfg.height),
+        _ => generate_gradient_rgba(cfg.width, cfg.height),
+    };
     let rgb = generate_gradient_rgb(cfg.width, cfg.height);
 
     match cfg.mode.as_str() {
@@ -278,14 +307,14 @@ fn print_usage() {
     eprintln!("  --method <M>         Method 0-6, default: 4");
     eprintln!("  --near-lossless <N>  Near-lossless 0-100, default: 100");
     eprintln!("  --bpp <N>            Bytes per pixel (3=RGB, 4=RGBA), default: 4");
+    eprintln!("  --content <TYPE>     Image content: gradient, noise, solid");
     eprintln!("  --sweep              Print CSV of all configs for batch testing");
     eprintln!("  --batch              Run batch of common configurations");
     eprintln!();
     eprintln!("Examples:");
     eprintln!("  heaptrack ./mem_formula --size 1024 --mode lossy --quality 85");
-    eprintln!("  heaptrack ./mem_formula --width 1920 --height 1080 --mode lossless");
+    eprintln!("  heaptrack ./mem_formula --size 1024 --mode lossless --content noise");
     eprintln!("  ./mem_formula --sweep > configs.csv");
-    eprintln!("  ./mem_formula --batch 2>&1 | tee batch_results.txt");
 }
 
 fn main() {
@@ -349,6 +378,10 @@ fn main() {
             "--bpp" => {
                 i += 1;
                 cfg.bpp = args[i].parse().unwrap_or(4);
+            }
+            "--content" => {
+                i += 1;
+                cfg.content = args[i].clone();
             }
             // Legacy positional args support
             arg if !arg.starts_with('-') => {
