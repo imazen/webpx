@@ -104,6 +104,23 @@ const LOSSLESS_M1_BYTES_PER_PIXEL: f64 = 34.0;
 /// non-linear hash table sizing effects.
 const LOSSLESS_M1_FIXED_OVERHEAD: u64 = 1_500_000;
 
+// =============================================================================
+// Decoding constants (measured with heaptrack, libwebp 1.5)
+// Decode memory is nearly identical for lossy and lossless sources.
+// The primary cost is: output buffer + internal decode buffers.
+// =============================================================================
+
+/// Bytes per pixel for decoding (internal buffers).
+/// This is roughly: YUV decode buffer + color conversion workspace.
+const DECODE_BYTES_PER_PIXEL: f64 = 15.0;
+
+/// Fixed overhead for lossy decoding (~76KB).
+const DECODE_LOSSY_FIXED_OVERHEAD: u64 = 76_000;
+
+/// Fixed overhead for lossless decoding (~133KB).
+/// Slightly higher than lossy due to VP8L-specific data structures.
+const DECODE_LOSSLESS_FIXED_OVERHEAD: u64 = 133_000;
+
 /// Resource estimation for encoding operations.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -142,11 +159,28 @@ pub struct EncodeEstimate {
 }
 
 /// Resource estimation for decoding operations.
+///
+/// Based on heaptrack measurements of libwebp 1.5 memory usage.
+///
+/// Key finding: Decode memory is nearly identical for lossy and lossless
+/// sources (~15 bytes/pixel total). Content type has minimal impact (~5%).
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct DecodeEstimate {
-    /// Estimated peak memory in bytes during decoding.
+    /// Minimum expected peak memory (best case: simple images).
+    ///
+    /// Decode memory varies only ~5% with content type, so min ≈ typical.
+    pub peak_memory_bytes_min: u64,
+
+    /// Typical peak memory in bytes during decoding.
+    ///
+    /// Based on heaptrack measurements with gradient test images.
     pub peak_memory_bytes: u64,
+
+    /// Maximum expected peak memory (worst case: noise images).
+    ///
+    /// Decode memory is relatively stable; max is only ~5% above typical.
+    pub peak_memory_bytes_max: u64,
 
     /// Estimated heap allocations during decoding.
     pub estimated_allocations: u32,
@@ -287,7 +321,13 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
 
 /// Estimate resources for decoding an image.
 ///
-/// Decode memory is primarily the output buffer plus libwebp internal state.
+/// Based on heaptrack measurements of libwebp 1.5.
+///
+/// # Key findings:
+/// - Decode memory is nearly identical for lossy and lossless (~15 bytes/pixel)
+/// - Content type has minimal impact (~5% variation)
+/// - Output buffer dominates: ~4 bytes/pixel for RGBA output
+/// - Internal buffers: ~11 bytes/pixel
 ///
 /// # Arguments
 ///
@@ -315,27 +355,34 @@ pub fn estimate_decode(
     let pixels = (width as u64) * (height as u64);
     let output_bytes = pixels * (output_bpp as u64);
 
-    // Decode memory is typically less than encode
-    // Using method 1+ constants as baseline since decode doesn't know encode method
-    let peak_memory_bytes = if is_lossless {
-        // Lossless decode needs hash tables for backward references
-        // Roughly half the encode cost
-        LOSSLESS_M1_FIXED_OVERHEAD / 2
-            + (pixels as f64 * LOSSLESS_M1_BYTES_PER_PIXEL / 2.0) as u64
+    // Measured decode memory formula: overhead + pixels × 15 bytes
+    // Lossy and lossless have nearly identical bytes/pixel, only overhead differs
+    let fixed_overhead = if is_lossless {
+        DECODE_LOSSLESS_FIXED_OVERHEAD
     } else {
-        // Lossy decode is lighter than encode
-        LOSSY_M3_FIXED_OVERHEAD + (pixels as f64 * LOSSY_M3_BYTES_PER_PIXEL / 2.0) as u64
+        DECODE_LOSSY_FIXED_OVERHEAD
     };
 
+    let peak_memory_bytes = fixed_overhead + (pixels as f64 * DECODE_BYTES_PER_PIXEL) as u64;
+
+    // Content-dependent multipliers (measured):
+    // - Min (gradient/solid): 1.0x (baseline)
+    // - Typical (photos): 1.0x (decode is very stable)
+    // - Max (noise): 1.05x (only ~5% variation)
+    let peak_memory_bytes_min = peak_memory_bytes;
+    let peak_memory_bytes_max = (peak_memory_bytes as f64 * 1.05) as u64;
+
     // Time factor: decode is generally faster than encode
-    // Lossless decode is slightly slower
+    // Lossless decode is slightly slower due to entropy decoding
     let time_factor = if is_lossless { 0.3 } else { 0.2 };
 
-    // Allocations: minimal for decode
-    let estimated_allocations = 10;
+    // Allocations: minimal for decode (measured ~10-15)
+    let estimated_allocations = 12;
 
     DecodeEstimate {
+        peak_memory_bytes_min,
         peak_memory_bytes,
+        peak_memory_bytes_max,
         estimated_allocations,
         time_factor,
         output_bytes,
@@ -344,8 +391,12 @@ pub fn estimate_decode(
 
 /// Estimate resources for decoding into a pre-allocated buffer.
 ///
-/// This path avoids allocating the output buffer, reducing peak memory
-/// by the output size.
+/// This path uses `decode_rgba_into` or similar functions that write directly
+/// to a caller-provided buffer, avoiding the output buffer allocation.
+///
+/// # Measured savings (heaptrack, libwebp 1.5):
+/// - Lossy: saves exactly the output buffer size
+/// - Lossless: internal allocations may still dominate (less savings observed)
 ///
 /// # Example
 ///
@@ -360,11 +411,23 @@ pub fn estimate_decode_zerocopy(width: u32, height: u32, is_lossless: bool) -> D
     let mut est = estimate_decode(width, height, 4, is_lossless);
 
     // Zero-copy path: output buffer is pre-allocated by caller
-    // Subtract output from peak (it's not allocated during decode)
-    est.peak_memory_bytes = est.peak_memory_bytes.saturating_sub(est.output_bytes);
+    // For lossy, this saves exactly the output buffer size
+    // For lossless, internal VP8L allocations may still dominate
+    let savings = if is_lossless {
+        // Lossless: internal allocations mean less savings
+        // Measured: negligible difference
+        0
+    } else {
+        // Lossy: saves the full output buffer
+        est.output_bytes
+    };
+
+    est.peak_memory_bytes_min = est.peak_memory_bytes_min.saturating_sub(savings);
+    est.peak_memory_bytes = est.peak_memory_bytes.saturating_sub(savings);
+    est.peak_memory_bytes_max = est.peak_memory_bytes_max.saturating_sub(savings);
 
     // Fewer allocations since output isn't allocated
-    est.estimated_allocations = 5;
+    est.estimated_allocations = 8;
 
     est
 }
@@ -452,7 +515,9 @@ pub fn estimate_animation_decode(
 
     // Animation decoder holds previous frame for blending
     let frame_bytes = (width as u64) * (height as u64) * 4;
+    let peak_memory_min = single_frame.peak_memory_bytes_min + frame_bytes;
     let peak_memory = single_frame.peak_memory_bytes + frame_bytes;
+    let peak_memory_max = single_frame.peak_memory_bytes_max + frame_bytes;
 
     // Time is linear with frame count
     let time_factor = single_frame.time_factor * frame_count as f32;
@@ -464,7 +529,9 @@ pub fn estimate_animation_decode(
     let output_bytes = single_frame.output_bytes * (frame_count as u64);
 
     DecodeEstimate {
+        peak_memory_bytes_min: peak_memory_min,
         peak_memory_bytes: peak_memory,
+        peak_memory_bytes_max: peak_memory_max,
         estimated_allocations,
         time_factor,
         output_bytes,
@@ -623,8 +690,50 @@ mod tests {
         let normal = estimate_decode(1024, 1024, 4, false);
         let zerocopy = estimate_decode_zerocopy(1024, 1024, false);
 
-        // Zero-copy should save the output buffer size
+        // Zero-copy should save the output buffer size (for lossy)
         let output_size = 1024 * 1024 * 4;
         assert!(normal.peak_memory_bytes - zerocopy.peak_memory_bytes >= output_size / 2);
+    }
+
+    #[test]
+    fn test_decode_estimate_accuracy() {
+        // Test against heaptrack measurements (libwebp 1.5, gradient images)
+        // Measured: 1024x1024 lossy decode = 15.81 MB
+        let lossy = estimate_decode(1024, 1024, 4, false);
+        let measured_lossy = 15_810_000u64;
+        let error_lossy =
+            (lossy.peak_memory_bytes as f64 - measured_lossy as f64).abs() / measured_lossy as f64;
+        assert!(
+            error_lossy < 0.10,
+            "Lossy decode 1024x1024: estimated {} vs measured {}, error {:.1}%",
+            lossy.peak_memory_bytes,
+            measured_lossy,
+            error_lossy * 100.0
+        );
+
+        // Measured: 1024x1024 lossless decode = 15.91 MB
+        let lossless = estimate_decode(1024, 1024, 4, true);
+        let measured_lossless = 15_910_000u64;
+        let error_lossless = (lossless.peak_memory_bytes as f64 - measured_lossless as f64).abs()
+            / measured_lossless as f64;
+        assert!(
+            error_lossless < 0.10,
+            "Lossless decode 1024x1024: estimated {} vs measured {}, error {:.1}%",
+            lossless.peak_memory_bytes,
+            measured_lossless,
+            error_lossless * 100.0
+        );
+    }
+
+    #[test]
+    fn test_decode_min_max_range() {
+        // Decode min/max should have ~5% variation (much less than encode)
+        let est = estimate_decode(1024, 1024, 4, false);
+        let ratio = est.peak_memory_bytes_max as f64 / est.peak_memory_bytes_min as f64;
+        assert!(
+            (ratio - 1.05).abs() < 0.01,
+            "Expected max/min ratio ~1.05, got {}",
+            ratio
+        );
     }
 }

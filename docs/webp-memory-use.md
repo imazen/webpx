@@ -201,18 +201,68 @@ the compression parameters.
 
 ## Decoding Memory
 
-> **TODO:** Decode memory profiling not yet completed. See CONTEXT-HANDOFF.md.
+### Key Findings
 
-Preliminary observations:
-- Decode uses less memory than encode
-- Primary cost is output buffer + internal decode state
-- Lossless decode needs hash tables for backward references
+**Decode memory is simpler than encode:**
+- Lossy and lossless have nearly identical memory usage (~15 bytes/pixel)
+- Content type has minimal impact (~5% variation, vs 2.25× for encode)
+- Primary cost is output buffer + internal YUV/color conversion workspace
+
+### Decoding Memory Formula
+
+```
+Lossy:    peak = 76 KB + pixels × 15 bytes
+Lossless: peak = 133 KB + pixels × 15 bytes
+```
+
+### Quick Decode Estimates
+
+| Size | Pixels | Lossy | Lossless | Output Buffer |
+|------|--------|-------|----------|---------------|
+| 256×256 | 65K | 1.06 MB | 1.11 MB | 0.26 MB |
+| 512×512 | 262K | 4.01 MB | 4.08 MB | 1.0 MB |
+| 1024×1024 | 1M | 15.81 MB | 15.91 MB | 4.0 MB |
+| 1920×1080 | 2.1M | 31.2 MB | 31.3 MB | 8.3 MB |
+| 2048×2048 | 4.2M | 63.02 MB | 63.22 MB | 16.8 MB |
+
+### API Variants
+
+| API | Memory | Notes |
+|-----|--------|-------|
+| `decode_rgba()` | Full formula | Standard decode, allocates output |
+| `decode_rgba_into()` | Formula − output buffer | Zero-copy for lossy (saves ~4 bytes/pixel) |
+| `Decoder::new().decode_rgba()` | Full formula | Builder API, same as decode_rgba() |
+
+**Zero-copy savings:**
+- Lossy: `decode_into` saves exactly the output buffer (pixels × 4 bytes for RGBA)
+- Lossless: Internal VP8L allocations dominate; minimal savings observed
+
+### Content Type Impact
+
+Unlike encoding, content type has minimal impact on decode memory:
+
+| Size | Gradient | Noise | Solid | Noise/Gradient |
+|------|----------|-------|-------|----------------|
+| 1024×1024 | 15.81 MB | 16.59 MB | 15.81 MB | 1.05× |
+
+Decode memory varies only ~5% with content type, compared to 2.25× for lossy encoding.
+
+### Decode vs Encode Comparison
+
+At 1024×1024:
+| Operation | Min | Typical | Max |
+|-----------|-----|---------|-----|
+| Lossy decode | 15.8 MB | 15.8 MB | 16.6 MB |
+| Lossy encode | 14.0 MB | 16.8 MB | 31.5 MB |
+| Lossless decode | 15.9 MB | 15.9 MB | 16.7 MB |
+| Lossless encode (M0) | 14.7 MB | 29.4 MB | 36.8 MB |
+| Lossless encode (M4) | 21.3 MB | 42.6 MB | 53.3 MB |
 
 ---
 
 ## API Usage
 
-### Getting Estimates
+### Getting Encode Estimates
 
 ```rust
 use webpx::heuristics::estimate_encode;
@@ -228,6 +278,23 @@ println!("Memory estimates for 1920×1080 lossy encode:");
 println!("  Min (smooth): {:.1} MB", est.peak_memory_bytes_min as f64 / 1e6);
 println!("  Typical:      {:.1} MB", est.peak_memory_bytes as f64 / 1e6);
 println!("  Max (noise):  {:.1} MB", est.peak_memory_bytes_max as f64 / 1e6);
+```
+
+### Getting Decode Estimates
+
+```rust
+use webpx::heuristics::{estimate_decode, estimate_decode_zerocopy};
+
+// Standard decode (allocates output buffer)
+let est = estimate_decode(1920, 1080, 4, false); // lossy source
+
+println!("Decode estimates for 1920×1080:");
+println!("  Output buffer: {:.1} MB", est.output_bytes as f64 / 1e6);
+println!("  Peak memory:   {:.1} MB", est.peak_memory_bytes as f64 / 1e6);
+
+// Zero-copy decode (caller provides output buffer)
+let est_zc = estimate_decode_zerocopy(1920, 1080, false);
+println!("  Zero-copy peak: {:.1} MB", est_zc.peak_memory_bytes as f64 / 1e6);
 ```
 
 ### Choosing the Right Estimate

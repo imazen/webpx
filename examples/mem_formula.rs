@@ -25,8 +25,9 @@
 //! ```
 
 use std::env;
+use std::fs;
 use std::io::{self, Write};
-use webpx::{decode_rgba, Encoder, Unstoppable};
+use webpx::{decode_rgba, decode_rgba_into, Decoder, Encoder, ImageInfo, Unstoppable};
 
 #[derive(Debug, Clone)]
 struct Config {
@@ -192,6 +193,76 @@ fn run_encode(cfg: &Config) {
             let (decoded, w, h) = decode_rgba(&webp).unwrap();
             eprintln!("Decoded: {}x{}, {} bytes", w, h, decoded.len());
         }
+        // Prepare modes: create WebP files for isolated decode testing
+        "prepare-lossy" => {
+            let webp = Encoder::new_rgba(&rgba, cfg.width, cfg.height)
+                .quality(cfg.quality)
+                .method(cfg.method)
+                .encode(Unstoppable)
+                .unwrap();
+            let filename = format!("mem_data/{}x{}_lossy.webp", cfg.width, cfg.height);
+            fs::write(&filename, &webp).unwrap();
+            eprintln!("Wrote {} ({} bytes)", filename, webp.len());
+        }
+        "prepare-lossless" => {
+            let webp = Encoder::new_rgba(&rgba, cfg.width, cfg.height)
+                .lossless(true)
+                .method(cfg.method)
+                .encode(Unstoppable)
+                .unwrap();
+            let filename = format!("mem_data/{}x{}_lossless.webp", cfg.width, cfg.height);
+            fs::write(&filename, &webp).unwrap();
+            eprintln!("Wrote {} ({} bytes)", filename, webp.len());
+        }
+        // Decode-only modes: load from pre-created files (isolates decode memory)
+        "decode-only-lossy" => {
+            let filename = format!("mem_data/{}x{}_lossy.webp", cfg.width, cfg.height);
+            let webp = fs::read(&filename).expect("Run with --mode prepare-lossy first");
+            let (decoded, w, h) = decode_rgba(&webp).unwrap();
+            eprintln!("Decoded from {}: {}x{}, {} bytes", filename, w, h, decoded.len());
+        }
+        "decode-only-lossless" => {
+            let filename = format!("mem_data/{}x{}_lossless.webp", cfg.width, cfg.height);
+            let webp = fs::read(&filename).expect("Run with --mode prepare-lossless first");
+            let (decoded, w, h) = decode_rgba(&webp).unwrap();
+            eprintln!("Decoded from {}: {}x{}, {} bytes", filename, w, h, decoded.len());
+        }
+        // Zero-copy decode variants (decode into pre-allocated buffer)
+        "decode-into-lossy" => {
+            let filename = format!("mem_data/{}x{}_lossy.webp", cfg.width, cfg.height);
+            let webp = fs::read(&filename).expect("Run with --mode prepare-lossy first");
+            let info = ImageInfo::from_webp(&webp).unwrap();
+            let stride = info.width as usize * 4;
+            let mut buffer = vec![0u8; stride * info.height as usize];
+            let (w, h) = decode_rgba_into(&webp, &mut buffer, stride as u32).unwrap();
+            eprintln!("Decoded into buffer from {}: {}x{}, {} bytes", filename, w, h, buffer.len());
+        }
+        "decode-into-lossless" => {
+            let filename = format!("mem_data/{}x{}_lossless.webp", cfg.width, cfg.height);
+            let webp = fs::read(&filename).expect("Run with --mode prepare-lossless first");
+            let info = ImageInfo::from_webp(&webp).unwrap();
+            let stride = info.width as usize * 4;
+            let mut buffer = vec![0u8; stride * info.height as usize];
+            let (w, h) = decode_rgba_into(&webp, &mut buffer, stride as u32).unwrap();
+            eprintln!("Decoded into buffer from {}: {}x{}, {} bytes", filename, w, h, buffer.len());
+        }
+        // Decoder builder API
+        "decoder-builder-lossy" => {
+            let filename = format!("mem_data/{}x{}_lossy.webp", cfg.width, cfg.height);
+            let webp = fs::read(&filename).expect("Run with --mode prepare-lossy first");
+            let img = Decoder::new(&webp).unwrap().decode_rgba().unwrap();
+            let (w, h) = (img.width(), img.height());
+            let pixel_bytes = img.pixels().len() * 4;
+            eprintln!("Decoder builder from {}: {}x{}, {} bytes", filename, w, h, pixel_bytes);
+        }
+        "decoder-builder-lossless" => {
+            let filename = format!("mem_data/{}x{}_lossless.webp", cfg.width, cfg.height);
+            let webp = fs::read(&filename).expect("Run with --mode prepare-lossless first");
+            let img = Decoder::new(&webp).unwrap().decode_rgba().unwrap();
+            let (w, h) = (img.width(), img.height());
+            let pixel_bytes = img.pixels().len() * 4;
+            eprintln!("Decoder builder from {}: {}x{}, {} bytes", filename, w, h, pixel_bytes);
+        }
         _ => {
             eprintln!("Unknown mode: {}", cfg.mode);
         }
@@ -301,8 +372,10 @@ fn print_usage() {
     eprintln!("  --size <N>           Image size (NxN), default: 512");
     eprintln!("  --width <N>          Image width, default: 512");
     eprintln!("  --height <N>         Image height, default: 512");
-    eprintln!("  --mode <MODE>        Mode: lossy, lossless, near-lossless,");
-    eprintln!("                       decode-lossy, decode-lossless");
+    eprintln!("  --mode <MODE>        Encode: lossy, lossless, near-lossless");
+    eprintln!("                       Decode (includes encode): decode-lossy, decode-lossless");
+    eprintln!("                       Prepare files: prepare-lossy, prepare-lossless");
+    eprintln!("                       Decode only (isolate memory): decode-only-lossy, decode-only-lossless");
     eprintln!("  --quality <Q>        Quality 0-100, default: 85");
     eprintln!("  --method <M>         Method 0-6, default: 4");
     eprintln!("  --near-lossless <N>  Near-lossless 0-100, default: 100");
