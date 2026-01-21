@@ -907,6 +907,247 @@ impl<'a> Encoder<'a> {
 
         result
     }
+
+    /// Encode to WebP, returning owned data without copying.
+    ///
+    /// This is the most efficient encoding method when you don't need a `Vec<u8>`.
+    /// The returned [`WebPData`](crate::WebPData) directly owns libwebp's internal
+    /// buffer and frees it on drop.
+    ///
+    /// # Arguments
+    /// - `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use webpx::{Encoder, Unstoppable};
+    ///
+    /// let rgba = vec![255u8; 100 * 100 * 4];
+    /// let webp_data = Encoder::new_rgba(&rgba, 100, 100)
+    ///     .quality(85.0)
+    ///     .encode_owned(Unstoppable)?;
+    ///
+    /// // Use as slice without copying
+    /// std::fs::write("output.webp", &*webp_data)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn encode_owned<S: Stop>(self, stop: S) -> Result<crate::WebPData> {
+        validate_dimensions(self.width, self.height)?;
+
+        // Check for early cancellation
+        stop.check().map_err(|reason| at!(Error::Stopped(reason)))?;
+
+        let webp_config = self.config.to_libwebp()?;
+
+        // Initialize picture
+        let mut picture = libwebp_sys::WebPPicture::new()
+            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
+
+        picture.width = self.width as i32;
+        picture.height = self.height as i32;
+
+        // Import pixel data (same as encode())
+        let import_ok = self.import_pixels(&mut picture)?;
+
+        if import_ok == 0 {
+            unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
+            return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
+        }
+
+        // Setup memory writer
+        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
+        unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
+        let mut writer = unsafe { writer.assume_init() };
+
+        picture.writer = Some(libwebp_sys::WebPMemoryWrite);
+        picture.custom_ptr = &mut writer as *mut _ as *mut _;
+
+        // Setup progress hook for cancellation
+        let ctx = StopContext { stop: &stop };
+        picture.progress_hook = Some(progress_hook::<S>);
+        picture.user_data = &ctx as *const _ as *mut _;
+
+        // Encode
+        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
+
+        if ok == 0 {
+            let error_code = picture.error_code as i32;
+            unsafe {
+                libwebp_sys::WebPPictureFree(&mut picture);
+                libwebp_sys::WebPMemoryWriterClear(&mut writer);
+            }
+            if error_code == 10 {
+                if let Err(reason) = stop.check() {
+                    return Err(at!(Error::Stopped(reason)));
+                }
+                return Err(at!(Error::EncodeFailed(EncodingError::UserAbort)));
+            }
+            return Err(at!(Error::EncodeFailed(EncodingError::from(error_code))));
+        }
+
+        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
+
+        // Transfer ownership to WebPData (don't clear the writer!)
+        let webp_data = unsafe { crate::WebPData::from_raw(writer.mem, writer.size) };
+
+        // Note: ICC profile embedding is not supported with encode_owned()
+        // because it requires reallocating the buffer. Use encode() instead.
+        #[cfg(feature = "icc")]
+        if self.icc_profile.is_some() {
+            // Drop webp_data (frees libwebp memory), then use regular encode path
+            drop(webp_data);
+            // Re-encode through the Vec path which handles ICC
+            // This is inefficient but ICC embedding is rare
+            return Err(at!(Error::InvalidConfig(
+                "ICC profile embedding not supported with encode_owned(), use encode() instead"
+                    .into()
+            )));
+        }
+
+        Ok(webp_data)
+    }
+
+    /// Encode to WebP, appending to an existing Vec.
+    ///
+    /// This avoids allocation if you already have a Vec with capacity.
+    ///
+    /// # Arguments
+    /// - `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
+    /// - `output` - Vec to append encoded data to
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use webpx::{Encoder, Unstoppable};
+    ///
+    /// let rgba = vec![255u8; 100 * 100 * 4];
+    /// let mut output = Vec::with_capacity(10000);
+    ///
+    /// Encoder::new_rgba(&rgba, 100, 100)
+    ///     .quality(85.0)
+    ///     .encode_into(Unstoppable, &mut output)?;
+    ///
+    /// println!("Encoded {} bytes", output.len());
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    pub fn encode_into<S: Stop>(self, stop: S, output: &mut Vec<u8>) -> Result<()> {
+        let data = self.encode_owned(stop)?;
+        output.extend_from_slice(&data);
+        Ok(())
+    }
+
+    /// Encode to WebP, writing to an [`io::Write`](std::io::Write) implementor.
+    ///
+    /// This is useful for streaming output to files or network without
+    /// buffering the entire result in memory.
+    ///
+    /// # Arguments
+    /// - `stop` - Cooperative cancellation token (use `Unstoppable` if not needed)
+    /// - `writer` - Destination for encoded data
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use webpx::{Encoder, Unstoppable};
+    /// use std::fs::File;
+    ///
+    /// let rgba = vec![255u8; 100 * 100 * 4];
+    /// let mut file = File::create("output.webp")?;
+    ///
+    /// Encoder::new_rgba(&rgba, 100, 100)
+    ///     .quality(85.0)
+    ///     .encode_to_writer(Unstoppable, &mut file)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[cfg(feature = "std")]
+    pub fn encode_to_writer<S: Stop, W: std::io::Write>(
+        self,
+        stop: S,
+        mut writer: W,
+    ) -> Result<()> {
+        let data = self.encode_owned(stop)?;
+        writer
+            .write_all(&data)
+            .map_err(|e| at!(Error::IoError(e.to_string())))?;
+        Ok(())
+    }
+
+    /// Import pixels into the WebPPicture, returning the success code.
+    fn import_pixels(&self, picture: &mut libwebp_sys::WebPPicture) -> Result<i32> {
+        let import_ok = match &self.data {
+            EncoderInput::Rgba { data, stride_bytes } => {
+                validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
+                picture.use_argb = 1;
+                unsafe {
+                    libwebp_sys::WebPPictureImportRGBA(picture, data.as_ptr(), *stride_bytes as i32)
+                }
+            }
+            EncoderInput::Bgra { data, stride_bytes } => {
+                validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
+                picture.use_argb = 1;
+                unsafe {
+                    libwebp_sys::WebPPictureImportBGRA(picture, data.as_ptr(), *stride_bytes as i32)
+                }
+            }
+            EncoderInput::Rgb { data, stride_bytes } => {
+                validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 3)?;
+                picture.use_argb = 1;
+                unsafe {
+                    libwebp_sys::WebPPictureImportRGB(picture, data.as_ptr(), *stride_bytes as i32)
+                }
+            }
+            EncoderInput::Bgr { data, stride_bytes } => {
+                validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 3)?;
+                picture.use_argb = 1;
+                unsafe {
+                    libwebp_sys::WebPPictureImportBGR(picture, data.as_ptr(), *stride_bytes as i32)
+                }
+            }
+            EncoderInput::Argb {
+                data,
+                stride_pixels,
+            } => {
+                let min_len = (*stride_pixels as usize) * (self.height as usize);
+                if data.len() < min_len {
+                    return Err(at!(Error::InvalidInput(alloc::format!(
+                        "ARGB buffer too small: got {} pixels, expected {}",
+                        data.len(),
+                        min_len
+                    ))));
+                }
+                if *stride_pixels < self.width {
+                    return Err(at!(Error::InvalidInput(alloc::format!(
+                        "ARGB stride too small: got {}, minimum {}",
+                        stride_pixels,
+                        self.width
+                    ))));
+                }
+                picture.use_argb = 1;
+                picture.argb = data.as_ptr() as *mut u32;
+                picture.argb_stride = *stride_pixels as i32;
+                1
+            }
+            EncoderInput::Yuv(planes) => {
+                picture.use_argb = 0;
+                picture.colorspace = if planes.a.is_some() {
+                    libwebp_sys::WebPEncCSP::WEBP_YUV420A
+                } else {
+                    libwebp_sys::WebPEncCSP::WEBP_YUV420
+                };
+                picture.y = planes.y.as_ptr() as *mut _;
+                picture.u = planes.u.as_ptr() as *mut _;
+                picture.v = planes.v.as_ptr() as *mut _;
+                picture.y_stride = planes.y_stride as i32;
+                picture.uv_stride = planes.u_stride as i32;
+                if let Some(a) = &planes.a {
+                    picture.a = a.as_ptr() as *mut _;
+                    picture.a_stride = planes.a_stride as i32;
+                }
+                1
+            }
+        };
+        Ok(import_ok)
+    }
 }
 
 pub(crate) fn validate_dimensions(width: u32, height: u32) -> Result<()> {

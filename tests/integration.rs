@@ -1920,6 +1920,98 @@ mod encoder_advanced_tests {
     }
 
     #[test]
+    fn test_encoder_encode_owned() {
+        use webpx::WebPData;
+
+        let width = 32u32;
+        let height = 32u32;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let webp_data: WebPData = Encoder::new_rgba(&data, width, height)
+            .quality(85.0)
+            .encode_owned(Unstoppable)
+            .expect("encode_owned");
+
+        // Verify we can access the data
+        assert!(!webp_data.is_empty());
+
+        // Verify it's valid WebP
+        let info = ImageInfo::from_webp(&webp_data).expect("info");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+
+        // Verify we can convert to Vec
+        let vec: Vec<u8> = webp_data.into();
+        assert!(!vec.is_empty());
+    }
+
+    #[test]
+    fn test_encoder_encode_into() {
+        let width = 32u32;
+        let height = 32u32;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let mut output = Vec::with_capacity(10000);
+
+        Encoder::new_rgba(&data, width, height)
+            .quality(85.0)
+            .encode_into(Unstoppable, &mut output)
+            .expect("encode_into");
+
+        assert!(!output.is_empty());
+
+        // Verify it's valid WebP
+        let info = ImageInfo::from_webp(&output).expect("info");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+    }
+
+    #[test]
+    fn test_encoder_encode_to_writer() {
+        let width = 32u32;
+        let height = 32u32;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+
+        let mut output = Vec::new();
+
+        Encoder::new_rgba(&data, width, height)
+            .quality(85.0)
+            .encode_to_writer(Unstoppable, &mut output)
+            .expect("encode_to_writer");
+
+        assert!(!output.is_empty());
+
+        // Verify it's valid WebP
+        let info = ImageInfo::from_webp(&output).expect("info");
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+    }
+
+    #[test]
+    fn test_webpdata_deref() {
+        let width = 16u32;
+        let height = 16u32;
+        let data = generate_rgba(width, height, 255, 0, 0, 255);
+
+        let webp_data = Encoder::new_rgba(&data, width, height)
+            .quality(85.0)
+            .encode_owned(Unstoppable)
+            .expect("encode_owned");
+
+        // Test Deref
+        let slice: &[u8] = &webp_data;
+        assert_eq!(slice.len(), webp_data.len());
+
+        // Test AsRef
+        let slice2: &[u8] = webp_data.as_ref();
+        assert_eq!(slice2.len(), webp_data.len());
+
+        // Test as_slice
+        let slice3 = webp_data.as_slice();
+        assert_eq!(slice3.len(), webp_data.len());
+    }
+
+    #[test]
     fn test_encoder_from_rgba() {
         use imgref::ImgVec;
         use rgb::RGBA8;

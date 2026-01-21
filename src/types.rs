@@ -291,3 +291,114 @@ impl<'a> From<&'a YuvPlanes> for YuvPlanesRef<'a> {
         }
     }
 }
+
+/// Owned WebP data that wraps libwebp's native memory allocation.
+///
+/// This type provides zero-copy access to encoded WebP data by directly
+/// holding libwebp's allocated buffer. The memory is freed when dropped.
+///
+/// Use this when you want to avoid the copy from libwebp's internal buffer
+/// to a `Vec<u8>`.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use webpx::{Encoder, Unstoppable};
+///
+/// let rgba = vec![255u8; 100 * 100 * 4];
+/// let webp_data = Encoder::new_rgba(&rgba, 100, 100)
+///     .quality(85.0)
+///     .encode_owned(Unstoppable)?;
+///
+/// // Access the data without copying
+/// let bytes: &[u8] = &webp_data;
+/// println!("Encoded {} bytes", bytes.len());
+///
+/// // Or convert to Vec when needed (copies)
+/// let vec: Vec<u8> = webp_data.into();
+/// # Ok::<(), webpx::At<webpx::Error>>(())
+/// ```
+pub struct WebPData {
+    ptr: *mut u8,
+    len: usize,
+}
+
+// SAFETY: The data is heap-allocated and owned exclusively
+unsafe impl Send for WebPData {}
+unsafe impl Sync for WebPData {}
+
+impl WebPData {
+    /// Create a new WebPData from a raw pointer and length.
+    ///
+    /// # Safety
+    ///
+    /// - `ptr` must be a valid pointer allocated by libwebp's memory allocator
+    /// - `len` must be the exact size of the allocation
+    /// - The caller transfers ownership of the memory to this struct
+    #[must_use]
+    pub(crate) unsafe fn from_raw(ptr: *mut u8, len: usize) -> Self {
+        Self { ptr, len }
+    }
+
+    /// Returns the length of the encoded data in bytes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns true if the data is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Returns a slice of the encoded data.
+    #[must_use]
+    pub fn as_slice(&self) -> &[u8] {
+        if self.ptr.is_null() || self.len == 0 {
+            &[]
+        } else {
+            // SAFETY: ptr is valid and len is correct per from_raw contract
+            unsafe { core::slice::from_raw_parts(self.ptr, self.len) }
+        }
+    }
+}
+
+impl Drop for WebPData {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            // SAFETY: ptr was allocated by libwebp's WebPMemoryWriter
+            unsafe {
+                libwebp_sys::WebPFree(self.ptr as *mut core::ffi::c_void);
+            }
+        }
+    }
+}
+
+impl core::ops::Deref for WebPData {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl AsRef<[u8]> for WebPData {
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl From<WebPData> for Vec<u8> {
+    fn from(data: WebPData) -> Self {
+        data.as_slice().to_vec()
+    }
+}
+
+impl core::fmt::Debug for WebPData {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WebPData")
+            .field("len", &self.len)
+            .finish_non_exhaustive()
+    }
+}

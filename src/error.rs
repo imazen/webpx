@@ -94,6 +94,8 @@ pub enum Error {
     InvalidWebP,
     /// Operation was stopped via cooperative cancellation
     Stopped(StopReason),
+    /// I/O error
+    IoError(String),
 }
 
 impl fmt::Display for Error {
@@ -110,6 +112,7 @@ impl fmt::Display for Error {
             Error::NeedMoreData => write!(f, "need more data"),
             Error::InvalidWebP => write!(f, "invalid WebP data"),
             Error::Stopped(reason) => write!(f, "{}", reason),
+            Error::IoError(msg) => write!(f, "I/O error: {}", msg),
         }
     }
 }
