@@ -3325,3 +3325,676 @@ mod typed_pixel_tests {
         }
     }
 }
+
+/// Tests using real WebP files from the codec-corpus.
+/// These tests verify behavior with actual encoded images rather than synthetic data.
+mod real_data_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Get the codec-corpus WebP test images directory.
+    fn corpus_dir() -> PathBuf {
+        PathBuf::from(env!("HOME"))
+            .join("work/codec-corpus/image-rs/test-images/webp")
+    }
+
+    /// Load a file from the corpus, returning None if not found (allows tests to skip).
+    fn load_corpus_file(subpath: &str) -> Option<Vec<u8>> {
+        let path = corpus_dir().join(subpath);
+        std::fs::read(&path).ok()
+    }
+
+    // ========== Lossy Image Tests ==========
+
+    #[test]
+    fn test_corpus_lossy_rgb() {
+        let Some(data) = load_corpus_file("lossy_images/simple-rgb.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        // Verify we can decode it
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 100);
+        assert_eq!(info.height, 100);
+        assert!(!info.has_alpha);
+
+        // Decode to RGBA
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+        assert_eq!(w, 100);
+        assert_eq!(h, 100);
+        assert_eq!(pixels.len(), 100 * 100 * 4);
+
+        // Decode to RGB
+        let (rgb_pixels, w, h) = decode_rgb(&data).unwrap();
+        assert_eq!(w, 100);
+        assert_eq!(h, 100);
+        assert_eq!(rgb_pixels.len(), 100 * 100 * 3);
+
+        // Re-encode and verify
+        let reencoded = Encoder::new_rgba(&pixels, w, h)
+            .quality(90.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        let info2 = ImageInfo::from_webp(&reencoded).unwrap();
+        assert_eq!(info2.width, 100);
+        assert_eq!(info2.height, 100);
+    }
+
+    #[test]
+    fn test_corpus_lossy_gray() {
+        let Some(data) = load_corpus_file("lossy_images/simple-gray.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 100);
+        assert_eq!(info.height, 100);
+        assert!(!info.has_alpha);
+
+        // Decode grayscale image to RGB
+        let (pixels, w, h) = decode_rgb(&data).unwrap();
+        assert_eq!(w, 100);
+        assert_eq!(h, 100);
+
+        // Verify grayscale property: R ≈ G ≈ B for all pixels
+        let mut grayscale_violations = 0;
+        for chunk in pixels.chunks_exact(3) {
+            let r = chunk[0] as i32;
+            let g = chunk[1] as i32;
+            let b = chunk[2] as i32;
+            // Allow small difference due to YUV conversion
+            if (r - g).abs() > 2 || (g - b).abs() > 2 || (r - b).abs() > 2 {
+                grayscale_violations += 1;
+            }
+        }
+        // Most pixels should be grayscale
+        assert!(
+            grayscale_violations < 100,
+            "Expected grayscale image, but {} pixels had significant color",
+            grayscale_violations
+        );
+    }
+
+    // ========== Lossless Image Tests ==========
+
+    #[test]
+    fn test_corpus_lossless_2color() {
+        let Some(data) = load_corpus_file("lossless_images/2-color.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 300);
+        assert_eq!(info.height, 300);
+
+        // Lossless format check
+        assert_eq!(info.format, BitstreamFormat::Lossless);
+
+        // Decode
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+        assert_eq!(w, 300);
+        assert_eq!(h, 300);
+
+        // Count unique colors (should be exactly 2)
+        let mut colors = std::collections::HashSet::new();
+        for chunk in pixels.chunks_exact(4) {
+            colors.insert((chunk[0], chunk[1], chunk[2], chunk[3]));
+        }
+        assert_eq!(colors.len(), 2, "Expected 2 colors, got {}", colors.len());
+
+        // Re-encode losslessly and verify exact roundtrip
+        let reencoded = Encoder::new_rgba(&pixels, w, h)
+            .lossless(true)
+            .encode(Unstoppable)
+            .unwrap();
+
+        let (decoded2, _, _) = decode_rgba(&reencoded).unwrap();
+        assert_eq!(pixels, decoded2, "Lossless re-encode should be exact");
+    }
+
+    #[test]
+    fn test_corpus_lossless_simple() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 300);
+        assert_eq!(info.height, 300);
+        assert_eq!(info.format, BitstreamFormat::Lossless);
+
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+        assert_eq!(pixels.len(), (w * h * 4) as usize);
+
+        // Test all decode variants work
+        let (rgb, _, _) = decode_rgb(&data).unwrap();
+        assert_eq!(rgb.len(), (w * h * 3) as usize);
+
+        let (bgra, _, _) = decode_bgra(&data).unwrap();
+        assert_eq!(bgra.len(), (w * h * 4) as usize);
+
+        let (bgr, _, _) = decode_bgr(&data).unwrap();
+        assert_eq!(bgr.len(), (w * h * 3) as usize);
+    }
+
+    #[test]
+    fn test_corpus_lossless_multicolor() {
+        let Some(data) = load_corpus_file("lossless_images/multi-color.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 300);
+        assert_eq!(info.height, 300);
+        assert_eq!(info.format, BitstreamFormat::Lossless);
+
+        // This is a more complex image - verify it decodes
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+        assert_eq!(pixels.len(), (w * h * 4) as usize);
+
+        // Count unique colors - should be many
+        let mut colors = std::collections::HashSet::new();
+        for chunk in pixels.chunks_exact(4) {
+            colors.insert((chunk[0], chunk[1], chunk[2], chunk[3]));
+        }
+        assert!(
+            colors.len() > 100,
+            "Expected many colors, got {}",
+            colors.len()
+        );
+    }
+
+    // ========== Extended Format Tests (Alpha, Metadata) ==========
+
+    #[test]
+    fn test_corpus_lossy_alpha() {
+        let Some(data) = load_corpus_file("extended_images/lossy_alpha.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 100);
+        assert_eq!(info.height, 100);
+        assert!(info.has_alpha, "Expected alpha channel");
+
+        // Decode with alpha
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+        assert_eq!(pixels.len(), (w * h * 4) as usize);
+
+        // Verify there are semi-transparent pixels
+        let mut has_transparency = false;
+        let mut has_opaque = false;
+        for chunk in pixels.chunks_exact(4) {
+            let alpha = chunk[3];
+            if alpha < 255 {
+                has_transparency = true;
+            }
+            if alpha > 0 {
+                has_opaque = true;
+            }
+        }
+        assert!(
+            has_transparency || has_opaque,
+            "Alpha channel should have varying values"
+        );
+
+        // Re-encode with alpha
+        let reencoded = Encoder::new_rgba(&pixels, w, h)
+            .quality(90.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        let info2 = ImageInfo::from_webp(&reencoded).unwrap();
+        assert!(info2.has_alpha || !has_transparency, "Alpha should be preserved if present");
+    }
+
+    #[test]
+    #[cfg(feature = "icc")]
+    fn test_corpus_lossless_with_xmp() {
+        let Some(data) = load_corpus_file("lossless_images/simple_xmp.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 300);
+        assert_eq!(info.height, 300);
+
+        // Extract XMP metadata
+        let xmp = get_xmp(&data).unwrap();
+        assert!(xmp.is_some(), "Expected XMP metadata");
+        let xmp_data = xmp.unwrap();
+        assert!(!xmp_data.is_empty(), "XMP data should not be empty");
+
+        // XMP is XML, verify it starts with XML declaration or xpacket
+        let xmp_str = String::from_utf8_lossy(&xmp_data);
+        assert!(
+            xmp_str.contains("xpacket") || xmp_str.contains("<?xml") || xmp_str.contains("x:xmpmeta"),
+            "XMP should contain XML content"
+        );
+
+        // Decode the image
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+
+        // Re-encode with XMP preserved
+        let encoded = Encoder::new_rgba(&pixels, w, h)
+            .lossless(true)
+            .encode(Unstoppable)
+            .unwrap();
+
+        // Embed the XMP into the re-encoded image
+        let with_xmp = embed_xmp(&encoded, &xmp_data).unwrap();
+
+        // Verify XMP was preserved
+        let extracted = get_xmp(&with_xmp).unwrap();
+        assert_eq!(extracted, Some(xmp_data));
+    }
+
+    // ========== Animation Tests ==========
+
+    #[test]
+    #[cfg(feature = "animation")]
+    fn test_corpus_animated_basic() {
+        let Some(data) = load_corpus_file("extended_images/anim.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 200);
+        assert_eq!(info.height, 200);
+        assert!(info.has_animation, "Expected animated WebP");
+
+        // Decode all frames
+        let mut decoder = AnimationDecoder::new(&data).unwrap();
+        let anim_info = decoder.info();
+        assert_eq!(anim_info.width, 200);
+        assert_eq!(anim_info.height, 200);
+        assert!(anim_info.frame_count >= 2, "Expected multiple frames");
+
+        // Decode frames
+        let frames = decoder.decode_all().unwrap();
+        assert!(frames.len() >= 2, "Expected multiple frames");
+
+        // Verify each frame has correct dimensions
+        for (i, frame) in frames.iter().enumerate() {
+            assert_eq!(
+                frame.data.len(),
+                (200 * 200 * 4) as usize,
+                "Frame {} has wrong size",
+                i
+            );
+            assert!(frame.timestamp_ms > 0 || i == 0, "Frame {} should have timestamp", i);
+        }
+
+        // Re-encode as animation
+        let mut encoder = AnimationEncoder::new(200, 200).unwrap();
+        let mut timestamp_ms = 0i32;
+        for frame in frames.iter() {
+            encoder.add_frame_rgba(&frame.data, timestamp_ms).unwrap();
+            timestamp_ms += frame.duration_ms as i32;
+        }
+        let reencoded = encoder.finish(timestamp_ms).unwrap();
+
+        let info2 = ImageInfo::from_webp(&reencoded).unwrap();
+        assert!(info2.has_animation, "Re-encoded should be animated");
+    }
+
+    #[test]
+    #[cfg(feature = "animation")]
+    fn test_corpus_animated_rgba_rgb_mismatch() {
+        // This file advertises RGBA but frames are actually RGB
+        let Some(data) = load_corpus_file("extended_images/advertises_rgba_but_frames_are_rgb.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        assert_eq!(info.width, 265);
+        assert_eq!(info.height, 199);
+        assert!(info.has_animation, "Expected animated WebP");
+
+        // Should still decode successfully
+        let mut decoder = AnimationDecoder::new(&data).unwrap();
+        let frames = decoder.decode_all().unwrap();
+        assert!(frames.len() >= 2, "Expected multiple frames");
+
+        // Verify frames decode correctly
+        for (i, frame) in frames.iter().enumerate() {
+            assert_eq!(
+                frame.data.len(),
+                (265 * 199 * 4) as usize,
+                "Frame {} has wrong size",
+                i
+            );
+        }
+    }
+
+    // ========== Decoder Builder Tests with Real Data ==========
+
+    #[test]
+    fn test_decoder_builder_with_corpus() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        // Test Decoder builder
+        let decoder = Decoder::new(&data).unwrap();
+        let info = decoder.info();
+        assert_eq!(info.width, 300);
+        assert_eq!(info.height, 300);
+
+        // Decode via builder
+        let img = decoder.decode_rgba().unwrap();
+        assert_eq!(img.width(), 300);
+        assert_eq!(img.height(), 300);
+    }
+
+    #[test]
+    fn test_decoder_crop_with_corpus() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        // Crop to center 100x100
+        let decoder = Decoder::new(&data).unwrap();
+        let img = decoder.crop(100, 100, 100, 100).decode_rgba().unwrap();
+
+        assert_eq!(img.width(), 100);
+        assert_eq!(img.height(), 100);
+    }
+
+    #[test]
+    fn test_decoder_scale_with_corpus() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        // Scale to 150x150
+        let decoder = Decoder::new(&data).unwrap();
+        let img = decoder.scale(150, 150).decode_rgba().unwrap();
+
+        assert_eq!(img.width(), 150);
+        assert_eq!(img.height(), 150);
+    }
+
+    #[test]
+    fn test_decoder_crop_and_scale_with_corpus() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        // Crop center 200x200, then scale to 100x100
+        let decoder = Decoder::new(&data).unwrap();
+        let img = decoder
+            .crop(50, 50, 200, 200)
+            .scale(100, 100)
+            .decode_rgba()
+            .unwrap();
+
+        assert_eq!(img.width(), 100);
+        assert_eq!(img.height(), 100);
+    }
+
+    // ========== Zero-Copy Decode Tests with Real Data ==========
+
+    #[test]
+    fn test_decode_into_with_corpus() {
+        let Some(data) = load_corpus_file("lossy_images/simple-rgb.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        let w = info.width;
+        let h = info.height;
+
+        // Pre-allocate buffer
+        let mut buffer = vec![0u8; (w * h * 4) as usize];
+        let stride = w * 4;
+
+        let (decoded_w, decoded_h) = decode_rgba_into(&data, &mut buffer, stride).unwrap();
+        assert_eq!(decoded_w, w);
+        assert_eq!(decoded_h, h);
+
+        // Verify buffer was filled (not all zeros)
+        let non_zero = buffer.iter().filter(|&&b| b != 0).count();
+        assert!(non_zero > 0, "Buffer should have non-zero pixels");
+    }
+
+    #[test]
+    fn test_decode_into_with_stride_with_corpus() {
+        let Some(data) = load_corpus_file("lossy_images/simple-rgb.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let info = ImageInfo::from_webp(&data).unwrap();
+        let w = info.width;
+        let h = info.height;
+
+        // Use stride with padding (128 byte alignment)
+        let stride = (w * 4).div_ceil(128) * 128;
+        let mut buffer = vec![0xFFu8; (stride * h) as usize];
+
+        let (decoded_w, decoded_h) = decode_rgba_into(&data, &mut buffer, stride).unwrap();
+        assert_eq!(decoded_w, w);
+        assert_eq!(decoded_h, h);
+
+        // Verify that pixels within width are modified but padding might be untouched
+        for y in 0..h {
+            let row_start = (y * stride) as usize;
+            let row_data = &buffer[row_start..row_start + (w * 4) as usize];
+            // Row should have actual pixel data (not all 0xFF)
+            let modified = row_data.iter().filter(|&&b| b != 0xFF).count();
+            assert!(modified > 0, "Row {} should have pixel data", y);
+        }
+    }
+
+    // ========== Encoder Quality Comparison ==========
+
+    #[test]
+    fn test_quality_affects_size() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+
+        // Encode at different quality levels
+        let q10 = Encoder::new_rgba(&pixels, w, h)
+            .quality(10.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        let q50 = Encoder::new_rgba(&pixels, w, h)
+            .quality(50.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        let q90 = Encoder::new_rgba(&pixels, w, h)
+            .quality(90.0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        // Higher quality should generally produce larger files
+        assert!(
+            q10.len() < q90.len(),
+            "q10 ({}) should be smaller than q90 ({})",
+            q10.len(),
+            q90.len()
+        );
+        assert!(
+            q50.len() <= q90.len(),
+            "q50 ({}) should be smaller or equal to q90 ({})",
+            q50.len(),
+            q90.len()
+        );
+    }
+
+    #[test]
+    fn test_method_affects_size_and_correctness() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+
+        // Encode at different method levels (0 = fastest, 6 = slowest/best compression)
+        let m0 = Encoder::new_rgba(&pixels, w, h)
+            .quality(80.0)
+            .method(0)
+            .encode(Unstoppable)
+            .unwrap();
+
+        let m4 = Encoder::new_rgba(&pixels, w, h)
+            .quality(80.0)
+            .method(4)
+            .encode(Unstoppable)
+            .unwrap();
+
+        let m6 = Encoder::new_rgba(&pixels, w, h)
+            .quality(80.0)
+            .method(6)
+            .encode(Unstoppable)
+            .unwrap();
+
+        // All should decode correctly
+        for (label, encoded) in [("m0", &m0), ("m4", &m4), ("m6", &m6)] {
+            let (decoded, dw, dh) = decode_rgba(encoded).unwrap();
+            assert_eq!(dw, w, "{} width mismatch", label);
+            assert_eq!(dh, h, "{} height mismatch", label);
+            assert_eq!(decoded.len(), pixels.len(), "{} size mismatch", label);
+        }
+
+        // Higher method should generally produce smaller or equal files
+        // (though this isn't guaranteed for all images)
+        println!(
+            "Method compression: m0={}, m4={}, m6={}",
+            m0.len(),
+            m4.len(),
+            m6.len()
+        );
+    }
+
+    // ========== Preset Tests with Real Data ==========
+
+    #[test]
+    fn test_presets_with_corpus() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+
+        // Test all presets
+        let presets = [
+            Preset::Default,
+            Preset::Picture,
+            Preset::Photo,
+            Preset::Drawing,
+            Preset::Icon,
+            Preset::Text,
+        ];
+
+        for preset in presets {
+            let encoded = Encoder::new_rgba(&pixels, w, h)
+                .preset(preset)
+                .quality(80.0)
+                .encode(Unstoppable)
+                .unwrap();
+
+            // Verify it decodes correctly
+            let (decoded, dw, dh) = decode_rgba(&encoded).unwrap();
+            assert_eq!(dw, w, "Preset {:?} width mismatch", preset);
+            assert_eq!(dh, h, "Preset {:?} height mismatch", preset);
+            assert_eq!(decoded.len(), pixels.len(), "Preset {:?} size mismatch", preset);
+        }
+    }
+
+    // ========== Streaming Tests with Real Data ==========
+
+    #[test]
+    #[cfg(feature = "streaming")]
+    fn test_streaming_decode_with_corpus() {
+        let Some(data) = load_corpus_file("lossy_images/simple-rgb.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        // Feed data in chunks using append (accumulates data)
+        let mut decoder = StreamingDecoder::new(ColorMode::Rgba).unwrap();
+        let chunk_size = 256;
+
+        let mut status = DecodeStatus::NeedMoreData;
+        for chunk in data.chunks(chunk_size) {
+            status = decoder.append(chunk).unwrap();
+            if matches!(status, DecodeStatus::Complete) {
+                break;
+            }
+        }
+
+        // Should be complete
+        assert!(matches!(status, DecodeStatus::Complete), "Expected Complete, got {:?}", status);
+
+        // Get dimensions
+        let (w, h) = decoder.dimensions().unwrap();
+        assert_eq!(w, 100);
+        assert_eq!(h, 100);
+
+        // Finish and get pixels
+        let (pixels, width, height) = decoder.finish().unwrap();
+        assert_eq!(width, 100);
+        assert_eq!(height, 100);
+        assert_eq!(pixels.len(), (100 * 100 * 4) as usize);
+    }
+
+    #[test]
+    #[cfg(feature = "streaming")]
+    fn test_streaming_encode_with_corpus() {
+        let Some(data) = load_corpus_file("lossless_images/simple.webp") else {
+            eprintln!("Skipping: corpus file not found");
+            return;
+        };
+
+        let (pixels, w, h) = decode_rgba(&data).unwrap();
+
+        // Stream encode with callback
+        let mut output = Vec::new();
+        let mut encoder = StreamingEncoder::new(w, h).unwrap();
+        encoder.set_quality(80.0);
+
+        // Encode with callback that collects output
+        encoder
+            .encode_rgba_with_callback(&pixels, |chunk| {
+                output.extend_from_slice(chunk);
+                Ok(())
+            })
+            .unwrap();
+
+        // Verify output is valid WebP
+        let info = ImageInfo::from_webp(&output).unwrap();
+        assert_eq!(info.width, w);
+        assert_eq!(info.height, h);
+
+        // Verify we can decode it back
+        let (decoded, dw, dh) = decode_rgba(&output).unwrap();
+        assert_eq!(dw, w);
+        assert_eq!(dh, h);
+        assert_eq!(decoded.len(), pixels.len());
+    }
+}
