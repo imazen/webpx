@@ -24,10 +24,12 @@ webpx = "0.1"
 ```
 
 ```rust
-use webpx::{encode_rgba, decode_rgba, Unstoppable};
+use webpx::{Encoder, decode_rgba, Unstoppable};
 
 // Encode RGBA pixels to WebP
-let webp = encode_rgba(&pixels, width, height, 85.0, Unstoppable)?;
+let webp = Encoder::new_rgba(&pixels, width, height)
+    .quality(85.0)
+    .encode(Unstoppable)?;
 
 // Decode WebP back to RGBA
 let (pixels, w, h) = decode_rgba(&webp)?;
@@ -54,16 +56,22 @@ let (pixels, w, h) = decode_rgba(&webp)?;
 ### Basic Encoding
 
 ```rust
-use webpx::{encode_rgba, encode_lossless, encode_rgb, Unstoppable};
+use webpx::{Encoder, Unstoppable};
 
 // Lossy encoding (quality 0-100)
-let webp = encode_rgba(&rgba_data, 640, 480, 85.0, Unstoppable)?;
+let webp = Encoder::new_rgba(&rgba_data, 640, 480)
+    .quality(85.0)
+    .encode(Unstoppable)?;
 
 // Lossless encoding (exact pixels)
-let webp = encode_lossless(&rgba_data, 640, 480, Unstoppable)?;
+let webp = Encoder::new_rgba(&rgba_data, 640, 480)
+    .lossless(true)
+    .encode(Unstoppable)?;
 
 // RGB without alpha
-let webp = encode_rgb(&rgb_data, 640, 480, 85.0, Unstoppable)?;
+let webp = Encoder::new_rgb(&rgb_data, 640, 480)
+    .quality(85.0)
+    .encode(Unstoppable)?;
 ```
 
 ### Builder API with Options
@@ -71,7 +79,7 @@ let webp = encode_rgb(&rgb_data, 640, 480, 85.0, Unstoppable)?;
 ```rust
 use webpx::{Encoder, Preset, Unstoppable};
 
-let webp = Encoder::new(&rgba_data, 640, 480)
+let webp = Encoder::new_rgba(&rgba_data, 640, 480)
     .preset(Preset::Photo)    // Content-aware optimization
     .quality(90.0)            // Higher quality
     .method(5)                // Better compression (slower)
@@ -134,10 +142,10 @@ let mut encoder = AnimationEncoder::new(320, 240)?;
 encoder.set_quality(80.0);
 encoder.set_lossless(false);
 
-encoder.add_frame(&frame1, 0)?;     // Start at 0ms
-encoder.add_frame(&frame2, 100)?;   // Show at 100ms
-encoder.add_frame(&frame3, 200)?;   // Show at 200ms
-let webp = encoder.finish(300)?;    // Total duration
+encoder.add_frame_rgba(&frame1_rgba, 0)?;     // Start at 0ms
+encoder.add_frame_rgba(&frame2_rgba, 100)?;   // Show at 100ms
+encoder.add_frame_rgba(&frame3_rgba, 200)?;   // Show at 200ms
+let webp = encoder.finish(300)?;              // End timestamp
 
 // Decode animation
 let mut decoder = AnimationDecoder::new(&webp)?;
@@ -204,7 +212,7 @@ let (pixels, width, height) = decoder.finish()?;
 Encoding can be cancelled cooperatively using the [`enough`](https://docs.rs/enough) crate:
 
 ```rust
-use webpx::{encode_rgba, Error, StopReason};
+use webpx::{Encoder, Error, StopReason};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -226,7 +234,10 @@ impl enough::Stop for MyCanceller {
 
 // In another thread: flag.store(true, Ordering::Relaxed);
 
-match encode_rgba(&data, width, height, 85.0, MyCanceller(cancelled)) {
+match Encoder::new_rgba(&data, width, height)
+    .quality(85.0)
+    .encode(MyCanceller(cancelled))
+{
     Ok(webp) => { /* success */ },
     Err(Error::Stopped(StopReason::Cancelled)) => { /* cancelled */ },
     Err(e) => { /* other error */ },
@@ -270,7 +281,7 @@ Choose a preset to optimize for your content type:
 ```rust
 use webpx::{Encoder, Preset, Unstoppable};
 
-let webp = Encoder::new(&data, w, h)
+let webp = Encoder::new_rgba(&data, w, h)
     .preset(Preset::Photo)
     .encode(Unstoppable)?;
 ```
