@@ -210,9 +210,9 @@ pub struct EncoderConfig {
     pub(crate) exact: bool,
     pub(crate) target_size: u32,
     pub(crate) target_psnr: f32,
-    pub(crate) sns_strength: u8,
-    pub(crate) filter_strength: u8,
-    pub(crate) filter_sharpness: u8,
+    pub(crate) sns_strength: Option<u8>,
+    pub(crate) filter_strength: Option<u8>,
+    pub(crate) filter_sharpness: Option<u8>,
     pub(crate) filter_type: u8,
     pub(crate) autofilter: bool,
     pub(crate) pass: u8,
@@ -250,9 +250,9 @@ impl Default for EncoderConfig {
             exact: false,
             target_size: 0,
             target_psnr: 0.0,
-            sns_strength: 50,
-            filter_strength: 60,
-            filter_sharpness: 0,
+            sns_strength: None,
+            filter_strength: None,
+            filter_sharpness: None,
             filter_type: 1,
             autofilter: false,
             pass: 1,
@@ -364,7 +364,7 @@ impl EncoderConfig {
             method: 6,
             pass: 10,
             segments: 4,
-            sns_strength: 100,
+            sns_strength: Some(100),
             autofilter: true,
             use_sharp_yuv: true,
             partition_limit: 100,
@@ -511,21 +511,21 @@ impl EncoderConfig {
     /// Set spatial noise shaping strength (0-100, 0 = off).
     #[must_use]
     pub fn sns_strength(mut self, strength: u8) -> Self {
-        self.sns_strength = strength.min(100);
+        self.sns_strength = Some(strength.min(100));
         self
     }
 
     /// Set filter strength (0-100, 0 = off).
     #[must_use]
     pub fn filter_strength(mut self, strength: u8) -> Self {
-        self.filter_strength = strength.min(100);
+        self.filter_strength = Some(strength.min(100));
         self
     }
 
     /// Set filter sharpness (0-7, 0 = sharpest).
     #[must_use]
     pub fn filter_sharpness(mut self, sharpness: u8) -> Self {
-        self.filter_sharpness = sharpness.min(7);
+        self.filter_sharpness = Some(sharpness.min(7));
         self
     }
 
@@ -919,9 +919,15 @@ impl EncoderConfig {
         config.exact = self.exact as i32;
         config.target_size = self.target_size as i32;
         config.target_PSNR = self.target_psnr;
-        config.sns_strength = self.sns_strength as i32;
-        config.filter_strength = self.filter_strength as i32;
-        config.filter_sharpness = self.filter_sharpness as i32;
+        if let Some(v) = self.sns_strength {
+            config.sns_strength = v as i32;
+        }
+        if let Some(v) = self.filter_strength {
+            config.filter_strength = v as i32;
+        }
+        if let Some(v) = self.filter_sharpness {
+            config.filter_sharpness = v as i32;
+        }
         config.filter_type = self.filter_type as i32;
         config.autofilter = self.autofilter as i32;
         config.pass = self.pass as i32;
