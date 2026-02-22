@@ -106,7 +106,8 @@ pub(crate) fn encode_with_config_stats(
             let slice = core::slice::from_raw_parts(writer.mem, writer.size);
             slice.to_vec()
         };
-        let encode_stats = EncodeStats::from_libwebp(unsafe { &stats.assume_init() });
+        let stats_val = unsafe { stats.assume_init() };
+        let encode_stats = EncodeStats::from_libwebp(&stats_val);
         unsafe {
             libwebp_sys::WebPPictureFree(&mut picture);
             libwebp_sys::WebPMemoryWriterClear(&mut writer);
