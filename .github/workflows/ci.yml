@@ -26,6 +26,22 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
+  # Cross-compiled 32-bit testing (i686 via QEMU)
+  test-i686:
+    name: Test i686
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-unknown-linux-gnu
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-i686
+      - name: Test (i686/QEMU)
+        run: cross test --all-features --target i686-unknown-linux-gnu
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
