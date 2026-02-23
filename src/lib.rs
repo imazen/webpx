@@ -123,12 +123,13 @@ pub use types::{BitstreamFormat, ColorMode, ImageInfo, WebPData, YuvPlanes, YuvP
 pub use enough::{Stop, StopReason, Unstoppable};
 
 // Re-export whereat types for error location tracking
-pub use whereat::{at, at_crate, At, ResultAtExt};
+pub use whereat::{At, ResultAtExt, at, at_crate};
 
 #[cfg(feature = "decode")]
 pub use decode::{
-    decode, decode_append, decode_bgr, decode_bgr_into, decode_bgra, decode_bgra_into, decode_into,
-    decode_rgb, decode_rgb_into, decode_rgba, decode_rgba_into, decode_to_img, decode_yuv, Decoder,
+    Decoder, decode, decode_append, decode_bgr, decode_bgr_into, decode_bgra, decode_bgra_into,
+    decode_into, decode_rgb, decode_rgb_into, decode_rgba, decode_rgba_into, decode_to_img,
+    decode_yuv,
 };
 // DecodePixel trait is intentionally not exported - it's a sealed implementation detail.
 // Users use concrete types (RGBA8, RGB8, etc.) with decode functions.

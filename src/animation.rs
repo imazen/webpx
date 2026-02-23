@@ -91,7 +91,7 @@ impl AnimationDecoder {
             _ => {
                 return Err(at!(Error::InvalidInput(
                     "animation decoder only supports RGB modes".into(),
-                )))
+                )));
             }
         };
 

@@ -1220,17 +1220,21 @@ mod icc_tests {
             .expect("encode with ICC failed");
 
         // Verify ICC present
-        assert!(get_icc_profile(&webp_with_icc)
-            .expect("get ICC failed")
-            .is_some());
+        assert!(
+            get_icc_profile(&webp_with_icc)
+                .expect("get ICC failed")
+                .is_some()
+        );
 
         // Remove ICC
         let webp_no_icc = remove_icc(&webp_with_icc).expect("remove ICC failed");
 
         // Verify ICC removed
-        assert!(get_icc_profile(&webp_no_icc)
-            .expect("get ICC failed")
-            .is_none());
+        assert!(
+            get_icc_profile(&webp_no_icc)
+                .expect("get ICC failed")
+                .is_none()
+        );
 
         // Image should still be decodable
         let (_, w, h) = decode_rgba(&webp_no_icc).expect("decode failed");

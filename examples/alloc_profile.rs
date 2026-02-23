@@ -13,8 +13,9 @@ use rgb::RGBA8;
 use std::io::{self, Write};
 use std::time::Instant;
 use webpx::{
-    decode, decode_append, decode_into, decode_rgba, decode_rgba_into, AnimationDecoder,
-    AnimationEncoder, ColorMode, Decoder, Encoder, StreamingDecoder, StreamingEncoder, Unstoppable,
+    AnimationDecoder, AnimationEncoder, ColorMode, Decoder, Encoder, StreamingDecoder,
+    StreamingEncoder, Unstoppable, decode, decode_append, decode_into, decode_rgba,
+    decode_rgba_into,
 };
 
 /// Read peak RSS from /proc/self/status (Linux only)
@@ -415,9 +416,15 @@ fn profile_animation(width: u32, height: u32, frame_count: usize) {
 }
 
 fn main() {
-    println!("╔════════════════════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║                              WEBPX MEMORY PROFILER                                                 ║");
-    println!("╚════════════════════════════════════════════════════════════════════════════════════════════════════╝");
+    println!(
+        "╔════════════════════════════════════════════════════════════════════════════════════════════════════╗"
+    );
+    println!(
+        "║                              WEBPX MEMORY PROFILER                                                 ║"
+    );
+    println!(
+        "╚════════════════════════════════════════════════════════════════════════════════════════════════════╝"
+    );
     println!();
     println!("For accurate allocation tracking, run with heaptrack:");
     println!("  heaptrack cargo run --release --all-features --example alloc_profile");

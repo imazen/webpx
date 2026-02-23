@@ -121,7 +121,7 @@ impl StreamingDecoder {
             _ => {
                 return Err(at!(Error::InvalidInput(
                     "YUV requires separate plane buffers".into(),
-                )))
+                )));
             }
         };
 

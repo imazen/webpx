@@ -27,7 +27,7 @@
 use std::env;
 use std::fs;
 use std::io::{self, Write};
-use webpx::{decode_rgba, decode_rgba_into, Decoder, Encoder, ImageInfo, Unstoppable};
+use webpx::{Decoder, Encoder, ImageInfo, Unstoppable, decode_rgba, decode_rgba_into};
 
 #[derive(Debug, Clone)]
 struct Config {
@@ -412,7 +412,9 @@ fn print_usage() {
     eprintln!("  --mode <MODE>        Encode: lossy, lossless, near-lossless");
     eprintln!("                       Decode (includes encode): decode-lossy, decode-lossless");
     eprintln!("                       Prepare files: prepare-lossy, prepare-lossless");
-    eprintln!("                       Decode only (isolate memory): decode-only-lossy, decode-only-lossless");
+    eprintln!(
+        "                       Decode only (isolate memory): decode-only-lossy, decode-only-lossless"
+    );
     eprintln!("  --quality <Q>        Quality 0-100, default: 85");
     eprintln!("  --method <M>         Method 0-6, default: 4");
     eprintln!("  --near-lossless <N>  Near-lossless 0-100, default: 100");

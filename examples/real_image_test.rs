@@ -10,7 +10,7 @@
 
 use std::env;
 use std::path::Path;
-use webpx::{heuristics::estimate_encode, Encoder, EncoderConfig, Unstoppable};
+use webpx::{Encoder, EncoderConfig, Unstoppable, heuristics::estimate_encode};
 
 fn main() {
     let args: Vec<String> = env::args().collect();

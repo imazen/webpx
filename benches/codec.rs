@@ -1,8 +1,8 @@
 //! Benchmarks for webpx encode/decode operations.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
-use webpx::{decode_rgba, AnimationEncoder, Encoder, EncoderConfig, Preset, Unstoppable};
+use webpx::{AnimationEncoder, Encoder, EncoderConfig, Preset, Unstoppable, decode_rgba};
 
 /// Generate a gradient RGBA image for benchmarking.
 fn generate_gradient_rgba(width: u32, height: u32) -> Vec<u8> {

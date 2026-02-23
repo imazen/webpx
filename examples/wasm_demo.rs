@@ -6,7 +6,7 @@
 //! cargo build --example wasm_demo --target wasm32-unknown-emscripten --release
 //! ```
 
-use webpx::{decode_rgba, Encoder, ImageInfo, Unstoppable};
+use webpx::{Encoder, ImageInfo, Unstoppable, decode_rgba};
 
 /// Encode RGBA data to WebP and return the size.
 #[no_mangle]

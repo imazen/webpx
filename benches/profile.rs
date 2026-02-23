@@ -3,13 +3,13 @@
 //! This benchmark measures CPU time, throughput, and provides data points
 //! for developing resource consumption heuristics.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rgb::{RGB8, RGBA8};
 use std::hint::black_box as bb;
 use webpx::{
-    decode, decode_append, decode_bgr, decode_bgra, decode_into, decode_rgb, decode_rgba,
-    decode_rgba_into, decode_to_img, decode_yuv, AnimationDecoder, AnimationEncoder, ColorMode,
-    Decoder, Encoder, Preset, StreamingDecoder, StreamingEncoder, Unstoppable,
+    AnimationDecoder, AnimationEncoder, ColorMode, Decoder, Encoder, Preset, StreamingDecoder,
+    StreamingEncoder, Unstoppable, decode, decode_append, decode_bgr, decode_bgra, decode_into,
+    decode_rgb, decode_rgba, decode_rgba_into, decode_to_img, decode_yuv,
 };
 
 /// Test image sizes: (width, height, description)
