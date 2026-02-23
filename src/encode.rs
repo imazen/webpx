@@ -848,7 +848,7 @@ impl<'a> Encoder<'a> {
         // Encode
         let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
 
-        let result = if ok == 0 {
+        if ok == 0 {
             let error_code = picture.error_code as i32;
             unsafe {
                 libwebp_sys::WebPPictureFree(&mut picture);
@@ -880,9 +880,7 @@ impl<'a> Encoder<'a> {
             }
 
             Ok(webp_data)
-        };
-
-        result
+        }
     }
 
     /// Encode to WebP, returning owned data without copying.
