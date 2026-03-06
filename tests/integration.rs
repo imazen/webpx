@@ -2562,6 +2562,7 @@ mod compat_webp_tests {
     }
 
     #[test]
+    #[cfg(feature = "animation")]
     fn test_decoder_decode_animated() {
         // Create an animated webp with multiple distinct frames
         let frame1 = generate_rgba(8, 8, 100, 150, 200, 255);

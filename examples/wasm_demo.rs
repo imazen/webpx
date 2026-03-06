@@ -9,7 +9,7 @@
 use webpx::{Encoder, ImageInfo, Unstoppable, decode_rgba};
 
 /// Encode RGBA data to WebP and return the size.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn webp_encode_test() -> i32 {
     // Create a small test image (4x4 red square)
     let width = 4u32;
@@ -33,7 +33,7 @@ pub extern "C" fn webp_encode_test() -> i32 {
 /// # Safety
 /// - `data` must point to valid memory of at least `len` bytes
 /// - The memory must remain valid for the duration of this call
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn webp_decode_test(data: *const u8, len: usize) -> i32 {
     if data.is_null() || len == 0 {
         return -1;
@@ -48,7 +48,7 @@ pub unsafe extern "C" fn webp_decode_test(data: *const u8, len: usize) -> i32 {
 }
 
 /// Simple roundtrip test.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn webp_roundtrip_test() -> i32 {
     let width = 8u32;
     let height = 8u32;

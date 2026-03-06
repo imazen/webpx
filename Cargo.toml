@@ -35,7 +35,17 @@ criterion = { version = "0.6", features = ["rayon"] }
 [[bench]]
 name = "codec"
 harness = false
+required-features = ["animation"]
 
 [[bench]]
 name = "profile"
 harness = false
+required-features = ["animation", "streaming"]
+
+[[example]]
+name = "alloc_profile"
+required-features = ["animation", "streaming"]
+
+[[example]]
+name = "pixel_api_demo"
+required-features = ["animation"]
