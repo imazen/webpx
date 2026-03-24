@@ -1058,4 +1058,16 @@ impl DecoderConfig {
         self.alpha_dithering = strength.min(100);
         self
     }
+
+    /// Returns true if any option requires the advanced WebPDecode API
+    /// instead of the simple WebPDecodeRGBA/etc functions.
+    pub(crate) fn needs_advanced_api(&self) -> bool {
+        self.use_cropping
+            || self.use_scaling
+            || self.use_threads
+            || self.bypass_filtering
+            || self.no_fancy_upsampling
+            || self.flip
+            || self.alpha_dithering > 0
+    }
 }

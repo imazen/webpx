@@ -688,7 +688,7 @@ impl<'a> Decoder<'a> {
 
     /// Decode to raw RGBA bytes.
     pub fn decode_rgba_raw(self) -> Result<(Vec<u8>, u32, u32)> {
-        if self.config.use_cropping || self.config.use_scaling {
+        if self.config.needs_advanced_api() {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGBA)
         } else {
             decode_rgba(self.data)
@@ -697,7 +697,7 @@ impl<'a> Decoder<'a> {
 
     /// Decode to raw RGB bytes.
     pub fn decode_rgb_raw(self) -> Result<(Vec<u8>, u32, u32)> {
-        if self.config.use_cropping || self.config.use_scaling {
+        if self.config.needs_advanced_api() {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGB)
         } else {
             decode_rgb(self.data)
@@ -745,7 +745,7 @@ impl<'a> Decoder<'a> {
 
     /// Decode to raw BGRA bytes.
     pub fn decode_bgra_raw(self) -> Result<(Vec<u8>, u32, u32)> {
-        if self.config.use_cropping || self.config.use_scaling {
+        if self.config.needs_advanced_api() {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGRA)
         } else {
             decode_bgra(self.data)
@@ -754,7 +754,7 @@ impl<'a> Decoder<'a> {
 
     /// Decode to raw BGR bytes.
     pub fn decode_bgr_raw(self) -> Result<(Vec<u8>, u32, u32)> {
-        if self.config.use_cropping || self.config.use_scaling {
+        if self.config.needs_advanced_api() {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGR)
         } else {
             decode_bgr(self.data)
