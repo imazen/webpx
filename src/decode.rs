@@ -847,6 +847,29 @@ impl<'a> Decoder<'a> {
 
     /// Advanced decode with cropping/scaling support.
     fn decode_advanced(self, mode: libwebp_sys::WEBP_CSP_MODE) -> Result<(Vec<u8>, u32, u32)> {
+        // Reject zero-sized scale/crop targets up front: libwebp may accept
+        // them and return a 0×N or N×0 buffer, which then panics inside
+        // imgref's `ImgVec::new` (asserts stride > 0). Surfacing as a clean
+        // error keeps `decode_rgba()` panic-free for any caller-supplied
+        // builder configuration.
+        if self.config.use_scaling
+            && (self.config.scaled_width == 0 || self.config.scaled_height == 0)
+        {
+            return Err(at!(Error::InvalidInput(alloc::format!(
+                "scale dimensions must be non-zero: got {}x{}",
+                self.config.scaled_width,
+                self.config.scaled_height
+            ))));
+        }
+        if self.config.use_cropping && (self.config.crop_width == 0 || self.config.crop_height == 0)
+        {
+            return Err(at!(Error::InvalidInput(alloc::format!(
+                "crop dimensions must be non-zero: got {}x{}",
+                self.config.crop_width,
+                self.config.crop_height
+            ))));
+        }
+
         let mut dec_config = libwebp_sys::WebPDecoderConfig::new()
             .map_err(|_| at!(Error::InvalidConfig("failed to init decoder config".into())))?;
 

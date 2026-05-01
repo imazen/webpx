@@ -41,6 +41,25 @@ cp fuzz/seeds/*.webp fuzz/corpus/decode_static/
 - `corpus/` — accumulated working corpus, gitignored. Sync to `/mnt/v/fuzzes/webpx/` per the repo-wide protocol.
 - `artifacts/` — raw libFuzzer crash artifacts, gitignored.
 
+## OOM artifacts are DoS findings
+
+webpx is consumed by image-processing services that handle untrusted user
+uploads. An attacker-controlled input that drives libwebp into very large
+allocations is a denial-of-service vector. **`oom-*` artifacts produced by
+any fuzz target should be triaged the same as `crash-*` — they're not
+noise.**
+
+The fuzz targets gate on a defensive `MAX_PIXELS` so the *fuzzer* doesn't
+poison itself, but artifacts that slip past those gates (e.g., inputs that
+decode to a small image but force huge intermediate libwebp buffers) are
+real findings. Mirror them into `/mnt/v/fuzzes/webpx/artifacts/<target>/`,
+attempt minimization with a generous `-rss_limit_mb`, and either commit
+the minimized POC (≤8 KB) to `fuzz/regression/` or reference the block-
+storage path from the issue/PR if it's larger.
+
+A configurable `DecoderConfig::max_pixels` in webpx itself is the right
+upstream fix; tracked separately.
+
 ## Regression gate
 
 `tests/fuzz_regression.rs` runs every file in `fuzz/regression/` through every

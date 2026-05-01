@@ -49,6 +49,15 @@ fn run_decoder_builder(input: &[u8]) {
     if let Ok(dec) = webpx::Decoder::new(input) {
         let _ = dec.crop(0, 0, 16, 16).decode_rgb();
     }
+    // Edge cases the fuzzer reaches but a fixed harness misses: zero
+    // scale and zero crop dimensions used to panic inside imgref instead
+    // of returning Err. Make sure every seed exercises both.
+    if let Ok(dec) = webpx::Decoder::new(input) {
+        let _ = dec.scale(0, 0).decode_rgba();
+    }
+    if let Ok(dec) = webpx::Decoder::new(input) {
+        let _ = dec.crop(0, 0, 0, 0).decode_rgba();
+    }
 }
 
 fn run_streaming(input: &[u8]) {

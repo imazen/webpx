@@ -1,0 +1,141 @@
+name: Fuzz & Sanitizers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Daily at 03:00 UTC — separate from the weekly remote agent that
+    # runs longer per-target sweeps and opens regression PRs.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Seconds per fuzz target (cron run only)'
+        required: false
+        default: '180'
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build every fuzz target. Cheap, runs on every push — keeps targets
+  # from bit-rotting against API changes.
+  fuzz-build:
+    name: Fuzz build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz-build
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Build all fuzz targets
+        run: cd fuzz && cargo +nightly fuzz build
+
+  # Cron-only short fuzz pass per target. PR/push runs are 60s,
+  # cron runs use the workflow_dispatch input or 180s default.
+  fuzz-run:
+    name: Fuzz (${{ matrix.target }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - image_info
+          - decode_static
+          - decode_into
+          - decoder_builder
+          - decode_streaming
+          - decode_animation
+          - mux_metadata
+          - encode_roundtrip
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz-${{ matrix.target }}
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Determine duration
+        id: duration
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "seconds=${{ github.event.inputs.duration || '180' }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "seconds=180" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Seed corpus
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          cp fuzz/seeds/* fuzz/corpus/${{ matrix.target }}/ 2>/dev/null || true
+          cp fuzz/regression/* fuzz/corpus/${{ matrix.target }}/ 2>/dev/null || true
+      - name: Fuzz ${{ matrix.target }}
+        run: |
+          cd fuzz && cargo +nightly fuzz run ${{ matrix.target }} corpus/${{ matrix.target }} \
+            -- -max_total_time=${{ steps.duration.outputs.seconds }} \
+               -dict=webp.dict \
+               -rss_limit_mb=2048
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.target }}
+          path: fuzz/artifacts/
+          retention-days: 30
+
+  # Stable-toolchain regression gate — runs every push.
+  regression:
+    name: Fuzz regression seeds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run regression harness
+        run: cargo test --all-features --test fuzz_regression
+
+  # AddressSanitizer pass on the soundness + integration tests.
+  # Catches use-after-free, OOB writes, and other libwebp-FFI memory
+  # bugs that a normal cargo test would miss.
+  asan:
+    name: ASAN (x86_64)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: '-Zsanitizer=address'
+      RUSTDOCFLAGS: '-Zsanitizer=address'
+      ASAN_OPTIONS: 'detect_odr_violation=0:detect_leaks=0'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: asan
+      - name: Soundness tests under ASAN
+        run: |
+          cargo +nightly test -Zbuild-std --release \
+            --target x86_64-unknown-linux-gnu --all-features \
+            --test soundness
+      - name: Integration tests under ASAN
+        run: |
+          cargo +nightly test -Zbuild-std --release \
+            --target x86_64-unknown-linux-gnu --all-features \
+            --test integration
+      - name: Fuzz regression under ASAN
+        run: |
+          cargo +nightly test -Zbuild-std --release \
+            --target x86_64-unknown-linux-gnu --all-features \
+            --test fuzz_regression

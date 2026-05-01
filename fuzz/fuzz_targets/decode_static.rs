@@ -10,8 +10,19 @@ use libfuzzer_sys::fuzz_target;
 use rgb::alt::{BGR8, BGRA8};
 use rgb::{RGB8, RGBA8};
 
-// Cap allocations: largest plausible decoded buffer we let through.
-const MAX_PIXELS: u64 = 64 * 1024 * 1024; // 64 MP
+// Cap allocations the *fuzzer* will let through, so ASAN-instrumented
+// runs stay under libFuzzer's RSS budget and don't poison every iteration
+// with OOMs from any-old-large-image input.
+//
+// This cap exists to make fuzzing useful — it does NOT mean OOM artifacts
+// libFuzzer still finds (e.g., compressed inputs that decode to >16 MP via
+// libwebp's internal buffers, or malformed inputs that trip pathological
+// allocations) are uninteresting. webpx is consumed by image-processing
+// services that handle untrusted user uploads, so attacker-controlled OOM
+// is a denial-of-service vector. Treat any `oom-*` artifact as a finding,
+// triage it, and consider whether webpx should reject the input earlier
+// (see `DecoderConfig::max_pixels`, tracked separately).
+const MAX_PIXELS: u64 = 16 * 1024 * 1024; // 16 MP
 
 fn pixels_ok(data: &[u8]) -> bool {
     match webpx::ImageInfo::from_webp(data) {
