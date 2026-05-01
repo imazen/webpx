@@ -117,3 +117,18 @@ prepublish: ci doc
 # Clean build artifacts
 clean:
     cargo clean
+
+# List fuzz targets
+fuzz-list:
+    cd fuzz && cargo +nightly fuzz list
+
+# Build all fuzz targets (smoke check)
+fuzz-build:
+    cd fuzz && cargo +nightly fuzz build
+
+# Run a fuzz target with the dictionary + seed corpus. Default: 60s.
+fuzz target="image_info" time="60":
+    mkdir -p fuzz/corpus/{{target}}
+    cp -n fuzz/seeds/* fuzz/corpus/{{target}}/ 2>/dev/null || true
+    cd fuzz && cargo +nightly fuzz run {{target}} corpus/{{target}} \
+        -- -dict=webp.dict -max_total_time={{time}}

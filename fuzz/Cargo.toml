@@ -1,0 +1,80 @@
+[package]
+name = "webpx-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+rgb = "0.8.53"
+
+[dependencies.webpx]
+path = ".."
+features = ["decode", "encode", "animation", "icc", "streaming"]
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "decode_static"
+path = "fuzz_targets/decode_static.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_into"
+path = "fuzz_targets/decode_into.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decoder_builder"
+path = "fuzz_targets/decoder_builder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_streaming"
+path = "fuzz_targets/decode_streaming.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_animation"
+path = "fuzz_targets/decode_animation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mux_metadata"
+path = "fuzz_targets/mux_metadata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "encode_roundtrip"
+path = "fuzz_targets/encode_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image_info"
+path = "fuzz_targets/image_info.rs"
+test = false
+doc = false
+bench = false

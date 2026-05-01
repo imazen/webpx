@@ -1,3 +1,9 @@
 /target
 Cargo.lock
 mem_data/
+.workongoing
+fuzz/target
+fuzz/corpus
+fuzz/artifacts
+fuzz/coverage
+fuzz/Cargo.lock
