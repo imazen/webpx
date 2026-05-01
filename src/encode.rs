@@ -852,6 +852,10 @@ impl<'a> Encoder<'a> {
                 1 // Success - no import function needed (zero-copy)
             }
             EncoderInput::Yuv(planes) => {
+                if let Err(e) = validate_yuv_planes(planes) {
+                    unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
+                    return Err(e);
+                }
                 picture.use_argb = 0;
                 picture.colorspace = if planes.a.is_some() {
                     libwebp_sys::WebPEncCSP::WEBP_YUV420A
@@ -1152,6 +1156,8 @@ impl<'a> Encoder<'a> {
                 1
             }
             EncoderInput::Yuv(planes) => {
+                // Caller (encode_owned) owns `picture` and frees it on error.
+                validate_yuv_planes(planes)?;
                 picture.use_argb = 0;
                 picture.colorspace = if planes.a.is_some() {
                     libwebp_sys::WebPEncCSP::WEBP_YUV420A
@@ -1204,6 +1210,98 @@ pub(crate) fn validate_buffer_size(size: usize, width: u32, height: u32, bpp: u3
             expected
         ))));
     }
+    Ok(())
+}
+
+/// Validate YUV planes against image dimensions before passing the raw
+/// pointers to libwebp. libwebp dereferences `y`/`u`/`v`/`a` directly via
+/// the supplied strides; if a plane slice is shorter than `stride * rows`,
+/// libwebp would read out of bounds. Each plane's stride must also be
+/// large enough for its sample width.
+pub(crate) fn validate_yuv_planes(planes: &YuvPlanesRef<'_>) -> Result<()> {
+    let width = planes.width as usize;
+    let height = planes.height as usize;
+    // 4:2:0 chroma subsampling: ceil(w/2) × ceil(h/2)
+    let uv_width = width.div_ceil(2);
+    let uv_height = height.div_ceil(2);
+
+    // Stride floors.
+    if planes.y_stride < width {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "Y stride too small: got {}, minimum {}",
+            planes.y_stride,
+            width
+        ))));
+    }
+    if planes.u_stride < uv_width {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "U stride too small: got {}, minimum {}",
+            planes.u_stride,
+            uv_width
+        ))));
+    }
+    if planes.v_stride < uv_width {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "V stride too small: got {}, minimum {}",
+            planes.v_stride,
+            uv_width
+        ))));
+    }
+
+    // Plane-length floors. The last row only needs `width` (chroma_width)
+    // samples, but libwebp treats the slice as a contiguous stride×rows
+    // block in several places; require the conservative full-stride extent.
+    let y_min = planes.y_stride.saturating_mul(height);
+    if planes.y.len() < y_min {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "Y plane too short: got {}, expected at least {} (y_stride {} × height {})",
+            planes.y.len(),
+            y_min,
+            planes.y_stride,
+            height
+        ))));
+    }
+    let u_min = planes.u_stride.saturating_mul(uv_height);
+    if planes.u.len() < u_min {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "U plane too short: got {}, expected at least {} (u_stride {} × uv_height {})",
+            planes.u.len(),
+            u_min,
+            planes.u_stride,
+            uv_height
+        ))));
+    }
+    let v_min = planes.v_stride.saturating_mul(uv_height);
+    if planes.v.len() < v_min {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "V plane too short: got {}, expected at least {} (v_stride {} × uv_height {})",
+            planes.v.len(),
+            v_min,
+            planes.v_stride,
+            uv_height
+        ))));
+    }
+
+    if let Some(a) = planes.a {
+        if planes.a_stride < width {
+            return Err(at!(Error::InvalidInput(alloc::format!(
+                "A stride too small: got {}, minimum {}",
+                planes.a_stride,
+                width
+            ))));
+        }
+        let a_min = planes.a_stride.saturating_mul(height);
+        if a.len() < a_min {
+            return Err(at!(Error::InvalidInput(alloc::format!(
+                "A plane too short: got {}, expected at least {} (a_stride {} × height {})",
+                a.len(),
+                a_min,
+                planes.a_stride,
+                height
+            ))));
+        }
+    }
+
     Ok(())
 }
 

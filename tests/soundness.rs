@@ -1,0 +1,159 @@
+//! Soundness regression tests from imazen/webpx#2.
+//!
+//! Each test asserts a memory-safety invariant that earlier API shapes broke.
+//! Run normally for the logical assertions, or under ASan for use-after-free
+//! detection on the streaming-decoder lifetime test:
+//!
+//! ```sh
+//! RUSTFLAGS='-Zsanitizer=address' \
+//!     cargo +nightly test -Zbuild-std --release \
+//!     --target x86_64-unknown-linux-gnu --test soundness
+//! ```
+
+use webpx::*;
+
+#[cfg(feature = "streaming")]
+fn rgba_fixture(width: u32, height: u32) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            rgba.extend_from_slice(&[
+                (x * 40 + 10) as u8,
+                (y * 50 + 20) as u8,
+                (x * 17 + y * 19 + 30) as u8,
+                255,
+            ]);
+        }
+    }
+    rgba
+}
+
+#[cfg(feature = "streaming")]
+fn encode_lossless_rgba(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
+    Encoder::new_rgba(rgba, width, height)
+        .lossless(true)
+        .encode(Unstoppable)
+        .expect("lossless encode should succeed")
+}
+
+#[test]
+fn argb_lossless_encode_must_not_mutate_shared_input() {
+    let argb = vec![0x00_ff_00_00u32];
+    let original = argb.clone();
+
+    Encoder::new_argb(&argb, 1, 1)
+        .lossless(true)
+        .encode(Unstoppable)
+        .expect("lossless argb encode should succeed");
+
+    assert_eq!(
+        argb, original,
+        "safe ARGB encoding mutated data passed through an immutable slice"
+    );
+}
+
+#[test]
+fn yuv_encode_must_not_mutate_shared_planes() {
+    let width = 8;
+    let height = 8;
+    let y: Vec<u8> = (0..(width * height)).map(|v| v as u8).collect();
+    let u: Vec<u8> = (0..((width / 2) * (height / 2)))
+        .map(|v| (64 + v) as u8)
+        .collect();
+    let v: Vec<u8> = (0..((width / 2) * (height / 2)))
+        .map(|v| (128 + v) as u8)
+        .collect();
+    let a = vec![0u8; (width * height) as usize];
+    let original_y = y.clone();
+    let original_u = u.clone();
+    let original_v = v.clone();
+
+    let planes = YuvPlanesRef {
+        y: &y,
+        y_stride: width as usize,
+        u: &u,
+        u_stride: (width / 2) as usize,
+        v: &v,
+        v_stride: (width / 2) as usize,
+        a: Some(&a),
+        a_stride: width as usize,
+        width,
+        height,
+    };
+
+    Encoder::new_yuv(planes)
+        .encode(Unstoppable)
+        .expect("yuv encode should succeed");
+
+    assert_eq!(
+        y, original_y,
+        "safe YUV encoding mutated the Y plane passed through an immutable slice"
+    );
+    assert_eq!(
+        u, original_u,
+        "safe YUV encoding mutated the U plane passed through an immutable slice"
+    );
+    assert_eq!(
+        v, original_v,
+        "safe YUV encoding mutated the V plane passed through an immutable slice"
+    );
+}
+
+#[test]
+fn yuv_encode_must_reject_planes_shorter_than_stride_height() {
+    let width = 2;
+    let height = 2;
+    let hidden_tail = [16u8, 235, 235, 235];
+    let u = [128u8];
+    let v = [128u8];
+    let planes = YuvPlanesRef {
+        y: &hidden_tail[..1],
+        y_stride: width as usize,
+        u: &u,
+        u_stride: 1,
+        v: &v,
+        v_stride: 1,
+        a: None,
+        a_stride: 0,
+        width,
+        height,
+    };
+
+    let result = Encoder::new_yuv(planes).encode(Unstoppable);
+    assert!(
+        result.is_err(),
+        "safe YUV encoding accepted a Y plane shorter than y_stride * height"
+    );
+}
+
+// The original report exercised this anti-pattern at runtime:
+//
+//     let mut decoder = {
+//         let mut output = vec![0u8; ...];
+//         StreamingDecoder::with_buffer(&mut output, stride, ColorMode::Rgba).unwrap()
+//     };
+//     decoder.append(&webp).expect(...);  // UAF: output dropped at end of inner block
+//
+// After the soundness fix added a lifetime to `StreamingDecoder<'_>`, the
+// borrow checker rejects that shape outright. The runtime test below
+// verifies the legitimate (buffer-outlives-decoder) path still works.
+#[cfg(feature = "streaming")]
+#[test]
+fn streaming_decoder_with_buffer_safe_usage() {
+    let width = 16;
+    let height = 16;
+    let rgba = rgba_fixture(width, height);
+    let webp = encode_lossless_rgba(&rgba, width, height);
+    let stride = (width * 4) as usize;
+
+    let mut output = vec![0u8; stride * height as usize];
+    let mut decoder = StreamingDecoder::with_buffer(&mut output, stride, ColorMode::Rgba)
+        .expect("streaming decoder with external buffer");
+
+    decoder.append(&webp).expect("streaming decode append");
+    let (decoded, decoded_width, decoded_height) =
+        decoder.finish().expect("finish on caller-owned buffer");
+
+    assert_eq!((decoded_width, decoded_height), (width, height));
+    assert_eq!(decoded, rgba);
+}

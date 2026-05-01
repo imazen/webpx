@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Encoder YUV path now validates each plane's slice length against
+  `stride * rows` (chroma planes use `ceil(h/2)` rows) before passing
+  raw pointers to libwebp, so a `YuvPlanesRef` with a too-short Y/U/V
+  plane is rejected with `Error::InvalidInput` instead of letting
+  libwebp read out of bounds.
+
 ## [0.2.0] - 2026-05-01
 
 ### Security
