@@ -11,7 +11,8 @@ use whereat::*;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Frame {
-    /// Frame pixel data (RGBA).
+    /// Frame pixel data, in whichever color mode the decoder was configured
+    /// with (defaults to RGBA, 4 bytes per pixel).
     pub data: Vec<u8>,
     /// Frame width.
     pub width: u32,
@@ -62,6 +63,7 @@ pub struct AnimationInfo {
 pub struct AnimationDecoder {
     decoder: *mut libwebp_sys::WebPAnimDecoder,
     info: AnimationInfo,
+    bpp: usize,
     _data: Vec<u8>, // Keep data alive
 }
 
@@ -82,15 +84,17 @@ impl AnimationDecoder {
     /// * `color_mode` - Output color format
     /// * `use_threads` - Enable multi-threaded decoding
     pub fn with_options(data: &[u8], color_mode: ColorMode, use_threads: bool) -> Result<Self> {
-        let csp_mode = match color_mode {
-            ColorMode::Rgba => libwebp_sys::WEBP_CSP_MODE::MODE_RGBA,
-            ColorMode::Bgra => libwebp_sys::WEBP_CSP_MODE::MODE_BGRA,
-            ColorMode::Argb => libwebp_sys::WEBP_CSP_MODE::MODE_ARGB,
-            ColorMode::Rgb => libwebp_sys::WEBP_CSP_MODE::MODE_RGB,
-            ColorMode::Bgr => libwebp_sys::WEBP_CSP_MODE::MODE_BGR,
+        // libwebp's WebPAnimDecoder only accepts MODE_RGBA / MODE_BGRA
+        // (and the premultiplied variants, which webpx doesn't expose).
+        // Reject anything else with a clear error rather than passing it
+        // through and letting `WebPAnimDecoderNew` return NULL with no
+        // explanation.
+        let (csp_mode, bpp) = match color_mode {
+            ColorMode::Rgba => (libwebp_sys::WEBP_CSP_MODE::MODE_RGBA, 4),
+            ColorMode::Bgra => (libwebp_sys::WEBP_CSP_MODE::MODE_BGRA, 4),
             _ => {
                 return Err(at!(Error::InvalidInput(
-                    "animation decoder only supports RGB modes".into(),
+                    "animation decoder only supports ColorMode::Rgba or ColorMode::Bgra".into(),
                 )));
             }
         };
@@ -139,6 +143,7 @@ impl AnimationDecoder {
                 loop_count: anim_info.loop_count,
                 bgcolor: anim_info.bgcolor,
             },
+            bpp,
             _data: data_copy,
         })
     }
@@ -173,8 +178,11 @@ impl AnimationDecoder {
             )));
         }
 
-        // Copy the frame data (buffer is owned by decoder)
-        let size = (self.info.width as usize) * (self.info.height as usize) * 4;
+        // Copy the frame data (buffer is owned by decoder).
+        // Buffer size matches the configured color mode (3 bpp for RGB/BGR,
+        // 4 bpp otherwise) — using a hard-coded 4 here would over-read by
+        // ~33% for the 3-bpp modes.
+        let size = (self.info.width as usize) * (self.info.height as usize) * self.bpp;
         let data = unsafe { core::slice::from_raw_parts(buf, size).to_vec() };
 
         // Calculate duration (difference from previous frame)
