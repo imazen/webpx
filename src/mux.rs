@@ -69,6 +69,14 @@ unsafe fn create_mux_from_data(webp_data: &[u8], copy_data: bool) -> *mut libweb
     }
 }
 
+/// Hard cap on metadata chunk size copied out of libwebp memory.
+///
+/// libwebp itself accepts ICCP/EXIF/XMP chunks up to ~4 GB. Without a cap
+/// here, a hostile WebP declaring a 4 GB ICCP chunk would force webpx to
+/// allocate a 4 GB Vec on every `get_*` call. 256 MiB is generous for any
+/// real-world ICC profile / EXIF / XMP block while bounding the worst case.
+pub(crate) const MAX_METADATA_CHUNK_BYTES: usize = 256 * 1024 * 1024;
+
 /// Get a metadata chunk from WebP data.
 fn get_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Option<Vec<u8>>> {
     let demux = unsafe { create_demux(webp_data) };
@@ -90,6 +98,18 @@ fn get_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Option<Vec<u8>>> {
     let result = if found != 0 {
         let chunk_iter = unsafe { chunk_iter.assume_init() };
         if !chunk_iter.chunk.bytes.is_null() && chunk_iter.chunk.size > 0 {
+            if chunk_iter.chunk.size > MAX_METADATA_CHUNK_BYTES {
+                unsafe {
+                    let mut iter = chunk_iter;
+                    libwebp_sys::WebPDemuxReleaseChunkIterator(&mut iter);
+                    libwebp_sys::WebPDemuxDelete(demux);
+                }
+                return Err(at!(Error::InvalidInput(alloc::format!(
+                    "metadata chunk exceeds limit: {} bytes (max {})",
+                    chunk_iter.chunk.size,
+                    MAX_METADATA_CHUNK_BYTES
+                ))));
+            }
             let chunk_data = unsafe {
                 core::slice::from_raw_parts(chunk_iter.chunk.bytes, chunk_iter.chunk.size)
             };

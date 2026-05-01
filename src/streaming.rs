@@ -58,7 +58,7 @@ pub struct StreamingDecoder<'a> {
     height: i32,
     last_y: i32,
     // Ties the decoder's lifetime to the caller-supplied output buffer
-    // (when `with_buffer` is used). For `new()` the lifetime is `'static`
+    // when `with_buffer` is used. For `new()` the lifetime is `'static`
     // because libwebp owns the buffer.
     _marker: PhantomData<&'a mut [u8]>,
 }
@@ -264,11 +264,13 @@ impl<'a> StreamingDecoder<'a> {
             )
         };
 
-        if ptr.is_null() || last_y <= 0 {
+        // Reject negative dims/stride so `as usize` cannot wrap into a huge
+        // value that bypasses libwebp's allocation bounds.
+        if ptr.is_null() || last_y <= 0 || stride <= 0 || width <= 0 {
             return None;
         }
 
-        let size = (stride as usize) * (last_y as usize);
+        let size = (stride as usize).saturating_mul(last_y as usize);
 
         let data = unsafe { core::slice::from_raw_parts(ptr, size) };
 
@@ -294,19 +296,30 @@ impl<'a> StreamingDecoder<'a> {
             )
         };
 
-        if ptr.is_null() || last_y < height {
+        if ptr.is_null() || last_y < height || stride <= 0 || width <= 0 || height <= 0 {
             return Err(at!(Error::NeedMoreData));
         }
 
         let bpp = self.color_mode.bytes_per_pixel().unwrap_or(4);
 
-        // Copy to contiguous buffer (stride may differ from width * bpp)
-        let mut result = Vec::with_capacity((width as usize) * (height as usize) * bpp);
+        // Copy to contiguous buffer (stride may differ from width * bpp).
+        // saturating_mul guards 32-bit usize against unexpectedly large
+        // libwebp-returned strides.
+        let total = (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(bpp);
+        let mut result = Vec::with_capacity(total);
 
+        let row_bytes = (width as usize).saturating_mul(bpp);
         for y in 0..height {
-            let row_start = (y as usize) * (stride as usize);
-            let row_data =
-                unsafe { core::slice::from_raw_parts(ptr.add(row_start), (width as usize) * bpp) };
+            let row_start = (y as usize).saturating_mul(stride as usize);
+            // ptr.add requires the offset to fit in isize; the guard here
+            // matches what libwebp's allocation guarantees for its own
+            // returned (stride, height) pair.
+            if row_start > isize::MAX as usize {
+                return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+            }
+            let row_data = unsafe { core::slice::from_raw_parts(ptr.add(row_start), row_bytes) };
             result.extend_from_slice(row_data);
         }
 
@@ -390,7 +403,9 @@ impl StreamingEncoder {
     where
         F: FnMut(&[u8]) -> Result<()>,
     {
-        let expected = (self.width as usize) * (self.height as usize) * 4;
+        let expected = (self.width as usize)
+            .saturating_mul(self.height as usize)
+            .saturating_mul(4);
         if data.len() < expected {
             return Err(at!(Error::InvalidInput("buffer too small".into())));
         }
@@ -467,7 +482,9 @@ impl StreamingEncoder {
     where
         F: FnMut(&[u8]) -> Result<()>,
     {
-        let expected = (self.width as usize) * (self.height as usize) * 3;
+        let expected = (self.width as usize)
+            .saturating_mul(self.height as usize)
+            .saturating_mul(3);
         if data.len() < expected {
             return Err(at!(Error::InvalidInput("buffer too small".into())));
         }

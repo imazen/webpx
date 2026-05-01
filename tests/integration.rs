@@ -1844,6 +1844,52 @@ mod encoder_advanced_tests {
     }
 
     #[test]
+    fn test_encoder_yuv_rejects_short_planes() {
+        // Regression: previously the YUV zero-copy path passed planes
+        // straight to libwebp without validating that y/u/v lengths
+        // matched stride×rows, allowing libwebp to read out of bounds.
+        use webpx::YuvPlanesRef;
+
+        let width = 32u32;
+        let height = 32u32;
+        let y = vec![0u8; (width as usize) * (height as usize)];
+        let u = vec![0u8; ((width as usize) / 2) * ((height as usize) / 2)];
+        let v = vec![0u8; ((width as usize) / 2) * ((height as usize) / 2)];
+
+        // Y plane truncated by one row → must error.
+        let bad_y = YuvPlanesRef {
+            y: &y[..y.len() - (width as usize)],
+            y_stride: width as usize,
+            u: &u,
+            u_stride: (width as usize) / 2,
+            v: &v,
+            v_stride: (width as usize) / 2,
+            a: None,
+            a_stride: 0,
+            width,
+            height,
+        };
+        let r = Encoder::new_yuv(bad_y).encode(Unstoppable);
+        assert!(r.is_err(), "short Y plane should be rejected");
+
+        // U/V stride mismatch → must error.
+        let bad_strides = YuvPlanesRef {
+            y: &y,
+            y_stride: width as usize,
+            u: &u,
+            u_stride: (width as usize) / 2,
+            v: &v,
+            v_stride: width as usize, // mismatched
+            a: None,
+            a_stride: 0,
+            width,
+            height,
+        };
+        let r = Encoder::new_yuv(bad_strides).encode(Unstoppable);
+        assert!(r.is_err(), "u_stride != v_stride should be rejected");
+    }
+
+    #[test]
     fn test_encoder_new_argb_zero_copy() {
         // Test the zero-copy ARGB fast path
         let width = 32u32;

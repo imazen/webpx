@@ -572,7 +572,10 @@ impl<'a> Encoder<'a> {
         let bpp = P::LAYOUT.bytes_per_pixel();
         // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
         let data = unsafe {
-            core::slice::from_raw_parts(img.buf().as_ptr() as *const u8, img.buf().len() * bpp)
+            core::slice::from_raw_parts(
+                img.buf().as_ptr() as *const u8,
+                img.buf().len().saturating_mul(bpp),
+            )
         };
         // imgref stride() returns stride in pixels, we need bytes
         let stride_bytes = (img.stride() * bpp) as u32;
@@ -607,7 +610,10 @@ impl<'a> Encoder<'a> {
         let bpp = P::LAYOUT.bytes_per_pixel();
         // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
         let data = unsafe {
-            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+            core::slice::from_raw_parts(
+                pixels.as_ptr() as *const u8,
+                pixels.len().saturating_mul(bpp),
+            )
         };
         let stride_bytes = width * bpp as u32;
         Self::from_pixels_internal(data, width, height, stride_bytes, P::LAYOUT)
@@ -644,7 +650,10 @@ impl<'a> Encoder<'a> {
         let bpp = P::LAYOUT.bytes_per_pixel();
         // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
         let data = unsafe {
-            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+            core::slice::from_raw_parts(
+                pixels.as_ptr() as *const u8,
+                pixels.len().saturating_mul(bpp),
+            )
         };
         let stride_bytes = stride_pixels * bpp as u32;
         Self::from_pixels_internal(data, width, height, stride_bytes, P::LAYOUT)
@@ -830,8 +839,10 @@ impl<'a> Encoder<'a> {
                 data,
                 stride_pixels,
             } => {
-                // Zero-copy fast path: set argb pointer directly without Import
-                let min_len = (*stride_pixels as usize) * (self.height as usize);
+                // Zero-copy fast path: set argb pointer directly without Import.
+                // Use saturating_mul so 32-bit usize (i686) cannot wrap around
+                // a maliciously large stride and bypass the length guard.
+                let min_len = (*stride_pixels as usize).saturating_mul(self.height as usize);
                 if data.len() < min_len {
                     return Err(at!(Error::InvalidInput(alloc::format!(
                         "ARGB buffer too small: got {} pixels, expected {}",
@@ -866,6 +877,8 @@ impl<'a> Encoder<'a> {
                 picture.u = planes.u.as_ptr() as *mut _;
                 picture.v = planes.v.as_ptr() as *mut _;
                 picture.y_stride = planes.y_stride as i32;
+                // u_stride == v_stride is enforced by validate_yuv_planes;
+                // libwebp uses a single uv_stride field for both planes.
                 picture.uv_stride = planes.u_stride as i32;
                 if let Some(a) = &planes.a {
                     picture.a = a.as_ptr() as *mut _;
@@ -1135,7 +1148,8 @@ impl<'a> Encoder<'a> {
                 data,
                 stride_pixels,
             } => {
-                let min_len = (*stride_pixels as usize) * (self.height as usize);
+                // saturating_mul so 32-bit usize cannot wrap and bypass the guard.
+                let min_len = (*stride_pixels as usize).saturating_mul(self.height as usize);
                 if data.len() < min_len {
                     return Err(at!(Error::InvalidInput(alloc::format!(
                         "ARGB buffer too small: got {} pixels, expected {}",
@@ -1247,6 +1261,15 @@ pub(crate) fn validate_yuv_planes(planes: &YuvPlanesRef<'_>) -> Result<()> {
             uv_width
         ))));
     }
+    // libwebp's WebPPicture has a single uv_stride field used for both U
+    // and V; if these don't match, V would be read with U's stride.
+    if planes.u_stride != planes.v_stride {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "U and V strides must match (got u={}, v={}); libwebp uses a single uv_stride",
+            planes.u_stride,
+            planes.v_stride
+        ))));
+    }
 
     // Plane-length floors. The last row only needs `width` (chroma_width)
     // samples, but libwebp treats the slice as a contiguous stride×rows
@@ -1338,6 +1361,13 @@ pub(crate) fn validate_buffer_size_stride(
     Ok(())
 }
 
+/// Validate YUV planes against the picture dimensions.
+///
+/// libwebp reads each plane via `pic->{y,u,v,a} + row * stride`, so each
+/// plane must hold at least `stride * rows` bytes. Strides themselves
+/// must be wide enough for the row. libwebp uses a single `uv_stride`
+/// for both U and V, so the caller-supplied `u_stride` and `v_stride`
+/// must match — otherwise V would be read with U's stride.
 #[cfg(test)]
 mod tests {
     use super::*;

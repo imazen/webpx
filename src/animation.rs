@@ -178,11 +178,13 @@ impl AnimationDecoder {
             )));
         }
 
-        // Copy the frame data (buffer is owned by decoder).
-        // Buffer size matches the configured color mode (3 bpp for RGB/BGR,
-        // 4 bpp otherwise) — using a hard-coded 4 here would over-read by
-        // ~33% for the 3-bpp modes.
-        let size = (self.info.width as usize) * (self.info.height as usize) * self.bpp;
+        // Copy the frame data (buffer is owned by decoder). Buffer size
+        // matches the configured color mode (3 bpp for RGB/BGR, 4 bpp
+        // otherwise). saturating_mul guards against 32-bit usize wrap if
+        // libwebp ever returned out-of-spec dimensions.
+        let size = (self.info.width as usize)
+            .saturating_mul(self.info.height as usize)
+            .saturating_mul(self.bpp);
         let data = unsafe { core::slice::from_raw_parts(buf, size).to_vec() };
 
         // Calculate duration (difference from previous frame)
@@ -209,12 +211,20 @@ impl AnimationDecoder {
     pub fn decode_all(&mut self) -> Result<Vec<Frame>> {
         self.reset();
 
-        let mut frames = Vec::with_capacity(self.info.frame_count as usize);
+        // `frame_count` is from the WebP container (attacker-controlled). Cap
+        // the up-front Vec reservation so a malformed file declaring billions
+        // of frames cannot trigger an OOM-aborting allocation. Real frames
+        // are still appended via push() which grows on demand.
+        const MAX_FRAME_HINT: u32 = 4096;
+        let cap = (self.info.frame_count as usize).min(MAX_FRAME_HINT as usize);
+        let mut frames = Vec::with_capacity(cap);
         let mut prev_timestamp = 0i32;
 
         while let Some(mut frame) = self.next_frame()? {
-            // Calculate duration from timestamp difference
-            frame.duration_ms = (frame.timestamp_ms - prev_timestamp).max(0) as u32;
+            // Saturating subtraction so a hostile non-monotonic timestamp
+            // sequence (e.g. previous = i32::MAX, current = i32::MIN) cannot
+            // wrap and produce a bogus duration.
+            frame.duration_ms = frame.timestamp_ms.saturating_sub(prev_timestamp).max(0) as u32;
             prev_timestamp = frame.timestamp_ms;
             frames.push(frame);
         }
@@ -381,7 +391,10 @@ impl AnimationEncoder {
     pub fn add_frame<P: EncodePixel>(&mut self, pixels: &[P], timestamp_ms: i32) -> Result<()> {
         let bpp = P::LAYOUT.bytes_per_pixel();
         let data = unsafe {
-            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+            core::slice::from_raw_parts(
+                pixels.as_ptr() as *const u8,
+                pixels.len().saturating_mul(bpp),
+            )
         };
         self.add_frame_internal(data, timestamp_ms, P::LAYOUT)
     }
@@ -438,7 +451,9 @@ impl AnimationEncoder {
         layout: PixelLayout,
     ) -> Result<()> {
         let bpp = layout.bytes_per_pixel();
-        let expected = (self.width as usize) * (self.height as usize) * bpp;
+        let expected = (self.width as usize)
+            .saturating_mul(self.height as usize)
+            .saturating_mul(bpp);
         if data.len() < expected {
             return Err(at!(Error::InvalidInput("buffer too small".into())));
         }

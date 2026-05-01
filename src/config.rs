@@ -734,7 +734,10 @@ impl EncoderConfig {
     ) -> Result<Vec<u8>> {
         let bpp = P::LAYOUT.bytes_per_pixel();
         let data = unsafe {
-            core::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * bpp)
+            core::slice::from_raw_parts(
+                pixels.as_ptr() as *const u8,
+                pixels.len().saturating_mul(bpp),
+            )
         };
         self.encode_internal(data, width, height, P::LAYOUT, stop)
     }

@@ -43,7 +43,9 @@ pub fn decode_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
         return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
-    let size = (width as usize) * (height as usize) * 4;
+    let size = (width as usize)
+        .saturating_mul(height as usize)
+        .saturating_mul(4);
     let pixels = unsafe {
         let slice = core::slice::from_raw_parts(ptr, size);
         let vec = slice.to_vec();
@@ -68,7 +70,9 @@ pub fn decode_rgb(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
         return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
-    let size = (width as usize) * (height as usize) * 3;
+    let size = (width as usize)
+        .saturating_mul(height as usize)
+        .saturating_mul(3);
     let pixels = unsafe {
         let slice = core::slice::from_raw_parts(ptr, size);
         let vec = slice.to_vec();
@@ -94,7 +98,9 @@ pub fn decode_bgra(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
         return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
-    let size = (width as usize) * (height as usize) * 4;
+    let size = (width as usize)
+        .saturating_mul(height as usize)
+        .saturating_mul(4);
     let pixels = unsafe {
         let slice = core::slice::from_raw_parts(ptr, size);
         let vec = slice.to_vec();
@@ -120,7 +126,9 @@ pub fn decode_bgr(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
         return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
     }
 
-    let size = (width as usize) * (height as usize) * 3;
+    let size = (width as usize)
+        .saturating_mul(height as usize)
+        .saturating_mul(3);
     let pixels = unsafe {
         let slice = core::slice::from_raw_parts(ptr, size);
         let vec = slice.to_vec();
@@ -151,8 +159,9 @@ pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
         .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
     let bpp = P::LAYOUT.bytes_per_pixel();
-    let pixel_count = (width as usize) * (height as usize);
-    let byte_size = pixel_count * bpp;
+    // saturating_mul so 32-bit usize cannot wrap when libwebp returns large dims.
+    let pixel_count = (width as usize).saturating_mul(height as usize);
+    let byte_size = pixel_count.saturating_mul(bpp);
 
     let pixels = unsafe {
         // Copy from libwebp buffer to our Vec<P>
@@ -194,8 +203,8 @@ pub fn decode_append<P: DecodePixel>(data: &[u8], output: &mut Vec<P>) -> Result
         .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
     let bpp = P::LAYOUT.bytes_per_pixel();
-    let pixel_count = (width as usize) * (height as usize);
-    let byte_size = pixel_count * bpp;
+    let pixel_count = (width as usize).saturating_mul(height as usize);
+    let byte_size = pixel_count.saturating_mul(bpp);
 
     unsafe {
         let byte_slice = core::slice::from_raw_parts(ptr, byte_size);
@@ -266,8 +275,8 @@ pub fn decode_into<P: DecodePixel>(
     let height = info.height;
     let bpp = P::LAYOUT.bytes_per_pixel();
 
-    // Validate buffer
-    let required_pixels = (stride_pixels as usize) * (height as usize);
+    // Validate buffer; saturating_mul so 32-bit usize cannot wrap.
+    let required_pixels = (stride_pixels as usize).saturating_mul(height as usize);
     if output.len() < required_pixels {
         return Err(at!(Error::InvalidInput(alloc::format!(
             "output buffer too small: got {} pixels, need {} (stride {} × height {})",
@@ -285,7 +294,14 @@ pub fn decode_into<P: DecodePixel>(
         ))));
     }
 
-    let stride_bytes = (stride_pixels as usize) * bpp;
+    // saturating_mul on 32-bit; range-check before casting to i32 below.
+    let stride_bytes = (stride_pixels as usize).saturating_mul(bpp);
+    if stride_bytes > i32::MAX as usize {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "stride too large for libwebp i32 stride parameter: {}",
+            stride_bytes
+        ))));
+    }
     let output_bytes = output.len() * bpp;
 
     // SAFETY: We've validated the buffer size and stride above
@@ -573,8 +589,15 @@ pub fn decode_yuv(data: &[u8]) -> Result<YuvPlanes> {
     let _uv_width = (width + 1) / 2;
     let uv_height = (height + 1) / 2;
 
-    let y_size = (y_stride as usize) * (height as usize);
-    let uv_size = (uv_stride as usize) * (uv_height as usize);
+    // libwebp's strides come back as i32; treat negatives as a malformed
+    // response (would wrap to ~4 GB on `as usize`) and saturate the product
+    // so 32-bit usize cannot wrap before from_raw_parts.
+    if y_stride < 0 || uv_stride < 0 || height < 0 || uv_height < 0 {
+        unsafe { libwebp_sys::WebPFree(y_ptr as *mut _) };
+        return Err(at!(Error::DecodeFailed(DecodingError::BitstreamError)));
+    }
+    let y_size = (y_stride as usize).saturating_mul(height as usize);
+    let uv_size = (uv_stride as usize).saturating_mul(uv_height as usize);
 
     let (y, u, v) = unsafe {
         let y = core::slice::from_raw_parts(y_ptr, y_size).to_vec();

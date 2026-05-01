@@ -349,27 +349,57 @@ impl YuvPlanes {
     /// Create new YUV planes with the given dimensions.
     ///
     /// Allocates planes for YUV420 format where U and V are half the resolution.
-    pub fn new(width: u32, height: u32, with_alpha: bool) -> Self {
+    ///
+    /// Returns `None` if the dimensions exceed libwebp's 16383×16383 limit
+    /// or would otherwise overflow plane size calculations on 32-bit usize.
+    /// For valid encode-side dimensions, prefer this over the panic-on-overflow
+    /// `vec!` macro.
+    #[must_use]
+    pub fn new_checked(width: u32, height: u32, with_alpha: bool) -> Option<Self> {
+        // Mirror the encoder's MAX_DIMENSION (libwebp's WEBP_MAX_DIMENSION).
+        const MAX_DIMENSION: u32 = 16383;
+        if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+            return None;
+        }
+
         let y_stride = width as usize;
         let uv_stride = (width as usize).div_ceil(2);
         let uv_height = (height as usize).div_ceil(2);
 
-        Self {
-            y: alloc::vec![0u8; y_stride * height as usize],
+        // saturating_mul guards 32-bit usize even though MAX_DIMENSION should
+        // prevent overflow at the dimension cap.
+        let y_size = y_stride.saturating_mul(height as usize);
+        let uv_size = uv_stride.saturating_mul(uv_height);
+
+        Some(Self {
+            y: alloc::vec![0u8; y_size],
             y_stride,
-            u: alloc::vec![0u8; uv_stride * uv_height],
+            u: alloc::vec![0u8; uv_size],
             u_stride: uv_stride,
-            v: alloc::vec![0u8; uv_stride * uv_height],
+            v: alloc::vec![0u8; uv_size],
             v_stride: uv_stride,
             a: if with_alpha {
-                Some(alloc::vec![0u8; y_stride * height as usize])
+                Some(alloc::vec![0u8; y_size])
             } else {
                 None
             },
             a_stride: y_stride,
             width,
             height,
-        }
+        })
+    }
+
+    /// Create new YUV planes with the given dimensions.
+    ///
+    /// Allocates planes for YUV420 format where U and V are half the resolution.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width` or `height` is zero or exceeds 16383. For a
+    /// non-panicking version, use [`Self::new_checked`].
+    pub fn new(width: u32, height: u32, with_alpha: bool) -> Self {
+        Self::new_checked(width, height, with_alpha)
+            .expect("YuvPlanes::new: dimensions out of range (1..=16383)")
     }
 
     /// Get the U plane dimensions (half width/height for YUV420).
