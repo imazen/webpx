@@ -1,0 +1,40 @@
+# Changelog
+
+## [Unreleased]
+
+## [0.2.0] - 2026-05-01
+
+### Security
+
+Soundness fixes from an internal audit of the FFI layer. Full technical
+detail and reproducers will be published in a coordinated security
+advisory once 0.2.0 is on crates.io. Versions 0.1.0–0.1.4 will be
+yanked at that time. Users on those versions should upgrade.
+
+### Changed (breaking)
+
+- `StreamingDecoder` is now `StreamingDecoder<'a>`. The `'a` parameter
+  ties a buffer-backed decoder to the buffer's lifetime so the borrow
+  checker rejects use-after-free patterns. `StreamingDecoder::new()`
+  returns `StreamingDecoder<'static>`, so call sites that don't use
+  `with_buffer` compile unchanged. `StreamingDecoder` no longer
+  auto-implements `UnwindSafe` / `RefUnwindSafe` as a side effect
+  (9580751).
+- `AnimationDecoder::with_options` now returns `Err` for color modes
+  that libwebp's animation decoder cannot satisfy
+  (`ColorMode::Rgb`, `Bgr`, `Argb`). Previously the constructor
+  accepted these and `WebPAnimDecoderNew` later returned NULL with
+  no explanation (9580751).
+
+### Fixed
+
+- Encoder: zero-copy ARGB and YUV-with-alpha paths now keep their
+  input buffers strictly read-only end-to-end (9580751).
+- `AnimationDecoder::next_frame`: frame buffer length now derives
+  from the configured color mode rather than a hard-coded value
+  (9580751).
+- `ImageInfo::from_webp`: features are only treated as initialized
+  after `WebPGetFeatures` reports success (9580751).
+- `decode_advanced`: defensive `WebPFreeDecBuffer` on the error
+  path; output slice length now uses libwebp's reported allocation
+  size rather than a recomputed value (9580751).

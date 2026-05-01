@@ -3,6 +3,7 @@
 use crate::error::{DecodingError, Error, Result};
 use crate::types::ColorMode;
 use alloc::vec::Vec;
+use core::marker::PhantomData;
 use core::ptr;
 use whereat::*;
 
@@ -50,19 +51,26 @@ pub enum DecodeStatus {
 /// let (pixels, width, height) = decoder.finish()?;
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
-pub struct StreamingDecoder {
+pub struct StreamingDecoder<'a> {
     decoder: *mut libwebp_sys::WebPIDecoder,
     color_mode: ColorMode,
     width: i32,
     height: i32,
     last_y: i32,
+    // Ties the decoder's lifetime to the caller-supplied output buffer
+    // (when `with_buffer` is used). For `new()` the lifetime is `'static`
+    // because libwebp owns the buffer.
+    _marker: PhantomData<&'a mut [u8]>,
 }
 
 // SAFETY: The WebPIDecoder is internally thread-safe for single-threaded access
-unsafe impl Send for StreamingDecoder {}
+unsafe impl Send for StreamingDecoder<'_> {}
 
-impl StreamingDecoder {
+impl StreamingDecoder<'static> {
     /// Create a new streaming decoder.
+    ///
+    /// libwebp allocates and owns the output buffer for this constructor;
+    /// the returned decoder has no lifetime constraints on the caller.
     ///
     /// # Arguments
     ///
@@ -97,10 +105,19 @@ impl StreamingDecoder {
             width: 0,
             height: 0,
             last_y: 0,
+            _marker: PhantomData,
         })
     }
+}
 
+impl<'a> StreamingDecoder<'a> {
     /// Create a streaming decoder with a pre-allocated output buffer.
+    ///
+    /// The decoder borrows `output_buffer` for its entire lifetime — libwebp
+    /// stores the raw pointer internally and writes into it on every
+    /// `append` / `update` / `get_partial` / `finish` call. The lifetime
+    /// parameter ties the returned decoder to the buffer so the borrow
+    /// checker rejects code that drops the buffer before the decoder.
     ///
     /// # Arguments
     ///
@@ -108,7 +125,7 @@ impl StreamingDecoder {
     /// * `stride` - Row stride in bytes
     /// * `color_mode` - Output color format
     pub fn with_buffer(
-        output_buffer: &mut [u8],
+        output_buffer: &'a mut [u8],
         stride: usize,
         color_mode: ColorMode,
     ) -> Result<Self> {
@@ -144,6 +161,7 @@ impl StreamingDecoder {
             width: 0,
             height: 0,
             last_y: 0,
+            _marker: PhantomData,
         })
     }
 
@@ -296,7 +314,7 @@ impl StreamingDecoder {
     }
 }
 
-impl Drop for StreamingDecoder {
+impl Drop for StreamingDecoder<'_> {
     fn drop(&mut self) {
         if !self.decoder.is_null() {
             unsafe {

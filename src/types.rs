@@ -229,18 +229,20 @@ impl ImageInfo {
             return Err(at!(crate::Error::InvalidWebP));
         }
 
-        // Get more detailed features
+        // Get more detailed features. Only `assume_init` after `WebPGetFeatures`
+        // returns `VP8_STATUS_OK` — on failure libwebp may not have written all
+        // fields, and `MaybeUninit::assume_init` on uninitialized memory is UB
+        // even for plain integer structs.
         let mut features = core::mem::MaybeUninit::<libwebp_sys::WebPBitstreamFeatures>::uninit();
         let status = unsafe {
             libwebp_sys::WebPGetFeatures(data.as_ptr(), data.len(), features.as_mut_ptr())
         };
-        let features = unsafe { features.assume_init() };
-
         if status != libwebp_sys::VP8StatusCode::VP8_STATUS_OK {
             return Err(at!(crate::Error::DecodeFailed(
                 crate::error::DecodingError::from(status as i32),
             )));
         }
+        let features = unsafe { features.assume_init() };
 
         let format = match features.format {
             0 => BitstreamFormat::Undefined,

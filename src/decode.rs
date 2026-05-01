@@ -865,6 +865,11 @@ impl<'a> Decoder<'a> {
         };
 
         if status != libwebp_sys::VP8StatusCode::VP8_STATUS_OK {
+            // libwebp's internal WebPDecode frees its own buffer on failure,
+            // but call WebPFreeDecBuffer defensively — it is a safe no-op when
+            // private_memory is null and protects against future libwebp paths
+            // that might leave the buffer allocated.
+            unsafe { libwebp_sys::WebPFreeDecBuffer(&mut dec_config.output) };
             return Err(at!(Error::DecodeFailed(DecodingError::from(status as i32))));
         }
 
@@ -885,16 +890,16 @@ impl<'a> Decoder<'a> {
             dec_config.input.height as u32
         };
 
-        let bpp = match mode {
-            libwebp_sys::WEBP_CSP_MODE::MODE_RGB | libwebp_sys::WEBP_CSP_MODE::MODE_BGR => 3,
-            _ => 4,
-        };
-
-        let size = (width as usize) * (height as usize) * bpp;
+        // Use libwebp's reported allocation size rather than recomputing it
+        // from width*height*bpp. The recomputed size assumes a tightly-packed
+        // stride, which is currently the case but not guaranteed — and a
+        // mismatch would make the slice over-read libwebp's allocation.
         let pixels = unsafe {
             if dec_config.output.u.RGBA.rgba.is_null() {
+                libwebp_sys::WebPFreeDecBuffer(&mut dec_config.output);
                 return Err(at!(Error::DecodeFailed(DecodingError::OutOfMemory)));
             }
+            let size = dec_config.output.u.RGBA.size;
             let slice = core::slice::from_raw_parts(dec_config.output.u.RGBA.rgba, size);
             let vec = slice.to_vec();
             libwebp_sys::WebPFreeDecBuffer(&mut dec_config.output);

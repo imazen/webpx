@@ -282,6 +282,26 @@ enum EncoderInput<'a> {
     Yuv(YuvPlanesRef<'a>),
 }
 
+impl EncoderInput<'_> {
+    /// Returns true when this input variant points libwebp at user-borrowed
+    /// memory and therefore needs `WebPConfig.exact = 1` to suppress
+    /// libwebp's transparent-area cleanup writes (which would mutate the
+    /// borrowed buffer and violate Rust's aliasing model).
+    fn requires_exact(&self) -> bool {
+        match self {
+            EncoderInput::Argb { .. } => true,
+            EncoderInput::Yuv(planes) => planes.a.is_some(),
+            // The Rgba/Bgra/Rgb/Bgr variants go through WebPPictureImport*,
+            // which copies into a libwebp-allocated argb buffer that libwebp
+            // is then free to mutate.
+            EncoderInput::Rgba { .. }
+            | EncoderInput::Bgra { .. }
+            | EncoderInput::Rgb { .. }
+            | EncoderInput::Bgr { .. } => false,
+        }
+    }
+}
+
 impl<'a> Encoder<'a> {
     /// Create a new encoder for contiguous RGBA data.
     ///
@@ -434,6 +454,13 @@ impl<'a> Encoder<'a> {
     /// Create a new encoder for YUV planar data (zero-copy).
     ///
     /// The YUV planes are borrowed directly without copying.
+    ///
+    /// # Note on `exact`
+    ///
+    /// When the YUV input includes an alpha plane, `EncoderConfig.exact`
+    /// is forced to `true` regardless of the configured value, so libwebp
+    /// will not write back to the borrowed Y/U/V planes when smoothing
+    /// fully-transparent regions. YUV-without-alpha is unaffected.
     #[must_use]
     pub fn new_yuv(planes: YuvPlanesRef<'a>) -> Self {
         let width = planes.width;
@@ -460,6 +487,14 @@ impl<'a> Encoder<'a> {
     /// - Bits 16-23: Red
     /// - Bits 8-15: Green
     /// - Bits 0-7: Blue
+    ///
+    /// # Note on `exact`
+    ///
+    /// To keep the input buffer read-only from C, `EncoderConfig.exact` is
+    /// forced to `true` for this path regardless of the configured value.
+    /// This disables libwebp's optimization that overwrites RGB values
+    /// under fully-transparent pixels — a small compression cost in
+    /// exchange for keeping the borrow safe.
     ///
     /// # Example
     ///
@@ -727,7 +762,16 @@ impl<'a> Encoder<'a> {
         // Check for early cancellation
         stop.check().map_err(|reason| at!(Error::Stopped(reason)))?;
 
-        let webp_config = self.config.to_libwebp()?;
+        let mut webp_config = self.config.to_libwebp()?;
+
+        // Zero-copy paths point libwebp at user-borrowed memory. With
+        // `config.exact == 0`, libwebp's `WebPCleanupTransparentArea` /
+        // `WebPReplaceTransparentPixels` write into that memory, which
+        // would be UB given the borrow is shared from Rust's POV. Force
+        // exact=1 on the zero-copy paths so the buffer stays read-only.
+        if self.data.requires_exact() {
+            webp_config.exact = 1;
+        }
 
         // Initialize picture
         let mut picture = libwebp_sys::WebPPicture::new()
@@ -912,7 +956,12 @@ impl<'a> Encoder<'a> {
         // Check for early cancellation
         stop.check().map_err(|reason| at!(Error::Stopped(reason)))?;
 
-        let webp_config = self.config.to_libwebp()?;
+        let mut webp_config = self.config.to_libwebp()?;
+        // See `Encoder::encode` — zero-copy inputs need exact=1 to keep
+        // libwebp from writing through borrowed user memory.
+        if self.data.requires_exact() {
+            webp_config.exact = 1;
+        }
 
         // Initialize picture
         let mut picture = libwebp_sys::WebPPicture::new()

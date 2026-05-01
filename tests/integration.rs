@@ -2389,6 +2389,49 @@ mod animation_tests {
     }
 
     #[test]
+    fn test_animation_decoder_rejects_unsupported_modes() {
+        // Regression: webpx previously accepted Rgb/Bgr/Argb at the API
+        // surface, then libwebp returned NULL inside WebPAnimDecoderNew
+        // with no explanation. We now reject those modes up-front. The
+        // hard-coded 4-bpp size in next_frame was tied to this — see the
+        // companion fix in src/animation.rs that derives bpp from the
+        // configured color mode.
+        use webpx::{AnimationDecoder, AnimationEncoder, ColorMode};
+
+        let width = 16;
+        let height = 16;
+        let frame1 = generate_rgba(width, height, 100, 150, 200, 255);
+        let frame2 = generate_rgba(width, height, 200, 150, 100, 255);
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame_rgba(&frame1, 0).expect("add");
+        encoder.add_frame_rgba(&frame2, 100).expect("add");
+        let webp = encoder.finish(200).expect("finish");
+
+        for mode in [ColorMode::Rgb, ColorMode::Bgr, ColorMode::Argb] {
+            let result = AnimationDecoder::with_options(&webp, mode, false);
+            assert!(
+                result.is_err(),
+                "{:?} should be rejected up-front (libwebp does not support it for animations)",
+                mode
+            );
+        }
+
+        // RGBA and BGRA both produce 4-bpp frame buffers.
+        for mode in [ColorMode::Rgba, ColorMode::Bgra] {
+            let mut decoder = AnimationDecoder::with_options(&webp, mode, false).expect("decoder");
+            let decoded = decoder.next_frame().expect("next").expect("frame");
+            let expected = (width * height) as usize * 4;
+            assert_eq!(
+                decoded.data.len(),
+                expected,
+                "wrong buffer length for {:?}",
+                mode
+            );
+        }
+    }
+
+    #[test]
     fn test_animation_decoder_yuv_error() {
         use webpx::{AnimationDecoder, AnimationEncoder, ColorMode};
 
