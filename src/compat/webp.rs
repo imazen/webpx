@@ -1,7 +1,29 @@
+// Deprecation warnings from this module are intended for *external*
+// callers; the internal impl blocks reference deprecated types of their
+// own and would otherwise spam the build log.
+#![allow(deprecated)]
+
 //! Compatibility shim for the `webp` crate (0.3.x).
 //!
 //! This module provides an API-compatible interface to ease migration
 //! from the `webp` crate to `webpx`.
+//!
+//! # Deprecated as of 0.2.1
+//!
+//! The shim swallows error variants ([`Encoder::encode`] returns an
+//! empty `WebPMemory` on failure; [`Decoder::decode`] collapses every
+//! error to `None`) and does not expose [`crate::Limits`] for
+//! untrusted-input decoding. New code should use the main webpx API
+//! directly:
+//!
+//! - `Encoder::new_rgba(...).quality(q).encode(Unstoppable)` instead of
+//!   [`Encoder::new`]
+//! - `Decoder::new(data)?.config(DecoderConfig::new().limits(...)).decode_rgba()`
+//!   instead of [`Decoder::decode`]
+//!
+//! This module will be retained for at least one minor release; all
+//! public items carry `#[deprecated]` attributes that surface as
+//! compiler warnings on use.
 //!
 //! # Migration
 //!
@@ -36,6 +58,10 @@ use alloc::vec::Vec;
 use core::ops::Deref;
 
 /// Pixel layout for raw image data.
+#[deprecated(
+    since = "0.2.1",
+    note = "use `webpx::Encoder` / `webpx::Decoder` directly; see module docs"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelLayout {
     /// RGB (3 bytes per pixel).
@@ -57,6 +83,10 @@ impl PixelLayout {
 /// Owned WebP memory buffer.
 ///
 /// Provides `Deref<Target = [u8]>` for compatibility with `webp::WebPMemory`.
+#[deprecated(
+    since = "0.2.1",
+    note = "use `webpx::WebPData` or `Vec<u8>` from the main API"
+)]
 #[derive(Debug)]
 pub struct WebPMemory(Vec<u8>);
 
@@ -87,6 +117,10 @@ impl AsRef<[u8]> for WebPMemory {
 }
 
 /// Decoded WebP image.
+#[deprecated(
+    since = "0.2.1",
+    note = "use `webpx::Decoder::new(data)?.decode_rgba()` etc."
+)]
 #[derive(Debug)]
 pub struct WebPImage {
     data: Vec<u8>,
@@ -118,6 +152,7 @@ impl WebPImage {
 }
 
 /// Bitstream features extracted from WebP data.
+#[deprecated(since = "0.2.1", note = "use `webpx::ImageInfo::from_webp` directly")]
 #[derive(Debug)]
 pub struct BitstreamFeatures {
     width: u32,
@@ -159,6 +194,10 @@ impl BitstreamFeatures {
 }
 
 /// WebP encoder (compatible with `webp::Encoder`).
+#[deprecated(
+    since = "0.2.1",
+    note = "use `webpx::Encoder` directly; the main API surfaces errors instead of returning an empty buffer"
+)]
 #[cfg(feature = "encode")]
 pub struct Encoder<'a> {
     image: &'a [u8],
@@ -223,6 +262,10 @@ impl<'a> Encoder<'a> {
 }
 
 /// WebP decoder (compatible with `webp::Decoder`).
+#[deprecated(
+    since = "0.2.1",
+    note = "use `webpx::Decoder::new(data)?` directly; the main API exposes Limits and full error variants"
+)]
 #[cfg(feature = "decode")]
 pub struct Decoder<'a> {
     data: &'a [u8],

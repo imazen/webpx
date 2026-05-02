@@ -234,7 +234,7 @@ impl ImageInfo {
         // returns `VP8_STATUS_OK` — on failure libwebp may not have written all
         // fields, and `MaybeUninit::assume_init` on uninitialized memory is UB
         // even for plain integer structs.
-        let mut features = core::mem::MaybeUninit::<libwebp_sys::WebPBitstreamFeatures>::uninit();
+        let mut features = core::mem::MaybeUninit::<libwebp_sys::WebPBitstreamFeatures>::zeroed();
         let status = unsafe {
             libwebp_sys::WebPGetFeatures(data.as_ptr(), data.len(), features.as_mut_ptr())
         };

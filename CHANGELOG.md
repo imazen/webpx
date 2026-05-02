@@ -2,6 +2,64 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-01
+
+### Security
+
+Closes a class of OOB issues found in a second-pass audit: caller-supplied
+`u32` / `usize` strides cast to `i32` for libwebp without an upper-bound
+check. A stride `>= 2^31` wrapped to a negative `i32`, and libwebp's row
+pointer arithmetic walked backwards through process memory. Reachable
+from safe Rust without an `unsafe` block by constructing a `&[u8]` of
+≥ 2 GiB on 64-bit and passing a stride above `i32::MAX`. Affected sites:
+`Encoder::new_rgba_stride` / `new_bgra_stride` / `new_rgb_stride` /
+`new_bgr_stride` / `new_argb_stride` / `new_yuv` (every plane stride),
+and `StreamingDecoder::with_buffer`.
+
+Also fixed: `Encoder::from_img` and `Encoder::from_pixels_stride`
+truncated `(stride * bpp) as u32` when the source `usize` stride
+exceeded `u32::MAX / bpp`. Truncation produced a stride smaller than
+the actual byte stride, which `validate_buffer_size_stride` could not
+catch — libwebp then encoded with a wrong row layout. Not OOB on the
+input slice (which still covered the buffer) but a silent
+wrong-output bug; saturating cast added so oversized strides hit the
+`i32::MAX` upper-bound check instead.
+
+### Changed
+
+- All `MaybeUninit::<libwebp_sys::*>::uninit()` sites switched to
+  `MaybeUninit::<libwebp_sys::*>::zeroed()`. libwebp's `*Init*`
+  functions only set their documented fields; the `pad` /
+  `padding` arrays they leave alone are now initialized to zero
+  rather than uninitialized. Resolves a latent UB pattern (reading
+  uninit bytes during `assume_init` is technically UB even when
+  those bytes are never observed).
+
+### Deprecated
+
+- The compatibility shim modules `compat::webp` and
+  `compat::webp_animation` are now `#[deprecated]`. Both swallow
+  error variants the main API surfaces (compat `Encoder::encode`
+  returns an empty buffer on failure; compat `Decoder::decode`
+  collapses every error to `None`) and neither exposes
+  [`Limits`](crate::Limits) for untrusted-input decoding. They will
+  be retained for at least one minor release.
+
+### Documentation
+
+- `Encoder::new_argb` rustdoc now spells out the
+  little-endian-only assumption: the `0xAARRGGBB` numeric layout
+  matches libwebp's expected `[B, G, R, A]` byte order on
+  little-endian targets (every CI target). Big-endian callers
+  should treat this path as unsupported.
+
+### Testing
+
+- `tests/soundness.rs` gains a `stride_overflow` module with four
+  regression tests covering ARGB, RGBA, YUV, and streaming
+  `with_buffer` stride bounds.
+
+
 ### Added
 
 - `webpx::Limits` — opt-in resource policy modeled on

@@ -64,7 +64,7 @@ pub(crate) fn encode_with_config_stats(
     picture.use_argb = 1;
 
     // Initialize stats
-    let mut stats = core::mem::MaybeUninit::<libwebp_sys::WebPAuxStats>::uninit();
+    let mut stats = core::mem::MaybeUninit::<libwebp_sys::WebPAuxStats>::zeroed();
     picture.stats = stats.as_mut_ptr();
 
     // Import pixel data
@@ -84,7 +84,7 @@ pub(crate) fn encode_with_config_stats(
     }
 
     // Setup memory writer
-    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
+    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
     unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
     let mut writer = unsafe { writer.assume_init() };
 
@@ -175,7 +175,7 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
     }
 
     // Setup memory writer
-    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
+    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
     unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
     let mut writer = unsafe { writer.assume_init() };
 
@@ -482,11 +482,22 @@ impl<'a> Encoder<'a> {
     ///
     /// # Format
     ///
-    /// Each `u32` is a pixel in `0xAARRGGBB` format (native endian):
+    /// Each `u32` is a pixel in `0xAARRGGBB` numeric layout (native
+    /// integer encoding):
     /// - Bits 24-31: Alpha
     /// - Bits 16-23: Red
     /// - Bits 8-15: Green
     /// - Bits 0-7: Blue
+    ///
+    /// libwebp's encoder reads `pic->argb` byte-wise assuming the
+    /// little-endian in-memory layout `[B, G, R, A]`. On little-endian
+    /// targets the `0xAARRGGBB` numeric value lays out exactly as
+    /// libwebp expects — that's every target webpx's CI exercises
+    /// (x86_64, i686, aarch64, wasm32). On big-endian targets the
+    /// numeric `0xAARRGGBB` lays out as `[A, R, G, B]` and the
+    /// resulting WebP would have its color channels permuted; webpx
+    /// has no big-endian CI coverage today, so big-endian callers
+    /// should treat this path as unsupported.
     ///
     /// # Note on `exact`
     ///
@@ -577,8 +588,13 @@ impl<'a> Encoder<'a> {
                 img.buf().len().saturating_mul(bpp),
             )
         };
-        // imgref stride() returns stride in pixels, we need bytes
-        let stride_bytes = (img.stride() * bpp) as u32;
+        // imgref stride() returns stride in pixels, we need bytes.
+        // Saturate-then-clamp to u32::MAX so a `usize` stride that
+        // overflows `u32::MAX` becomes a stride that
+        // `validate_buffer_size_stride` will reject — preventing a
+        // silent wrong-stride encode from a truncating `as u32` cast.
+        let stride_bytes_usize = img.stride().saturating_mul(bpp);
+        let stride_bytes = u32::try_from(stride_bytes_usize).unwrap_or(u32::MAX);
         Self::from_pixels_internal(
             data,
             img.width() as u32,
@@ -648,14 +664,21 @@ impl<'a> Encoder<'a> {
         stride_pixels: u32,
     ) -> Self {
         let bpp = P::LAYOUT.bytes_per_pixel();
-        // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays
+        // SAFETY: Pixel types are repr(C) and have the same layout as their byte arrays.
         let data = unsafe {
             core::slice::from_raw_parts(
                 pixels.as_ptr() as *const u8,
                 pixels.len().saturating_mul(bpp),
             )
         };
-        let stride_bytes = stride_pixels * bpp as u32;
+        // Saturate so an `u32` stride near `u32::MAX / bpp` does not wrap
+        // and produce a stride smaller than `width × bpp` would expect —
+        // pushing libwebp through a wrong-stride encode that
+        // `validate_buffer_size_stride` couldn't catch with the truncated
+        // value. After saturation, oversized strides hit the `i32::MAX`
+        // upper-bound check in `validate_buffer_size_stride`.
+        let stride_bytes =
+            u32::try_from((stride_pixels as u64).saturating_mul(bpp as u64)).unwrap_or(u32::MAX);
         Self::from_pixels_internal(data, width, height, stride_bytes, P::LAYOUT)
     }
 
@@ -857,6 +880,15 @@ impl<'a> Encoder<'a> {
                         self.width
                     ))));
                 }
+                // Reject stride values that would wrap to a negative i32
+                // when cast for libwebp's i32 stride parameter.
+                if *stride_pixels > i32::MAX as u32 {
+                    return Err(at!(Error::InvalidInput(alloc::format!(
+                        "ARGB stride too large for libwebp i32 parameter: {} (max {})",
+                        stride_pixels,
+                        i32::MAX
+                    ))));
+                }
                 picture.use_argb = 1;
                 picture.argb = data.as_ptr() as *mut u32;
                 picture.argb_stride = *stride_pixels as i32;
@@ -894,7 +926,7 @@ impl<'a> Encoder<'a> {
         }
 
         // Setup memory writer
-        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
+        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
         unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
         let mut writer = unsafe { writer.assume_init() };
 
@@ -996,7 +1028,7 @@ impl<'a> Encoder<'a> {
         }
 
         // Setup memory writer
-        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
+        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
         unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
         let mut writer = unsafe { writer.assume_init() };
 
@@ -1164,6 +1196,15 @@ impl<'a> Encoder<'a> {
                         self.width
                     ))));
                 }
+                // Reject stride values that would wrap to a negative i32
+                // when cast for libwebp's i32 stride parameter.
+                if *stride_pixels > i32::MAX as u32 {
+                    return Err(at!(Error::InvalidInput(alloc::format!(
+                        "ARGB stride too large for libwebp i32 parameter: {} (max {})",
+                        stride_pixels,
+                        i32::MAX
+                    ))));
+                }
                 picture.use_argb = 1;
                 picture.argb = data.as_ptr() as *mut u32;
                 picture.argb_stride = *stride_pixels as i32;
@@ -1270,6 +1311,28 @@ pub(crate) fn validate_yuv_planes(planes: &YuvPlanesRef<'_>) -> Result<()> {
             planes.v_stride
         ))));
     }
+    // Reject strides that would wrap to a negative i32 when cast for
+    // libwebp's i32 stride parameters. libwebp's row-pointer arithmetic
+    // (`pic->y + row * y_stride`) treats the stride as signed, so a
+    // wrapped-negative stride would walk backwards through process
+    // memory. The plane-length checks above don't catch this — a caller
+    // can construct an oversized `&[u8]` (>=2 GB on 64-bit) that
+    // satisfies `slice.len() >= stride * rows` for `stride >= 2^31`.
+    let i32_max = i32::MAX as usize;
+    if planes.y_stride > i32_max {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "Y stride too large for libwebp i32 parameter: {} (max {})",
+            planes.y_stride,
+            i32_max
+        ))));
+    }
+    if planes.u_stride > i32_max {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "UV stride too large for libwebp i32 parameter: {} (max {})",
+            planes.u_stride,
+            i32_max
+        ))));
+    }
 
     // Plane-length floors. The last row only needs `width` (chroma_width)
     // samples, but libwebp treats the slice as a contiguous stride×rows
@@ -1313,6 +1376,13 @@ pub(crate) fn validate_yuv_planes(planes: &YuvPlanesRef<'_>) -> Result<()> {
                 width
             ))));
         }
+        if planes.a_stride > i32_max {
+            return Err(at!(Error::InvalidInput(alloc::format!(
+                "A stride too large for libwebp i32 parameter: {} (max {})",
+                planes.a_stride,
+                i32_max
+            ))));
+        }
         let a_min = planes.a_stride.saturating_mul(height);
         if a.len() < a_min {
             return Err(at!(Error::InvalidInput(alloc::format!(
@@ -1339,6 +1409,18 @@ pub(crate) fn validate_buffer_size_stride(
     stride_bytes: u32,
     bpp: u32,
 ) -> Result<()> {
+    // Stride is later cast to `i32` for libwebp's stride parameters.
+    // A `u32` value >= 2^31 wraps to a negative `i32`; libwebp's pointer
+    // arithmetic then walks backwards through process memory. Reject
+    // before the cast.
+    if stride_bytes > i32::MAX as u32 {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "stride too large for libwebp i32 stride parameter: {} (max {})",
+            stride_bytes,
+            i32::MAX
+        ))));
+    }
+
     let min_stride = (width as usize).saturating_mul(bpp as usize);
     if (stride_bytes as usize) < min_stride {
         return Err(at!(Error::InvalidInput(alloc::format!(

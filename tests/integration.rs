@@ -2658,6 +2658,9 @@ mod animation_tests {
     }
 }
 
+// The compat shims are deprecated in 0.2.1; we still test them for parity
+// but suppress the deprecation warnings inside the module.
+#[allow(deprecated)]
 mod compat_webp_tests {
     use super::{generate_rgb, generate_rgba};
     use webpx::compat::webp::{BitstreamFeatures, Decoder, Encoder, PixelLayout};
@@ -2804,6 +2807,7 @@ mod compat_webp_tests {
 }
 
 #[cfg(feature = "animation")]
+#[allow(deprecated)]
 mod compat_webp_animation_tests {
     use super::generate_rgba;
     use webpx::compat::webp_animation::{

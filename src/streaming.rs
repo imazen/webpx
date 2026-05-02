@@ -141,6 +141,17 @@ impl<'a> StreamingDecoder<'a> {
                 )));
             }
         };
+        // Reject stride values that would wrap to a negative i32 when
+        // cast for libwebp's `output_stride` parameter. libwebp's row
+        // pointer arithmetic uses the signed value, so a wrapped-negative
+        // stride would write to addresses *before* `output_buffer`.
+        if stride > i32::MAX as usize {
+            return Err(at!(Error::InvalidInput(alloc::format!(
+                "stride too large for libwebp i32 parameter: {} (max {})",
+                stride,
+                i32::MAX
+            ))));
+        }
 
         let decoder = unsafe {
             libwebp_sys::WebPINewRGB(
@@ -509,7 +520,7 @@ impl StreamingEncoder {
 
         // Use memory writer and send all at once for simplicity
         // (libwebp doesn't truly stream the output)
-        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::uninit();
+        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
         unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
         let mut writer = unsafe { writer.assume_init() };
 

@@ -142,7 +142,7 @@ impl AnimationDecoder {
         // Keep a copy of the data since WebPAnimDecoder references it
         let data_copy = data.to_vec();
 
-        let mut options = core::mem::MaybeUninit::<libwebp_sys::WebPAnimDecoderOptions>::uninit();
+        let mut options = core::mem::MaybeUninit::<libwebp_sys::WebPAnimDecoderOptions>::zeroed();
         let ok = unsafe { libwebp_sys::WebPAnimDecoderOptionsInit(options.as_mut_ptr()) };
         if ok == 0 {
             return Err(at!(Error::InvalidConfig(
@@ -373,7 +373,7 @@ impl AnimationEncoder {
             return Err(at!(Error::InvalidInput("invalid dimensions".into())));
         }
 
-        let mut options = core::mem::MaybeUninit::<libwebp_sys::WebPAnimEncoderOptions>::uninit();
+        let mut options = core::mem::MaybeUninit::<libwebp_sys::WebPAnimEncoderOptions>::zeroed();
         let ok = unsafe {
             libwebp_sys::WebPAnimEncoderOptionsInitInternal(
                 options.as_mut_ptr(),

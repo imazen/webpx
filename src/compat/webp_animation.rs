@@ -1,7 +1,24 @@
+// See `compat::webp` for the rationale on this module-level allow.
+#![allow(deprecated)]
+
 //! Compatibility shim for the `webp-animation` crate (0.9.x).
 //!
 //! This module provides an API-compatible interface to ease migration
 //! from the `webp-animation` crate to `webpx`.
+//!
+//! # Deprecated as of 0.2.1
+//!
+//! The shim does not expose [`crate::Limits`] for untrusted-input
+//! decoding, so callers can't apply `max_total_pixels` /
+//! `max_frame_count` / `max_input_bytes` policies through this API.
+//! [`Decoder::into_iter`] also silently produces an empty iterator on
+//! construction failure instead of returning the error. New code
+//! should use [`crate::AnimationDecoder::with_options_limits`] /
+//! [`crate::AnimationEncoder`] directly.
+//!
+//! This module will be retained for at least one minor release; all
+//! public items carry `#[deprecated]` attributes that surface as
+//! compiler warnings on use.
 //!
 //! # Migration
 //!
@@ -24,6 +41,10 @@ use alloc::vec::Vec;
 use core::ops::Deref;
 
 /// Color mode for decoded frames.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorMode {
     /// RGB (3 bytes per pixel).
@@ -59,6 +80,10 @@ impl From<ColorMode> for crate::ColorMode {
 }
 
 /// Owned WebP data buffer.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug)]
 pub struct WebPData(Vec<u8>);
 
@@ -89,6 +114,10 @@ impl AsRef<[u8]> for WebPData {
 }
 
 /// Error type compatible with webp-animation.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug, PartialEq)]
 pub enum Error {
     /// Encoder creation failed.
@@ -133,6 +162,10 @@ impl core::fmt::Display for Error {
 }
 
 /// Encoder options.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug, Clone, Default)]
 pub struct EncoderOptions {
     /// Minimum keyframe interval.
@@ -144,6 +177,10 @@ pub struct EncoderOptions {
 }
 
 /// Encoding configuration.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug, Clone)]
 pub struct EncodingConfig {
     /// Quality (0-100).
@@ -162,6 +199,10 @@ impl Default for EncodingConfig {
 }
 
 /// Encoding type.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug, Clone)]
 pub enum EncodingType {
     /// Lossy encoding.
@@ -171,6 +212,10 @@ pub enum EncodingType {
 }
 
 /// Lossy encoding configuration.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug, Clone, Default)]
 pub struct LossyEncodingConfig {
     /// Number of segments.
@@ -180,6 +225,10 @@ pub struct LossyEncodingConfig {
 }
 
 /// Decoded animation frame.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug, Clone)]
 pub struct Frame {
     data: Vec<u8>,
@@ -212,6 +261,10 @@ impl Frame {
 }
 
 /// Decoder options.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[derive(Debug, Clone, Default)]
 pub struct DecoderOptions {
     /// Use multi-threaded decoding.
@@ -221,6 +274,10 @@ pub struct DecoderOptions {
 }
 
 /// Animation encoder (compatible with `webp_animation::Encoder`).
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[cfg(feature = "animation")]
 pub struct Encoder {
     inner: crate::AnimationEncoder,
@@ -299,6 +356,10 @@ impl Encoder {
 }
 
 /// Animation decoder (compatible with `webp_animation::Decoder`).
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[cfg(feature = "animation")]
 pub struct Decoder<'a> {
     data: &'a [u8],
@@ -366,6 +427,10 @@ impl<'a> IntoIterator for Decoder<'a> {
 }
 
 /// Iterator over animation frames.
+#[deprecated(
+    since = "0.2.1",
+    note = "use the main webpx animation API; see module docs"
+)]
 #[cfg(feature = "animation")]
 pub struct DecoderIterator {
     inner: Option<crate::AnimationDecoder>,

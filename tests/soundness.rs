@@ -126,6 +126,99 @@ fn yuv_encode_must_reject_planes_shorter_than_stride_height() {
     );
 }
 
+/// Regression tests for the second-pass-audit class: caller-supplied
+/// strides cast to `i32` for libwebp without an upper-bound check.
+/// A stride `>= 2^31` wraps to a negative `i32`, and libwebp's row
+/// pointer arithmetic walks backwards through process memory. The
+/// fixes in 0.2.1 reject any stride above `i32::MAX` before the cast.
+mod stride_overflow {
+    use super::*;
+
+    /// Smallest stride that wraps to a negative `i32`.
+    const NEGATIVE_BOUNDARY: u32 = (i32::MAX as u32) + 1;
+
+    #[test]
+    fn argb_zero_copy_rejects_stride_above_i32_max() {
+        // 1×1 image with `stride_pixels = 2^31`. The data-length check
+        // requires `data.len() >= stride * height` which is impractical
+        // to satisfy at this magnitude; the test confirms the call
+        // errors (whether via the length check or the stride bound) so
+        // there's no path that reaches the libwebp `as i32` cast.
+        let argb: Vec<u32> = vec![0; 64];
+        let r = Encoder::new_argb_stride(&argb, 1, 1, NEGATIVE_BOUNDARY).encode(Unstoppable);
+        assert!(
+            r.is_err(),
+            "ARGB stride > i32::MAX must be rejected before the cast",
+        );
+    }
+
+    #[test]
+    fn rgba_stride_above_i32_max_is_rejected() {
+        // Same idea for the RGBA byte path. `validate_buffer_size_stride`
+        // has to gate the stride before the libwebp Import call.
+        let data = vec![0u8; 16];
+        let r = Encoder::new_rgba_stride(&data, 1, 1, NEGATIVE_BOUNDARY).encode(Unstoppable);
+        assert!(
+            r.is_err(),
+            "RGBA stride > i32::MAX must be rejected before the cast",
+        );
+    }
+
+    #[test]
+    fn yuv_stride_above_i32_max_is_rejected() {
+        // Y stride too large. width = 2, height = 2; we set y_stride
+        // to a value above `i32::MAX as usize`. The Y plane needs
+        // `y_stride * 2` bytes which is impractical to allocate, so
+        // we use a smaller plane that fails the *length* check first.
+        // The stride bound check is tested directly via
+        // `validate_yuv_planes` semantics: u_stride above i32::MAX
+        // should also reject.
+        //
+        // To exercise just the stride bound, we build planes whose
+        // length checks pass (oversized slice) only on 64-bit. On
+        // 32-bit `usize::MAX as i32` is problematic anyway, so the
+        // upper-bound check is a no-op there. Skip on 32-bit.
+        if usize::BITS < 64 {
+            return;
+        }
+        let big_stride = (i32::MAX as usize) + 1;
+        let y = vec![0u8; big_stride * 2];
+        let u = vec![0u8; 1];
+        let v = vec![0u8; 1];
+        let planes = YuvPlanesRef {
+            y: &y,
+            y_stride: big_stride,
+            u: &u,
+            u_stride: 1,
+            v: &v,
+            v_stride: 1,
+            a: None,
+            a_stride: 0,
+            width: 2,
+            height: 2,
+        };
+        let r = Encoder::new_yuv(planes).encode(Unstoppable);
+        assert!(
+            r.is_err(),
+            "Y stride > i32::MAX must be rejected by validate_yuv_planes",
+        );
+    }
+
+    #[cfg(feature = "streaming")]
+    #[test]
+    fn streaming_with_buffer_rejects_stride_above_i32_max() {
+        // `WebPINewRGB` takes the stride as `i32`; a wrapped-negative
+        // value would cause libwebp to write to addresses *before* the
+        // caller's buffer.
+        let mut buf = vec![0u8; 64];
+        let r = StreamingDecoder::with_buffer(&mut buf, (i32::MAX as usize) + 1, ColorMode::Rgba);
+        assert!(
+            r.is_err(),
+            "StreamingDecoder::with_buffer must reject stride > i32::MAX",
+        );
+    }
+}
+
 // The original report exercised this anti-pattern at runtime:
 //
 //     let mut decoder = {
