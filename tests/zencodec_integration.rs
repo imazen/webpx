@@ -152,6 +152,107 @@ fn capabilities_advertise_webp_support() {
     assert!(dcaps.enforces_max_pixels());
 }
 
+#[cfg(feature = "animation")]
+#[test]
+fn animation_roundtrip_via_zencodec_traits() {
+    use zencodec::decode::AnimationFrameDecoder;
+    use zencodec::encode::AnimationFrameEncoder;
+
+    let frame_a = rgba_test_image(8, 8);
+    let mut frame_b = frame_a.clone();
+    for px in frame_b.chunks_mut(4) {
+        px[0] = 255 - px[0];
+    }
+    let mut frame_c = frame_a.clone();
+    for px in frame_c.chunks_mut(4) {
+        px[1] = 255 - px[1];
+    }
+
+    let cfg = WebpEncoderConfig::lossy().with_generic_quality(70.0);
+    let mut anim_enc = cfg
+        .job()
+        .with_canvas_size(8, 8)
+        .animation_frame_encoder()
+        .expect("animation_frame_encoder ctor");
+
+    for (frame, dur) in [(&frame_a, 100u32), (&frame_b, 100), (&frame_c, 150)] {
+        let slice =
+            PixelSlice::new(frame, 8, 8, 8 * 4, PixelDescriptor::RGBA8_SRGB).expect("frame slice");
+        anim_enc.push_frame(slice, dur, None).expect("push frame");
+    }
+    let webp = anim_enc.finish(None).expect("anim finish").into_vec();
+    assert!(!webp.is_empty());
+
+    // Decode through the trait surface.
+    let dcfg = WebpDecoderConfig::new();
+    let djob = dcfg.job();
+    let info = djob.probe(&webp).expect("probe");
+    assert_eq!(info.width, 8);
+    assert_eq!(info.height, 8);
+    assert!(info.is_animation());
+
+    let mut dec = WebpDecoderConfig::new()
+        .job()
+        .animation_frame_decoder(
+            std::borrow::Cow::Borrowed(&webp),
+            &[PixelDescriptor::RGBA8_SRGB],
+        )
+        .expect("animation_frame_decoder ctor");
+    assert_eq!(dec.frame_count(), Some(3));
+
+    let mut frames_seen = 0;
+    while let Some(frame) = dec.render_next_frame(None).expect("render frame") {
+        assert_eq!(frame.pixels().width(), 8);
+        assert_eq!(frame.pixels().rows(), 8);
+        frames_seen += 1;
+    }
+    assert_eq!(frames_seen, 3);
+}
+
+#[cfg(feature = "streaming")]
+#[test]
+fn streaming_decode_via_zencodec_traits() {
+    use zencodec::decode::StreamingDecode;
+
+    let pixels = rgba_test_image(16, 16);
+    let cfg = WebpEncoderConfig::lossless();
+    let webp = cfg
+        .job()
+        .encoder()
+        .expect("encoder")
+        .encode(PixelSlice::new(&pixels, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap())
+        .expect("encode")
+        .into_vec();
+
+    let mut sdec = WebpDecoderConfig::new()
+        .job()
+        .streaming_decoder(
+            std::borrow::Cow::Borrowed(&webp),
+            &[PixelDescriptor::RGBA8_SRGB],
+        )
+        .expect("streaming decoder");
+    assert_eq!(sdec.info().width, 16);
+    assert_eq!(sdec.info().height, 16);
+
+    let mut total_rows = 0u32;
+    while let Some((row_offset, slice)) = sdec.next_batch().expect("next_batch") {
+        assert_eq!(row_offset, total_rows);
+        assert_eq!(slice.width(), 16);
+        // Lossless: bytes must match the source for this strip.
+        let strip_rows = slice.rows();
+        let stride = slice.stride();
+        let bytes = slice.as_strided_bytes();
+        for y in 0..strip_rows as usize {
+            let want_y = total_rows as usize + y;
+            let want = &pixels[want_y * 16 * 4..(want_y + 1) * 16 * 4];
+            let got = &bytes[y * stride..y * stride + 16 * 4];
+            assert_eq!(got, want, "row {} mismatch", want_y);
+        }
+        total_rows += strip_rows;
+    }
+    assert_eq!(total_rows, 16);
+}
+
 #[test]
 fn limits_round_trip_between_webpx_and_zencodec() {
     // webpx::Limits ↔ zencodec::ResourceLimits should round-trip every

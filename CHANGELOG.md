@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-05-02
+## [0.3.2] - 2026-05-02
 
 ### Added
 
@@ -14,15 +14,23 @@
   so the same caller code compiles unchanged when swapping crates —
   the only line that changes is the `use` import. See
   `examples/zencodec_swap.rs` for the swap pattern.
-- Single-image encode + decode are fully wired through the trait
-  surface (RGBA / BGRA / RGB input, RGBA / BGRA / RGB decode output,
-  ICC / EXIF / XMP metadata, `Limits` propagation through
-  `ResourceLimits`, generic-quality and generic-effort calibration).
-  Animation and incremental streaming are exposed as the matching
-  `zencodec` types but currently surface `Error::InvalidConfig` from
-  their constructors — the native `crate::AnimationDecoder` /
-  `StreamingDecoder` paths cover those today; trait wiring will land
-  in a follow-up.
+- All four executor traits are wired:
+  - `zencodec::encode::Encoder` on `WebpEncoder` — RGBA / BGRA / RGB
+    input, ICC / EXIF / XMP metadata, generic-quality / generic-effort
+    calibration, `Limits` propagation.
+  - `zencodec::encode::AnimationFrameEncoder` on
+    `WebpAnimationFrameEncoder` — accepts per-frame `PixelSlice`s,
+    converts cumulative-timestamp on the trait side to webpx's
+    timestamp-per-frame model, embeds metadata after assembly.
+  - `zencodec::decode::Decode` on `WebpDecoder` — full single-image
+    decode with caller-preferred descriptor selection.
+  - `zencodec::decode::AnimationFrameDecoder` on
+    `WebpAnimationFrameDecoder` — frame-by-frame and sink-based
+    rendering, with `frame_count` / `loop_count` accessors.
+  - `zencodec::decode::StreamingDecode` on `WebpStreamingDecoder` —
+    buffered approach (full input → single batch). A row-batch
+    implementation against libwebp's true incremental decoder is a
+    future iteration.
 - `From<webpx::Limits> for zencodec::ResourceLimits` and reverse.
   The two types were designed to mirror each other field-for-field;
   webpx's `max_metadata_bytes` is the only field without a zencodec

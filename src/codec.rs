@@ -13,12 +13,12 @@
 //! let cfg = WebpEncoderConfig::lossy().with_generic_quality(85.0);
 //! ```
 //!
-//! Single-image encode and decode are fully wired through the
-//! `zencodec` trait surface. Animation and incremental streaming are
-//! exposed as `zencodec` types but currently surface
-//! `Error::InvalidConfig` from their constructors — the native webpx
-//! API on `crate::AnimationDecoder` / `StreamingDecoder` covers those
-//! paths today; the trait wrapping will land in a follow-up.
+//! All four executor traits — `Encoder`, `Decode`,
+//! `AnimationFrameEncoder`, `AnimationFrameDecoder`, `StreamingDecode`
+//! — are wired through `zencodec`. Animation and streaming require the
+//! matching webpx Cargo features (`animation`, `streaming`); when
+//! disabled, the corresponding wrapper types stub out and surface
+//! `Error::InvalidConfig` from their constructors.
 
 use alloc::borrow::Cow;
 use alloc::format;
@@ -265,11 +265,29 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
     }
 
     fn animation_frame_encoder(self) -> Result<WebpAnimationFrameEncoder, At<Error>> {
-        Err(at!(Error::InvalidConfig(
-            "WebpAnimationFrameEncoder via the zencodec trait surface is not yet wired in webpx — \
-             use the native crate::AnimationEncoder API for now"
-                .into(),
-        )))
+        #[cfg(not(feature = "animation"))]
+        {
+            return Err(at!(Error::InvalidConfig(
+                "webpx built without `animation` feature".into(),
+            )));
+        }
+        #[cfg(feature = "animation")]
+        {
+            // The trait contract gives us pixel data on push_frame, so
+            // we can't construct the underlying encoder until the first
+            // frame arrives — that's the only point we know the
+            // canvas dimensions. Defer the AnimationEncoder::new call.
+            Ok(WebpAnimationFrameEncoder {
+                inner: None,
+                config: self.config.inner.clone(),
+                stop: self.stop,
+                icc: self.icc,
+                exif: self.exif,
+                xmp: self.xmp,
+                limits: Limits::from(self.limits),
+                last_timestamp_ms: 0,
+            })
+        }
     }
 }
 
@@ -414,19 +432,143 @@ impl zencodec::encode::Encoder for WebpEncoder {
     }
 }
 
-/// Animation encoder. Currently surfaces an
-/// `Error::InvalidConfig` from constructor paths — see module docs.
+/// WebP animation-frame encoder implementing
+/// [`zencodec::encode::AnimationFrameEncoder`].
+///
+/// The underlying [`crate::AnimationEncoder`] requires canvas
+/// dimensions at construction, but `zencodec`'s trait gives us pixels
+/// only at `push_frame` time. We defer the underlying encoder's
+/// construction until the first frame arrives so we can read its
+/// dimensions; subsequent frames must match.
+#[cfg(feature = "animation")]
+pub struct WebpAnimationFrameEncoder {
+    inner: Option<crate::AnimationEncoder>,
+    config: EncoderConfig,
+    /// Stored at construction time but not currently propagated to
+    /// libwebp's animation encoder (which doesn't take a stop token).
+    /// Keep the field so `with_stop` from the EncodeJob still flows
+    /// through and a future libwebp/webpx version can wire it in.
+    #[allow(dead_code)]
+    stop: Option<zencodec::StopToken>,
+    icc: Option<Arc<[u8]>>,
+    exif: Option<Arc<[u8]>>,
+    xmp: Option<Arc<[u8]>>,
+    limits: Limits,
+    /// Cumulative timestamp of frames added so far. webpx's animation
+    /// API takes per-frame timestamps; we track them ourselves so the
+    /// trait's `duration_ms` parameter maps cleanly.
+    last_timestamp_ms: u32,
+}
+
+#[cfg(feature = "animation")]
+impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
+    type Error = At<Error>;
+
+    fn reject(op: UnsupportedOperation) -> At<Error> {
+        at!(Error::InvalidConfig(format!(
+            "operation not supported by webpx animation encoder: {op:?}"
+        )))
+    }
+
+    fn push_frame(
+        &mut self,
+        pixels: PixelSlice<'_>,
+        duration_ms: u32,
+        _stop: Option<&dyn enough::Stop>,
+    ) -> Result<(), At<Error>> {
+        let (buf, mode, w, h, _stride_bytes) = pixels_to_webp_input(&pixels)?;
+
+        self.limits
+            .check_dimensions(w, h)
+            .map_err(|e| at!(Error::LimitExceeded(e)))?;
+
+        // Construct the underlying AnimationEncoder lazily on the
+        // first frame so we know the canvas size.
+        if self.inner.is_none() {
+            let mut enc = crate::AnimationEncoder::new(w, h)?;
+            // Carry over the encoder-config knobs the AnimationEncoder
+            // exposes setters for (quality / lossless). Other knobs on
+            // EncoderConfig are not plumbed through libwebp's anim
+            // encoder API.
+            enc.set_quality(self.config.get_quality());
+            if self.config.is_lossless() {
+                enc.set_lossless(true);
+            }
+            self.inner = Some(enc);
+        }
+
+        let enc = self.inner.as_mut().expect("just initialized");
+        let timestamp_ms = self.last_timestamp_ms as i32;
+
+        // The native `add_frame_*` family takes tightly-packed pixel
+        // slices (stride = width * bpp). When the caller passes a
+        // strided slice, copy into a contiguous buffer first. The
+        // common case (stride == width * bpp) is zero-copy via
+        // `Cow::Borrowed` from `pixels_to_webp_input`.
+        let bpp = match mode {
+            ColorMode::Rgba | ColorMode::Bgra => 4,
+            ColorMode::Rgb | ColorMode::Bgr => 3,
+            _ => unreachable!(),
+        };
+        let row_bytes = w as usize * bpp;
+        let stride_bytes_usize = pixels.stride();
+        let contiguous: Cow<'_, [u8]> = if stride_bytes_usize == row_bytes {
+            buf
+        } else {
+            // Strided source: copy into a tightly-packed buffer.
+            let mut packed = alloc::vec![0u8; row_bytes * h as usize];
+            for y in 0..h as usize {
+                let src = &buf[y * stride_bytes_usize..y * stride_bytes_usize + row_bytes];
+                packed[y * row_bytes..(y + 1) * row_bytes].copy_from_slice(src);
+            }
+            Cow::Owned(packed)
+        };
+
+        match mode {
+            ColorMode::Rgba => enc.add_frame_rgba(&contiguous, timestamp_ms)?,
+            ColorMode::Bgra => enc.add_frame_bgra(&contiguous, timestamp_ms)?,
+            ColorMode::Rgb => enc.add_frame_rgb(&contiguous, timestamp_ms)?,
+            ColorMode::Bgr => enc.add_frame_bgr(&contiguous, timestamp_ms)?,
+            _ => unreachable!(),
+        }
+
+        self.last_timestamp_ms = self.last_timestamp_ms.saturating_add(duration_ms);
+        Ok(())
+    }
+
+    fn finish(mut self, _stop: Option<&dyn enough::Stop>) -> Result<EncodeOutput, At<Error>> {
+        let enc = self.inner.take().ok_or_else(|| {
+            at!(Error::InvalidConfig(
+                "AnimationFrameEncoder::finish called before any push_frame".into(),
+            ))
+        })?;
+        let webp = enc.finish(self.last_timestamp_ms as i32)?;
+        let webp = apply_metadata(
+            webp,
+            self.icc.as_deref(),
+            self.exif.as_deref(),
+            self.xmp.as_deref(),
+        )?;
+        self.limits
+            .check_output_size(webp.len() as u64)
+            .map_err(|e| at!(Error::LimitExceeded(e)))?;
+        Ok(EncodeOutput::new(webp, ImageFormat::WebP))
+    }
+}
+
+/// Stub when the `animation` feature is off.
+#[cfg(not(feature = "animation"))]
 pub struct WebpAnimationFrameEncoder {
     _marker: core::marker::PhantomData<()>,
 }
 
+#[cfg(not(feature = "animation"))]
 impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
     type Error = At<Error>;
 
     fn reject(_op: UnsupportedOperation) -> At<Error> {
         at!(Error::InvalidConfig(
-            "WebpAnimationFrameEncoder not yet wired through zencodec; use crate::AnimationEncoder"
-                .into(),
+            "webpx built without `animation` feature".into(),
         ))
     }
 
@@ -638,9 +780,41 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
         _data: Cow<'a, [u8]>,
         _preferred: &[PixelDescriptor],
     ) -> Result<WebpStreamingDecoder, At<Error>> {
-        Err(at!(Error::InvalidConfig(
-            "WebpStreamingDecoder via the zencodec trait surface is not yet wired in webpx".into(),
-        )))
+        #[cfg(not(feature = "streaming"))]
+        {
+            return Err(at!(Error::InvalidConfig(
+                "webpx built without `streaming` feature".into(),
+            )));
+        }
+        #[cfg(feature = "streaming")]
+        {
+            // Probe the bitstream up-front for the ImageInfo we need
+            // to expose via the trait, plus to surface limit
+            // violations before any allocation.
+            let probe = crate::ImageInfo::from_webp(&_data)?;
+            let limits = Limits::from(self.limits);
+            limits
+                .check_dimensions(probe.width, probe.height)
+                .map_err(|e| at!(Error::LimitExceeded(e)))?;
+
+            let descriptor = pick_decode_descriptor(_preferred);
+            let zen_info = build_zencodec_image_info(probe);
+            // Buffered approach: stash the input, expose the whole
+            // image as a single batch via the native one-shot
+            // decoder. A row-by-row implementation against
+            // crate::StreamingDecoder is possible but that API takes
+            // mutable input chunks and we already own the data here;
+            // the buffered shape is simpler and matches zenwebp's.
+            Ok(WebpStreamingDecoder {
+                data: _data.into_owned(),
+                descriptor,
+                info: zen_info,
+                config: self.config.inner,
+                limits,
+                emitted: false,
+                decoded: None,
+            })
+        }
     }
 
     fn animation_frame_decoder(
@@ -648,10 +822,45 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
         _data: Cow<'a, [u8]>,
         _preferred: &[PixelDescriptor],
     ) -> Result<WebpAnimationFrameDecoder, At<Error>> {
-        Err(at!(Error::InvalidConfig(
-            "WebpAnimationFrameDecoder via the zencodec trait surface is not yet wired in webpx"
-                .into(),
-        )))
+        #[cfg(not(feature = "animation"))]
+        {
+            return Err(at!(Error::InvalidConfig(
+                "webpx built without `animation` feature".into(),
+            )));
+        }
+        #[cfg(feature = "animation")]
+        {
+            // libwebp's animation decoder only produces RGBA / BGRA;
+            // map preferred descriptor to one of those.
+            let mode = match pick_decode_descriptor(_preferred) {
+                PixelDescriptor::BGRA8_SRGB => ColorMode::Bgra,
+                _ => ColorMode::Rgba,
+            };
+            let descriptor = match mode {
+                ColorMode::Bgra => PixelDescriptor::BGRA8_SRGB,
+                _ => PixelDescriptor::RGBA8_SRGB,
+            };
+            let owned = _data.into_owned();
+            let limits = Limits::from(self.limits);
+            let inner = crate::AnimationDecoder::with_options_limits(&owned, mode, true, &limits)?;
+            let n_info = inner.info();
+            let zen_info = ImageInfo::new(n_info.width, n_info.height, ImageFormat::WebP)
+                .with_alpha(true)
+                .with_sequence(ImageSequence::Animation {
+                    frame_count: Some(n_info.frame_count),
+                    loop_count: Some(n_info.loop_count),
+                    random_access: false,
+                });
+            Ok(WebpAnimationFrameDecoder {
+                inner,
+                _data: owned,
+                info: zen_info,
+                descriptor,
+                last_pixels: Vec::new(),
+                last_width: 0,
+                last_height: 0,
+            })
+        }
     }
 }
 
@@ -694,35 +903,98 @@ impl zencodec::decode::Decode for WebpDecoder<'_> {
     }
 }
 
-/// Streaming decoder. Constructor surfaces an
-/// `Error::InvalidConfig` for now — see module docs.
+/// WebP streaming decoder implementing
+/// [`zencodec::decode::StreamingDecode`].
+///
+/// The current shape buffers the full input, then hands the entire
+/// decoded image back as a single batch on the first `next_batch`
+/// call. libwebp's true incremental decoder ([`crate::StreamingDecoder`])
+/// can yield rows as they're decoded; wiring that in row-batch form
+/// is left for a future iteration. The trait contract permits this
+/// shape (a single `(0, full_image)` batch followed by `Ok(None)`).
+#[cfg(feature = "streaming")]
+pub struct WebpStreamingDecoder {
+    data: Vec<u8>,
+    descriptor: PixelDescriptor,
+    info: ImageInfo,
+    config: DecoderConfig,
+    limits: Limits,
+    emitted: bool,
+    decoded: Option<(Vec<u8>, u32, u32)>,
+}
+
+#[cfg(feature = "streaming")]
+impl zencodec::decode::StreamingDecode for WebpStreamingDecoder {
+    type Error = At<Error>;
+
+    fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
+        if self.emitted {
+            return Ok(None);
+        }
+        if self.decoded.is_none() {
+            let cfg = self.config.clone().limits(self.limits);
+            let dec = crate::Decoder::new(&self.data)?.config(cfg);
+            let (bytes, w, h) = match self.descriptor {
+                PixelDescriptor::RGBA8_SRGB => dec.decode_rgba_raw()?,
+                PixelDescriptor::BGRA8_SRGB => dec.decode_bgra_raw()?,
+                PixelDescriptor::RGB8_SRGB => dec.decode_rgb_raw()?,
+                _ => unreachable!("pick_decode_descriptor only returns supported variants"),
+            };
+            self.decoded = Some((bytes, w, h));
+        }
+        self.emitted = true;
+        let (bytes, w, h) = self.decoded.as_ref().unwrap();
+        let stride_bytes = *w as usize * self.descriptor.bytes_per_pixel();
+        let slice = PixelSlice::new(bytes, *w, *h, stride_bytes, self.descriptor)
+            .map_err(|e| at!(Error::InvalidInput(format!("{e:?}"))))?;
+        Ok(Some((0, slice)))
+    }
+
+    fn info(&self) -> &ImageInfo {
+        &self.info
+    }
+}
+
+/// Stub when the `streaming` feature is off.
+#[cfg(not(feature = "streaming"))]
 pub struct WebpStreamingDecoder {
     _marker: core::marker::PhantomData<()>,
 }
 
+#[cfg(not(feature = "streaming"))]
 impl zencodec::decode::StreamingDecode for WebpStreamingDecoder {
     type Error = At<Error>;
 
     fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
         Err(at!(Error::InvalidConfig(
-            "WebpStreamingDecoder not wired through zencodec; use crate::StreamingDecoder".into(),
+            "webpx built without `streaming` feature".into(),
         )))
     }
 
     fn info(&self) -> &ImageInfo {
-        // This panic is unreachable in normal use because `streaming_decoder`
-        // never returns Ok(_) — callers can never get a `WebpStreamingDecoder`
-        // instance through the trait surface.
-        panic!("WebpStreamingDecoder::info called on stub instance")
+        unreachable!("streaming feature not enabled");
     }
 }
 
-/// Animation frame decoder. Constructor surfaces an
-/// `Error::InvalidConfig` for now — see module docs.
+/// WebP animation-frame decoder implementing
+/// [`zencodec::decode::AnimationFrameDecoder`].
+#[cfg(feature = "animation")]
 pub struct WebpAnimationFrameDecoder {
-    _marker: core::marker::PhantomData<()>,
+    inner: crate::AnimationDecoder,
+    /// Holds the input bytes alive for the duration of the decoder.
+    /// libwebp's demuxer keeps a raw pointer into this slice.
+    _data: Vec<u8>,
+    info: ImageInfo,
+    descriptor: PixelDescriptor,
+    /// Most recently produced frame's pixels. Owned so the
+    /// `AnimationFrame<'_>` we return can borrow from it; cleared on
+    /// each new `render_next_frame` call.
+    last_pixels: Vec<u8>,
+    last_width: u32,
+    last_height: u32,
 }
 
+#[cfg(feature = "animation")]
 impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
     type Error = At<Error>;
 
@@ -731,7 +1003,99 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
     }
 
     fn info(&self) -> &ImageInfo {
-        panic!("WebpAnimationFrameDecoder::info called on stub instance")
+        &self.info
+    }
+
+    fn render_next_frame(
+        &mut self,
+        _stop: Option<&dyn enough::Stop>,
+    ) -> Result<Option<zencodec::decode::AnimationFrame<'_>>, At<Error>> {
+        let frame = match self.inner.next_frame()? {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+        // Cache pixels so the returned PixelSlice can borrow safely.
+        self.last_pixels = frame.data;
+        self.last_width = frame.width;
+        self.last_height = frame.height;
+        let stride_bytes = self.last_width as usize * self.descriptor.bytes_per_pixel();
+        let slice = PixelSlice::new(
+            &self.last_pixels,
+            self.last_width,
+            self.last_height,
+            stride_bytes,
+            self.descriptor,
+        )
+        .map_err(|e| at!(Error::InvalidInput(format!("{e:?}"))))?;
+        Ok(Some(zencodec::decode::AnimationFrame::new(
+            slice,
+            frame.duration_ms,
+            // frame_index isn't tracked here; pass 0 as a placeholder.
+            // libwebp's animation decoder doesn't expose a per-frame
+            // index distinct from iteration order.
+            0,
+        )))
+    }
+
+    fn render_next_frame_to_sink(
+        &mut self,
+        stop: Option<&dyn enough::Stop>,
+        sink: &mut dyn DecodeRowSink,
+    ) -> Result<Option<OutputInfo>, At<Error>> {
+        let descriptor = self.descriptor;
+        let frame = match self.render_next_frame(stop)? {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+        let pixels = frame.pixels();
+        let w = pixels.width();
+        let h = pixels.rows();
+        sink.begin(w, h, descriptor)
+            .map_err(|e| at!(Error::InvalidInput(format!("sink begin: {e}"))))?;
+        let mut dst = sink
+            .provide_next_buffer(0, h, w, descriptor)
+            .map_err(|e| at!(Error::InvalidInput(format!("sink provide: {e}"))))?;
+        let bpp = descriptor.bytes_per_pixel();
+        let row_bytes = w as usize * bpp;
+        let src_bytes = pixels.as_strided_bytes();
+        let src_stride = pixels.stride();
+        for y in 0..h as usize {
+            let src_row = &src_bytes[y * src_stride..y * src_stride + row_bytes];
+            let dst_row = dst.row_mut(y as u32);
+            dst_row[..row_bytes].copy_from_slice(src_row);
+        }
+        sink.finish()
+            .map_err(|e| at!(Error::InvalidInput(format!("sink finish: {e}"))))?;
+        Ok(Some(OutputInfo::full_decode(w, h, descriptor)))
+    }
+
+    fn frame_count(&self) -> Option<u32> {
+        Some(self.inner.info().frame_count)
+    }
+
+    fn loop_count(&self) -> Option<u32> {
+        Some(self.inner.info().loop_count)
+    }
+}
+
+/// Stub when the `animation` feature is off.
+#[cfg(not(feature = "animation"))]
+pub struct WebpAnimationFrameDecoder {
+    _marker: core::marker::PhantomData<()>,
+}
+
+#[cfg(not(feature = "animation"))]
+impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
+    type Error = At<Error>;
+
+    fn wrap_sink_error(_e: zencodec::decode::SinkError) -> At<Error> {
+        at!(Error::InvalidConfig(
+            "webpx built without `animation` feature".into(),
+        ))
+    }
+
+    fn info(&self) -> &ImageInfo {
+        unreachable!("animation feature not enabled");
     }
 
     fn render_next_frame(
@@ -739,8 +1103,7 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
         _stop: Option<&dyn enough::Stop>,
     ) -> Result<Option<zencodec::decode::AnimationFrame<'_>>, At<Error>> {
         Err(at!(Error::InvalidConfig(
-            "WebpAnimationFrameDecoder not wired through zencodec; use crate::AnimationDecoder"
-                .into(),
+            "webpx built without `animation` feature".into(),
         )))
     }
 
@@ -750,8 +1113,7 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
         _sink: &mut dyn zencodec::decode::DecodeRowSink,
     ) -> Result<Option<OutputInfo>, At<Error>> {
         Err(at!(Error::InvalidConfig(
-            "WebpAnimationFrameDecoder not wired through zencodec; use crate::AnimationDecoder"
-                .into(),
+            "webpx built without `animation` feature".into(),
         )))
     }
 }
