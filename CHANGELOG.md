@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The crate now compiles under every feature combination
+  (`--no-default-features` with any subset of `decode` / `encode` /
+  `std` / `streaming` / `animation` / `icc`). The compat layer's
+  `Encoder` / `Decoder` types are now properly gated on the matching
+  feature, and `EncoderConfig`'s encoding entry points are gated on
+  `encode`. CI gains a feature-combo matrix to prevent regression.
+  Closes [#1].
+
+[#1]: https://github.com/imazen/webpx/issues/1
+
 ## [0.2.0] - 2026-05-01
 
 ### Security

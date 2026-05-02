@@ -42,6 +42,30 @@ jobs:
       - name: Test (i686/QEMU)
         run: cross test --all-features --target i686-unknown-linux-gnu
 
+  # Build under each minimal feature combination so disabling encode or
+  # decode (or both) doesn't regress into a compile error. Catches
+  # imazen/webpx#1.
+  feature-matrix:
+    name: Feature combo (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - "std"
+          - "decode std"
+          - "encode std"
+          - "decode encode std"
+          - "decode encode std streaming"
+          - "decode encode std animation"
+          - "decode encode std icc"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --no-default-features --features "${{ matrix.features }}"
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

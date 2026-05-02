@@ -159,6 +159,7 @@ impl BitstreamFeatures {
 }
 
 /// WebP encoder (compatible with `webp::Encoder`).
+#[cfg(feature = "encode")]
 pub struct Encoder<'a> {
     image: &'a [u8],
     layout: PixelLayout,
@@ -166,6 +167,7 @@ pub struct Encoder<'a> {
     height: u32,
 }
 
+#[cfg(feature = "encode")]
 impl<'a> Encoder<'a> {
     /// Create a new encoder from raw image data.
     pub fn new(image: &'a [u8], layout: PixelLayout, width: u32, height: u32) -> Self {
@@ -221,10 +223,12 @@ impl<'a> Encoder<'a> {
 }
 
 /// WebP decoder (compatible with `webp::Decoder`).
+#[cfg(feature = "decode")]
 pub struct Decoder<'a> {
     data: &'a [u8],
 }
 
+#[cfg(feature = "decode")]
 impl<'a> Decoder<'a> {
     /// Create a new decoder from WebP data.
     pub fn new(data: &'a [u8]) -> Self {

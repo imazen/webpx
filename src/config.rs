@@ -695,9 +695,16 @@ impl EncoderConfig {
         self.xmp_data = Some(data.into());
         self
     }
+}
 
-    // === Encoding Entry Points ===
-
+// === Encoding Entry Points ===
+//
+// These require the `encode` feature because they delegate to the encoder
+// implementation in `crate::encode`. Splitting them into their own impl
+// block (rather than gating each method) avoids feature-flag noise on
+// every entry point and keeps the builder methods above unconditional.
+#[cfg(feature = "encode")]
+impl EncoderConfig {
     /// Encode typed pixel data to WebP.
     ///
     /// This is the preferred method for type-safe encoding with rgb crate types.
@@ -897,7 +904,9 @@ impl EncoderConfig {
                 .encode(stop),
         }
     }
+}
 
+impl EncoderConfig {
     // === Validation ===
 
     /// Validate the configuration.
