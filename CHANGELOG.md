@@ -2,13 +2,47 @@
 
 ## [Unreleased]
 
+### Added
+
+- `webpx::Limits` — opt-in resource policy modeled on
+  `zencodec::ResourceLimits`. Fields: `max_pixels` (per-frame),
+  `max_total_pixels` (across all animation frames),
+  `max_width`, `max_height`, `max_input_bytes`, `max_frames`,
+  `max_animation_ms`, `max_metadata_bytes`, `max_output_bytes`.
+  All `Option<T>`; `None` means no webpx-side cap.
+- `webpx::LimitExceeded` — error variant carrying the actual value
+  and the limit that was exceeded. Returned via the new
+  `Error::LimitExceeded` variant, also implements
+  `core::error::Error` standalone.
+- `DecoderConfig::limits(Limits)` and `::get_limits()` — apply the
+  policy at parse time. `max_width`, `max_height`, `max_pixels`, and
+  `max_total_pixels` are checked via `WebPGetFeatures` before
+  libwebp allocates the output buffer; if `scale()` is also set,
+  the post-scale dimensions are checked too.
+- `AnimationDecoder::with_options_limits(data, mode, threads, &Limits)`
+  — applies limits against the canvas dimensions and declared
+  `frame_count` before any decode work. `max_total_pixels`
+  catches the W × H × N animation-bomb case that per-frame
+  `max_pixels` misses. Closes [#4].
+- `mux::get_icc_profile_with_limits` / `get_exif_with_limits` /
+  `get_xmp_with_limits` — apply `Limits::max_metadata_bytes` on
+  top of the existing 256 MiB internal hard cap.
+
 ### Changed (breaking)
 
+- `EncoderConfig` and `DecoderConfig` are now `#[non_exhaustive]`.
+  They have `pub(crate)` fields so external struct-literal
+  construction was already disallowed; the marker documents that
+  these structs will grow (`limits`, future config knobs) without
+  another minor bump.
 - `error::EncodingError`, `error::DecodingError`, `error::MuxError`
   and `types::ImageInfo` are now `#[non_exhaustive]`. Match arms must
   add `_ =>` and struct construction must go through a constructor.
   This closes the door on adding new libwebp error variants or new
   bitstream-info fields requiring another minor bump.
+- `Error` gains a `LimitExceeded(LimitExceeded)` variant. Already
+  `#[non_exhaustive]`, so adding the variant is a non-breaking
+  additive change for `match` arms with `_ =>`.
 
 ### Fixed
 
@@ -21,6 +55,7 @@
   Closes [#1].
 
 [#1]: https://github.com/imazen/webpx/issues/1
+[#4]: https://github.com/imazen/webpx/issues/4
 
 ## [0.2.0] - 2026-05-01
 

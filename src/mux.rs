@@ -7,7 +7,8 @@ use whereat::*;
 
 /// Extract ICC profile from WebP data.
 ///
-/// Returns `None` if no ICC profile is present.
+/// Returns `None` if no ICC profile is present. Subject to the internal
+/// 256 MiB hard cap; for a tighter cap, use [`get_icc_profile_with_limits`].
 ///
 /// # Example
 ///
@@ -19,21 +20,41 @@ use whereat::*;
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn get_icc_profile(webp_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    get_chunk(webp_data, b"ICCP")
+    get_chunk(webp_data, b"ICCP", &crate::Limits::none())
 }
 
 /// Extract EXIF metadata from WebP data.
 ///
-/// Returns `None` if no EXIF data is present.
+/// Returns `None` if no EXIF data is present. Subject to the internal
+/// 256 MiB hard cap; for a tighter cap, use [`get_exif_with_limits`].
 pub fn get_exif(webp_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    get_chunk(webp_data, b"EXIF")
+    get_chunk(webp_data, b"EXIF", &crate::Limits::none())
 }
 
 /// Extract XMP metadata from WebP data.
 ///
-/// Returns `None` if no XMP data is present.
+/// Returns `None` if no XMP data is present. Subject to the internal
+/// 256 MiB hard cap; for a tighter cap, use [`get_xmp_with_limits`].
 pub fn get_xmp(webp_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    get_chunk(webp_data, b"XMP ")
+    get_chunk(webp_data, b"XMP ", &crate::Limits::none())
+}
+
+/// Extract ICC profile, rejecting chunks larger than `limits.max_metadata_bytes`.
+pub fn get_icc_profile_with_limits(
+    webp_data: &[u8],
+    limits: &crate::Limits,
+) -> Result<Option<Vec<u8>>> {
+    get_chunk(webp_data, b"ICCP", limits)
+}
+
+/// Extract EXIF metadata, rejecting chunks larger than `limits.max_metadata_bytes`.
+pub fn get_exif_with_limits(webp_data: &[u8], limits: &crate::Limits) -> Result<Option<Vec<u8>>> {
+    get_chunk(webp_data, b"EXIF", limits)
+}
+
+/// Extract XMP metadata, rejecting chunks larger than `limits.max_metadata_bytes`.
+pub fn get_xmp_with_limits(webp_data: &[u8], limits: &crate::Limits) -> Result<Option<Vec<u8>>> {
+    get_chunk(webp_data, b"XMP ", limits)
 }
 
 /// Helper to create a demuxer from WebP data.
@@ -77,8 +98,13 @@ unsafe fn create_mux_from_data(webp_data: &[u8], copy_data: bool) -> *mut libweb
 /// real-world ICC profile / EXIF / XMP block while bounding the worst case.
 pub(crate) const MAX_METADATA_CHUNK_BYTES: usize = 256 * 1024 * 1024;
 
-/// Get a metadata chunk from WebP data.
-fn get_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Option<Vec<u8>>> {
+/// Get a metadata chunk from WebP data, applying both the internal 256 MiB
+/// hard cap and any caller-supplied [`crate::Limits::max_metadata_bytes`].
+fn get_chunk(
+    webp_data: &[u8],
+    fourcc: &[u8; 4],
+    limits: &crate::Limits,
+) -> Result<Option<Vec<u8>>> {
     let demux = unsafe { create_demux(webp_data) };
 
     if demux.is_null() {
@@ -98,6 +124,8 @@ fn get_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Option<Vec<u8>>> {
     let result = if found != 0 {
         let chunk_iter = unsafe { chunk_iter.assume_init() };
         if !chunk_iter.chunk.bytes.is_null() && chunk_iter.chunk.size > 0 {
+            // Internal hard cap: protects against `Limits::default()` callers
+            // who didn't set max_metadata_bytes themselves.
             if chunk_iter.chunk.size > MAX_METADATA_CHUNK_BYTES {
                 unsafe {
                     let mut iter = chunk_iter;
@@ -105,10 +133,24 @@ fn get_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Option<Vec<u8>>> {
                     libwebp_sys::WebPDemuxDelete(demux);
                 }
                 return Err(at!(Error::InvalidInput(alloc::format!(
-                    "metadata chunk exceeds limit: {} bytes (max {})",
+                    "metadata chunk exceeds internal hard cap: {} bytes (max {})",
                     chunk_iter.chunk.size,
                     MAX_METADATA_CHUNK_BYTES
                 ))));
+            }
+            // Caller-side `Limits::max_metadata_bytes`. Saturate the cast
+            // because chunk.size is usize but max_metadata_bytes is u32; on
+            // 64-bit a > 4 GiB chunk would already be caught by the hard
+            // cap above, so this saturation never widens the threshold.
+            if let Err(e) = limits
+                .check_metadata_bytes(u32::try_from(chunk_iter.chunk.size).unwrap_or(u32::MAX))
+            {
+                unsafe {
+                    let mut iter = chunk_iter;
+                    libwebp_sys::WebPDemuxReleaseChunkIterator(&mut iter);
+                    libwebp_sys::WebPDemuxDelete(demux);
+                }
+                return Err(at!(Error::LimitExceeded(e)));
             }
             let chunk_data = unsafe {
                 core::slice::from_raw_parts(chunk_iter.chunk.bytes, chunk_iter.chunk.size)

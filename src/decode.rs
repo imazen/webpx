@@ -880,6 +880,18 @@ impl<'a> Decoder<'a> {
         if status != libwebp_sys::VP8StatusCode::VP8_STATUS_OK {
             return Err(at!(Error::DecodeFailed(DecodingError::from(status as i32))));
         }
+        // Limits checks happen after features are read but before libwebp
+        // allocates the output buffer in WebPDecode. The pre-scale check
+        // is the cheap upfront gate; if a scale is configured, also check
+        // the post-scale dimensions so the produced canvas honors the cap.
+        self.config.check_still_image(
+            dec_config.input.width as u32,
+            dec_config.input.height as u32,
+        )?;
+        if self.config.use_scaling {
+            self.config
+                .check_still_image(self.config.scaled_width, self.config.scaled_height)?;
+        }
 
         // Configure output
         dec_config.output.colorspace = mode;

@@ -1582,6 +1582,66 @@ mod decoder_tests {
     }
 
     #[test]
+    fn test_decoder_max_pixels_rejects_over_budget() {
+        use webpx::{DecoderConfig, Limits};
+
+        // Encode a 100×100 image, then try to decode it with a 50×50 budget.
+        let width = 100;
+        let height = 100;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
+
+        let cfg = DecoderConfig::new().limits(Limits::none().with_max_pixels(50 * 50));
+        let r = Decoder::new(&webp)
+            .expect("decoder")
+            .config(cfg)
+            .decode_rgba();
+        assert!(
+            r.is_err(),
+            "decode should be rejected when image exceeds max_pixels"
+        );
+
+        // The same image fits a 100×100 budget exactly.
+        let cfg = DecoderConfig::new().limits(Limits::none().with_max_pixels(100 * 100));
+        let r = Decoder::new(&webp)
+            .expect("decoder")
+            .config(cfg)
+            .decode_rgba();
+        assert!(r.is_ok(), "decode should succeed at exact budget");
+
+        // Limits::none() disables the cap (default behavior).
+        let cfg = DecoderConfig::new().limits(Limits::none());
+        let r = Decoder::new(&webp)
+            .expect("decoder")
+            .config(cfg)
+            .decode_rgba();
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_decoder_max_pixels_rejects_post_scale() {
+        use webpx::{DecoderConfig, Limits};
+
+        // 100×100 source, scale to 200×200, with a 100×100 budget.
+        // The pre-scale image fits, but the post-scale output doesn't.
+        let width = 100;
+        let height = 100;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
+
+        let cfg = DecoderConfig::new().limits(Limits::none().with_max_pixels(100 * 100));
+        let r = Decoder::new(&webp)
+            .expect("decoder")
+            .config(cfg)
+            .scale(200, 200)
+            .decode_rgba();
+        assert!(
+            r.is_err(),
+            "scaled output that exceeds budget should be rejected"
+        );
+    }
+
+    #[test]
     fn test_decoder_rgb_with_scaling() {
         let width = 100;
         let height = 100;
@@ -2475,6 +2535,70 @@ mod animation_tests {
                 mode
             );
         }
+    }
+
+    #[test]
+    fn test_animation_decoder_rejects_total_pixels() {
+        // The case `max_pixels` alone misses: a tiny canvas with many
+        // frames whose product exceeds the cumulative cap.
+        use webpx::{AnimationDecoder, AnimationEncoder, ColorMode, Limits};
+
+        let width = 32;
+        let height = 32;
+        let frame_a = generate_rgba(width, height, 100, 150, 200, 255);
+        let frame_b = generate_rgba(width, height, 200, 100, 50, 255);
+
+        // Build a 4-frame animation: 32×32 × 4 = 4096 cumulative pixels.
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame_rgba(&frame_a, 0).expect("add");
+        encoder.add_frame_rgba(&frame_b, 100).expect("add");
+        encoder.add_frame_rgba(&frame_a, 200).expect("add");
+        encoder.add_frame_rgba(&frame_b, 300).expect("add");
+        let webp = encoder.finish(400).expect("finish");
+
+        // max_pixels passes (each frame is 1024 ≤ 2000) but max_total_pixels
+        // (2000 < 4096) fails.
+        let limits = Limits::none()
+            .with_max_pixels(2000)
+            .with_max_total_pixels(2000);
+        let r = AnimationDecoder::with_options_limits(&webp, ColorMode::Rgba, false, &limits);
+        assert!(
+            r.is_err(),
+            "max_total_pixels should reject cumulative pixel count"
+        );
+
+        // Same but with a generous total cap → succeeds.
+        let limits = Limits::none()
+            .with_max_pixels(2000)
+            .with_max_total_pixels(10_000);
+        let r = AnimationDecoder::with_options_limits(&webp, ColorMode::Rgba, false, &limits);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_animation_decoder_rejects_max_frames() {
+        use webpx::{AnimationDecoder, AnimationEncoder, ColorMode, Limits};
+
+        let width = 16;
+        let height = 16;
+        // Distinct frames so libwebp doesn't dedupe.
+        let frame_a = generate_rgba(width, height, 100, 150, 200, 255);
+        let frame_b = generate_rgba(width, height, 50, 200, 100, 255);
+        let frame_c = generate_rgba(width, height, 200, 50, 150, 255);
+
+        let mut encoder = AnimationEncoder::new(width, height).expect("encoder");
+        encoder.add_frame_rgba(&frame_a, 0).expect("add");
+        encoder.add_frame_rgba(&frame_b, 100).expect("add");
+        encoder.add_frame_rgba(&frame_c, 200).expect("add");
+        let webp = encoder.finish(300).expect("finish");
+
+        let limits = Limits::none().with_max_frames(2);
+        let r = AnimationDecoder::with_options_limits(&webp, ColorMode::Rgba, false, &limits);
+        assert!(r.is_err(), "3-frame animation should fail max_frames=2");
+
+        let limits = Limits::none().with_max_frames(10);
+        let r = AnimationDecoder::with_options_limits(&webp, ColorMode::Rgba, false, &limits);
+        assert!(r.is_ok());
     }
 
     #[test]

@@ -96,6 +96,8 @@ pub enum Error {
     Stopped(StopReason),
     /// I/O error
     IoError(String),
+    /// A configured resource limit ([`Limits`](crate::Limits)) was exceeded.
+    LimitExceeded(crate::LimitExceeded),
 }
 
 impl fmt::Display for Error {
@@ -113,7 +115,14 @@ impl fmt::Display for Error {
             Error::InvalidWebP => write!(f, "invalid WebP data"),
             Error::Stopped(reason) => write!(f, "{}", reason),
             Error::IoError(msg) => write!(f, "I/O error: {}", msg),
+            Error::LimitExceeded(e) => write!(f, "limit exceeded: {}", e),
         }
+    }
+}
+
+impl From<crate::LimitExceeded> for Error {
+    fn from(e: crate::LimitExceeded) -> Self {
+        Error::LimitExceeded(e)
     }
 }
 
