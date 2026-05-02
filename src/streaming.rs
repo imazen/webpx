@@ -281,7 +281,20 @@ impl<'a> StreamingDecoder<'a> {
             return None;
         }
 
-        let size = (stride as usize).saturating_mul(last_y as usize);
+        let bpp = self.color_mode.bytes_per_pixel().unwrap_or(4);
+        let row_bytes = (width as usize).checked_mul(bpp)?;
+        let stride = stride as usize;
+        if stride < row_bytes {
+            return None;
+        }
+        let decoded_rows = last_y as usize;
+        let size = decoded_rows
+            .checked_sub(1)?
+            .checked_mul(stride)?
+            .checked_add(row_bytes)?;
+        if size > isize::MAX as usize {
+            return None;
+        }
 
         let data = unsafe { core::slice::from_raw_parts(ptr, size) };
 
