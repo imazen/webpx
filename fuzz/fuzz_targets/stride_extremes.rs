@@ -11,6 +11,8 @@
 
 #![no_main]
 
+extern crate alloc;
+
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use webpx::{ColorMode, Encoder, StreamingDecoder, Unstoppable};
@@ -79,12 +81,15 @@ fuzz_target!(|input: Input<'_>| {
     // ---- ARGB encoder stride (pixel-stride, not byte-stride) ----
     {
         let s = resolve(input.argb_stride, w);
-        let argb: &[u32] = unsafe {
-            // SAFETY: byte-aligned; we only read len/4 elements.
-            core::slice::from_raw_parts(input.pixels.as_ptr() as *const u32, input.pixels.len() / 4)
-        };
+        // Build an aligned u32 slice — &[u8] is not necessarily 4-byte
+        // aligned, so reinterpreting via from_raw_parts is UB.
+        let argb_words = input.pixels.len() / 4;
+        let mut argb: alloc::vec::Vec<u32> = alloc::vec::Vec::with_capacity(argb_words);
+        for chunk in input.pixels.chunks_exact(4).take(argb_words) {
+            argb.push(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+        }
         if argb.len() >= (s as usize).saturating_mul(h as usize) {
-            let _ = Encoder::new_argb_stride(argb, w, h, s)
+            let _ = Encoder::new_argb_stride(&argb, w, h, s)
                 .quality(50.0)
                 .encode(Unstoppable);
         }

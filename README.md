@@ -58,21 +58,20 @@ let (pixels, w, h) = decode_rgba(&webp)?;
 
 ## Decoding untrusted input
 
-If you decode WebP files supplied by users (HTTP request bodies, uploaded
-files, etc.), apply a [`Limits`] policy to bound resource usage *before*
-libwebp allocates pixel buffers. Without one, an attacker can declare a
-16383×16383 canvas (libwebp's intrinsic max ≈ 1 GiB at 4 bpp) and force
-your process into OOM territory. With `Limits` set, oversized inputs are
-rejected at parse time with `Error::LimitExceeded`.
+`Limits::default()` applies **opinionated production caps** suited to
+typical web / image-server use, so the default `DecoderConfig` and
+`AnimationDecoder` paths are already bounded. Defaults: 64 MP per frame,
+256 MP cumulative, 16383×16383 (libwebp's intrinsic limit), 64 MiB
+input, 4096 frames, 5 min animation, 4 MiB metadata, 256 MiB output.
+Override individual fields via the `with_*` builders on top of
+`Limits::default()`, or use `Limits::none()` to opt out entirely (only
+when you fully trust the input).
 
 ```rust
 use webpx::{Decoder, DecoderConfig, Limits};
 
-let limits = Limits::none()
-    .with_max_pixels(64 * 1024 * 1024)             // 64 MP per frame (≈256 MB at 4 bpp)
-    .with_max_total_pixels(256 * 1024 * 1024)      // 256 MP cumulative across animation frames
-    .with_max_frames(1024)                         // sane animation cap
-    .with_max_metadata_bytes(4 * 1024 * 1024);     // 4 MB ICCP/EXIF/XMP
+// Tighter than default: 16 MP per frame for a thumbnail decoder.
+let limits = Limits::default().with_max_pixels(16 * 1024 * 1024);
 
 let img = Decoder::new(webp_data)?
     .config(DecoderConfig::new().limits(limits))

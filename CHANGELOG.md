@@ -2,6 +2,62 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-02
+
+### Security
+
+- `Encoder::new_rgba` / `new_bgra` / `new_rgb` / `new_bgr` no longer
+  panic with an arithmetic-overflow trap when constructed with
+  `width >= 2^30` (RGBA/BGRA) or `width >= 2^30 + change` (RGB/BGR) —
+  `width * 4` / `width * 3` overflowed `u32` *inside the constructor*,
+  before the caller had a chance to validate dimensions. The fuzz
+  campaign added in 0.2.3 (`dim_extremes`) caught it within seconds
+  on its first run. Fix: `saturating_mul` on the byte stride; the
+  oversize stride now flows through `validate_buffer_size_stride`
+  and produces a clean `Error::InvalidInput` rather than a panic.
+
+### Changed (breaking — caller may need to opt out of caps)
+
+- **`Limits::default()` now applies opinionated production caps.**
+  Previously `Limits::default()` returned `Limits::none()` (unbounded);
+  callers who construct `DecoderConfig::default()` or
+  `AnimationDecoder::with_options(...)` against untrusted input were
+  silently relying on libwebp's intrinsic caps only. New default:
+  `max_pixels = 64 MiP`, `max_total_pixels = 256 MiP`,
+  `max_width = max_height = 16383`, `max_input_bytes = 64 MiB`,
+  `max_frames = 4096`, `max_animation_ms = 5 min`,
+  `max_metadata_bytes = 4 MiB`, `max_output_bytes = 256 MiB`.
+  Code that needs the unbounded behavior must switch to
+  `Limits::none()` explicitly.
+
+### Testing
+
+- New `examples/leak_test` harness exercises every webpx surface
+  (encode, decode, streaming, animation, mux) in a tight loop. Used
+  with `heaptrack` (`just leak-test`) or AddressSanitizer with
+  `detect_leaks=1` (`just leak-test-asan`) to verify the FFI RAII
+  layer cleans up libwebp's internal allocations on every path,
+  including error returns. Wired into the ASan CI job. Local runs
+  show zero webpx-attributable leaks; the sole reported leak is
+  std's per-thread `stack_overflow::thread_info` allocation,
+  released by OS process teardown but not visible to heaptrack
+  (suppression added to the LSan list).
+- `tests/soundness.rs` gained reproduction tests covering bug-history
+  fixes that lacked direct repros: encoder constructor overflow
+  panics on huge widths, `from_pixels_stride` truncation,
+  `YuvPlanes::new_checked` rejection of out-of-range dims,
+  `max_metadata_bytes` enforcement, `max_frames` enforcement against
+  declared frame counts, `max_animation_ms` enforcement on
+  cumulative timestamps, and `max_pixels` enforcement on
+  oversize canvases. 17 soundness tests total.
+
+### Documentation
+
+- README and lib-level rustdoc explain that `Limits::default()` is
+  now the safe baseline for untrusted input — callers no longer need
+  to remember to apply caps explicitly. The "decoding untrusted
+  input" example shows the new pattern (`Limits::default().with_*`).
+
 ## [0.2.3] - 2026-05-02
 
 ### Testing

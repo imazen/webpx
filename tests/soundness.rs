@@ -314,3 +314,238 @@ fn streaming_decoder_new_rejects_yuv_modes() {
         }
     }
 }
+
+// `Encoder::new_rgba` / `new_bgra` / `new_rgb` / `new_bgr` used to panic
+// with an arithmetic-overflow trap when constructed with `width >= 2^30`
+// (RGBA) or `width >= 2^30 + ...` (RGB) — `width * 4` / `width * 3` overflowed
+// `u32` and the panic happened *inside the constructor*, before the
+// caller had a chance to validate dimensions. Discovered by `dim_extremes`
+// fuzzing on 2026-05-02. Fix: saturating_mul on the byte stride; the
+// oversize stride flows through to `validate_buffer_size_stride` which
+// rejects it as a clean error.
+#[test]
+fn encoder_constructors_dont_panic_on_huge_width() {
+    // u32::MAX width is the worst case for every constructor.
+    let small = [0u8; 16];
+    // None of these may panic. The encode itself will error (invalid
+    // dimensions / oversize stride) but the constructor must not.
+    let _e1 = Encoder::new_rgba(&small, u32::MAX, 1);
+    let _e2 = Encoder::new_bgra(&small, u32::MAX, 1);
+    let _e3 = Encoder::new_rgb(&small, u32::MAX, 1);
+    let _e4 = Encoder::new_bgr(&small, u32::MAX, 1);
+
+    // And a value just below the libwebp 16383 cap to confirm the
+    // saturating path doesn't pessimize the common case.
+    let r = Encoder::new_rgba(&small, 1_073_741_824, 1).encode(Unstoppable);
+    assert!(r.is_err(), "huge width must produce a clean error");
+}
+
+// `Encoder::from_pixels_stride` truncated `(stride_pixels * bpp) as u32`
+// when the source `u32` pixel-stride exceeded `u32::MAX / bpp`. The
+// truncated byte stride then satisfied `validate_buffer_size_stride`'s
+// checks while libwebp encoded with the wrong row layout (silent
+// wrong-output bug). Fix in 0.2.1: saturating cast so oversize strides
+// hit the i32::MAX upper-bound check instead of being silently truncated.
+#[test]
+fn from_pixels_stride_with_huge_pixel_stride_rejected() {
+    use rgb::RGBA8;
+    let pixels: Vec<RGBA8> = vec![RGBA8::new(0, 0, 0, 0); 16];
+    // pixel_stride > u32::MAX / 4 (RGBA bpp). The old truncating cast
+    // would have produced a valid-looking byte stride; saturation
+    // pushes this to u32::MAX which fails the i32::MAX check.
+    let huge_pixel_stride: u32 = (u32::MAX / 4) + 1;
+    let r = Encoder::from_pixels_stride(&pixels, 1, 1, huge_pixel_stride).encode(Unstoppable);
+    assert!(
+        r.is_err(),
+        "from_pixels_stride must reject pixel-strides that overflow u32::MAX when scaled by bpp",
+    );
+}
+
+// `YuvPlanes::new_checked` is the non-panicking constructor added in
+// 0.2.0 specifically because the panicking `YuvPlanes::new` constructor
+// allocated via `vec!` and could panic with a confusing capacity-overflow
+// message instead of a clean rejection. Out-of-range dimensions must
+// return `None` here, and the panicking constructor must produce a
+// clear panic message rather than the underlying vec macro's overflow.
+#[test]
+fn yuv_planes_new_checked_rejects_out_of_range_dimensions() {
+    // 16384 exceeds libwebp's intrinsic max of 16383.
+    assert!(YuvPlanes::new_checked(u32::MAX, 1, false).is_none());
+    assert!(YuvPlanes::new_checked(1, u32::MAX, false).is_none());
+    // u32::MAX × u32::MAX × bpp wraps usize on every platform.
+    assert!(YuvPlanes::new_checked(u32::MAX, u32::MAX, true).is_none());
+    // The legitimate small case still succeeds.
+    assert!(YuvPlanes::new_checked(64, 48, false).is_some());
+}
+
+// 0.2.0 added `MAX_METADATA_CHUNK_BYTES = 256 MiB` as an internal hard
+// cap on ICCP / EXIF / XMP chunk sizes returned by the demuxer.
+// libwebp itself accepts ICCP / EXIF / XMP chunks up to ~4 GB; without
+// the cap, a hostile WebP declaring a 4 GB chunk would force webpx to
+// allocate a 4 GB Vec on every `get_*` call. Caller-supplied
+// `Limits::max_metadata_bytes` lets users set a *tighter* cap on top.
+//
+// Direct exercise of the 256 MiB hard cap is impractical (we'd need to
+// embed a 256 MiB chunk into a synthetic WebP); the test below covers
+// the caller-side `max_metadata_bytes` path instead, which uses the
+// same code path through `inspect_chunk` and would surface a regression
+// in the cap-check structure.
+#[cfg(feature = "icc")]
+#[test]
+fn metadata_get_with_tight_max_metadata_bytes_rejects_oversize_chunk() {
+    // Build a real WebP with a 1 KiB ICC profile, then read it back
+    // with `max_metadata_bytes = 512` — must reject.
+    let rgba = vec![255u8; 4 * 4 * 4];
+    let webp = Encoder::new_rgba(&rgba, 4, 4)
+        .quality(80.0)
+        .encode(Unstoppable)
+        .expect("encode");
+    let icc = vec![0xa5u8; 1024];
+    let webp_with_icc = webpx::embed_icc(&webp, &icc).expect("embed icc");
+
+    let tight = Limits::none().with_max_metadata_bytes(512);
+    let r = webpx::get_icc_profile_with_limits(&webp_with_icc, &tight);
+    match r {
+        Err(at) => {
+            let (err, _) = at.decompose();
+            assert!(
+                matches!(err, Error::LimitExceeded(_)),
+                "max_metadata_bytes overflow must surface LimitExceeded, got {:?}",
+                err
+            );
+        }
+        Ok(_) => panic!("max_metadata_bytes=512 accepted a 1 KiB ICC chunk"),
+    }
+
+    // And the same call with a generous cap must succeed.
+    let loose = Limits::none().with_max_metadata_bytes(4096);
+    let icc_back = webpx::get_icc_profile_with_limits(&webp_with_icc, &loose)
+        .expect("loose cap should succeed")
+        .expect("ICC chunk must be present");
+    assert_eq!(icc_back, icc);
+}
+
+// 0.2.0 added a 4096-frame cap on `AnimationDecoder::decode_all`'s
+// initial `Vec::with_capacity` reservation. Without the cap, a hostile
+// WebP declaring frame_count = u32::MAX would force a 96 GB allocation
+// up front (24 bytes per Frame × 4 billion). This is also enforced
+// against the `max_frames` budget when `with_options_limits` is used.
+//
+// Use distinct per-frame content so libwebp doesn't dedupe and report
+// frame_count = 1.
+#[cfg(feature = "animation")]
+#[test]
+fn animation_decoder_max_frames_rejects_huge_declared_frame_count() {
+    let mut frame_a = vec![0u8; 8 * 8 * 4];
+    for px in frame_a.chunks_mut(4) {
+        px.copy_from_slice(&[255, 0, 0, 255]);
+    }
+    let mut frame_b = vec![0u8; 8 * 8 * 4];
+    for px in frame_b.chunks_mut(4) {
+        px.copy_from_slice(&[0, 255, 0, 255]);
+    }
+    let mut frame_c = vec![0u8; 8 * 8 * 4];
+    for px in frame_c.chunks_mut(4) {
+        px.copy_from_slice(&[0, 0, 255, 255]);
+    }
+
+    let mut enc = AnimationEncoder::new(8, 8).expect("encoder");
+    enc.add_frame_rgba(&frame_a, 0).expect("add frame 0");
+    enc.add_frame_rgba(&frame_b, 100).expect("add frame 1");
+    enc.add_frame_rgba(&frame_c, 200).expect("add frame 2");
+    let webp = enc.finish(300).expect("finish");
+
+    let tight = Limits::none().with_max_frames(2);
+    let r = AnimationDecoder::with_options_limits(&webp, ColorMode::Rgba, true, &tight);
+    match r {
+        Err(at) => {
+            let (err, _) = at.decompose();
+            assert!(
+                matches!(err, Error::LimitExceeded(_)),
+                "max_frames=2 must surface LimitExceeded for a 3-frame animation, got {:?}",
+                err
+            );
+        }
+        Ok(_) => panic!("max_frames=2 accepted a 3-frame animation"),
+    }
+}
+
+// 0.2.0 made `AnimationDecoder::decode_all` use `saturating_sub` when
+// computing per-frame durations from declared timestamps, so a hostile
+// non-monotonic timestamp (frame 1 at t=100, frame 2 at t=50) cannot
+// wrap into a multi-billion-millisecond duration. This is paired with
+// `max_animation_ms` enforcement against the cumulative timestamp.
+//
+// Use distinct frames to keep libwebp from de-duplicating them.
+#[cfg(feature = "animation")]
+#[test]
+fn animation_decoder_max_animation_ms_rejects_long_animations() {
+    let mut frame_a = vec![0u8; 8 * 8 * 4];
+    for px in frame_a.chunks_mut(4) {
+        px.copy_from_slice(&[200, 50, 50, 255]);
+    }
+    let mut frame_b = vec![0u8; 8 * 8 * 4];
+    for px in frame_b.chunks_mut(4) {
+        px.copy_from_slice(&[50, 200, 50, 255]);
+    }
+    let mut frame_c = vec![0u8; 8 * 8 * 4];
+    for px in frame_c.chunks_mut(4) {
+        px.copy_from_slice(&[50, 50, 200, 255]);
+    }
+
+    let mut enc = AnimationEncoder::new(8, 8).expect("encoder");
+    enc.add_frame_rgba(&frame_a, 0).expect("add frame 0");
+    enc.add_frame_rgba(&frame_b, 5_000).expect("add frame 1");
+    enc.add_frame_rgba(&frame_c, 60_000).expect("add frame 2");
+    let webp = enc.finish(120_000).expect("finish");
+
+    let tight = Limits::none().with_max_animation_ms(30_000);
+    let mut dec = AnimationDecoder::with_options_limits(&webp, ColorMode::Rgba, true, &tight)
+        .expect("decoder construction succeeds; max_animation_ms is checked in decode_all");
+    let r = dec.decode_all();
+    match r {
+        Err(at) => {
+            let (err, _) = at.decompose();
+            assert!(
+                matches!(err, Error::LimitExceeded(_)),
+                "max_animation_ms=30s must reject a 120s animation, got {:?}",
+                err
+            );
+        }
+        Ok(_) => panic!("max_animation_ms=30s accepted a 120s animation"),
+    }
+}
+
+// 0.2.0 added `DecoderConfig::limits` with auto-enforcement of
+// `max_pixels` against `WebPGetFeatures` *before* libwebp allocates
+// the output buffer. Without this, a hostile WebP declaring a
+// 16383×16383 canvas would force a ~1 GiB allocation at 4 bpp.
+// Already covered by `test_decoder_max_pixels_rejects_over_budget`
+// in integration.rs; this version is the per-pixel-budget reproduction
+// against an encoded image we know exceeds the cap.
+#[cfg(feature = "decode")]
+#[test]
+fn decoder_max_pixels_rejects_oversize_canvas() {
+    let rgba = vec![255u8; 64 * 64 * 4];
+    let webp = Encoder::new_rgba(&rgba, 64, 64)
+        .quality(80.0)
+        .encode(Unstoppable)
+        .expect("encode");
+
+    // 64×64 = 4096 pixels; cap at 1024.
+    let tight = Limits::none().with_max_pixels(1024);
+    let cfg = DecoderConfig::new().limits(tight);
+    let dec = Decoder::new(&webp).expect("decoder").config(cfg);
+    let r = dec.decode_rgba();
+    match r {
+        Err(at) => {
+            let (err, _) = at.decompose();
+            assert!(
+                matches!(err, Error::LimitExceeded(_)),
+                "max_pixels=1024 must reject a 4096-pixel image, got {:?}",
+                err
+            );
+        }
+        Ok(_) => panic!("max_pixels=1024 accepted a 4096-pixel image"),
+    }
+}

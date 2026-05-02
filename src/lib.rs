@@ -67,20 +67,19 @@
 //!
 //! ## Decoding untrusted input
 //!
-//! Apply a [`Limits`] policy any time the bitstream comes from an
-//! untrusted source. Without one, libwebp's intrinsic 16383×16383 cap
-//! still applies but allocations up to ~1 GiB at 4 bpp are reachable.
-//! With limits set, oversized inputs are rejected at parse time.
+//! [`Limits::default()`] applies opinionated production caps (64 MP per
+//! frame, 256 MP cumulative, 16383×16383, 64 MiB input, 4096 frames,
+//! 5 min animation, 4 MiB metadata, 256 MiB output), so the default
+//! `DecoderConfig` and `AnimationDecoder` paths are already bounded.
+//! Override individual fields via the `with_*` builders on top of
+//! `Limits::default()`, or use [`Limits::none()`] to opt out entirely
+//! (only when the input source is fully trusted).
 //!
 //! ```rust,no_run
 //! use webpx::{Decoder, DecoderConfig, Limits};
 //!
-//! let limits = Limits::none()
-//!     .with_max_pixels(64 * 1024 * 1024)
-//!     .with_max_total_pixels(256 * 1024 * 1024)
-//!     .with_max_frames(1024)
-//!     .with_max_input_bytes(64 * 1024 * 1024)
-//!     .with_max_metadata_bytes(4 * 1024 * 1024);
+//! // Tighter than default: 16 MP per frame for a thumbnail decoder.
+//! let limits = Limits::default().with_max_pixels(16 * 1024 * 1024);
 //!
 //! let webp_data: &[u8] = &[];
 //! let img = Decoder::new(webp_data)?

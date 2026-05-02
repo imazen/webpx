@@ -6,17 +6,23 @@
 //! can lift the relevant fields into webpx's [`Limits`] without re-thinking
 //! the units.
 //!
+//! [`Limits::default()`] applies opinionated production caps suited to
+//! typical web / image-server use (64 MP per frame, 256 MP cumulative,
+//! 16383×16383, 64 MiB input, 4096 frames, 5 min animation, 4 MiB
+//! metadata, 256 MiB output). [`Limits::none()`] returns the unbounded
+//! config — use that only when you fully trust the input source. Both
+//! `DecoderConfig::default()` and `AnimationDecoder::with_options(...)`
+//! flow through the default caps; explicit `_with_limits` paths let
+//! callers override.
+//!
 //! Use the `check_*` methods for parse-time rejection (fastest — reject
 //! before any pixel work):
 //!
 //! ```rust,no_run
 //! use webpx::{Decoder, DecoderConfig, Limits};
 //!
-//! let limits = Limits::none()
-//!     .with_max_pixels(64 * 1024 * 1024)            // 64 MP per frame
-//!     .with_max_total_pixels(256 * 1024 * 1024)     // 256 MP across all frames
-//!     .with_max_frames(1024)
-//!     .with_max_metadata_bytes(4 * 1024 * 1024);    // 4 MB ICC/EXIF/XMP
+//! // Tighter than default: cap to 16 MP per frame for thumbnail decoders.
+//! let limits = Limits::default().with_max_pixels(16 * 1024 * 1024);
 //!
 //! let webp_data: &[u8] = &[];
 //! let img = Decoder::new(webp_data)?
@@ -57,7 +63,7 @@
 /// caps you can apply with one line of caller code, just not yet wired
 /// into the encoder builder paths. A future minor release will lift the
 /// encoder caps to "Auto" without changing the public `Limits` shape.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Limits {
     /// Maximum pixels in a single frame (`width × height`).
@@ -94,11 +100,64 @@ pub struct Limits {
     pub max_output_bytes: Option<u64>,
 }
 
+/// Default `Limits` are **opinionated production caps** sized for typical
+/// web / image-server use, not "no limits." If you need to decode larger
+/// inputs (very large camera RAW intermediates, archival scans, hand-built
+/// Photoshop output, etc.), construct with [`Limits::none()`] and add
+/// only the caps that matter to you, or override individual fields via
+/// the `with_*` builders on top of `default()`.
+///
+/// The defaults are:
+///
+/// - `max_pixels = 64 MiP` (64 × 1024 × 1024) — per frame, ~256 MB at 4 bpp
+/// - `max_total_pixels = 256 MiP` (256 × 1024 × 1024) — cumulative across animation frames
+/// - `max_width = max_height = 16383` — libwebp's intrinsic bitstream limit
+/// - `max_input_bytes = 64 MiB` — encoded bitstream
+/// - `max_frames = 4096`
+/// - `max_animation_ms = 300_000` (5 minutes)
+/// - `max_metadata_bytes = 4 MiB` — ICCP / EXIF / XMP
+/// - `max_output_bytes = 256 MiB` — encoded output cap
+///
+/// These shipped with the addition of `Limits::default()` having content;
+/// **prior releases (≤ 0.2.3) had `Limits::default() == Limits::none()`**.
+/// Code that relies on the unbounded behavior must switch to
+/// `Limits::none()` explicitly.
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_pixels: Some(64 * 1024 * 1024),
+            max_total_pixels: Some(256 * 1024 * 1024),
+            max_width: Some(16383),
+            max_height: Some(16383),
+            max_input_bytes: Some(64 * 1024 * 1024),
+            max_frames: Some(4096),
+            max_animation_ms: Some(5 * 60 * 1000),
+            max_metadata_bytes: Some(4 * 1024 * 1024),
+            max_output_bytes: Some(256 * 1024 * 1024),
+        }
+    }
+}
+
 impl Limits {
     /// No webpx-side limits — only libwebp's intrinsic caps apply.
+    ///
+    /// Use this when you trust the input source unconditionally
+    /// (decoding files you generated yourself, a tightly-controlled
+    /// pipeline, etc.). For untrusted input, prefer [`Limits::default`]
+    /// and override individual fields via the `with_*` builders.
     #[must_use]
     pub fn none() -> Self {
-        Self::default()
+        Self {
+            max_pixels: None,
+            max_total_pixels: None,
+            max_width: None,
+            max_height: None,
+            max_input_bytes: None,
+            max_frames: None,
+            max_animation_ms: None,
+            max_metadata_bytes: None,
+            max_output_bytes: None,
+        }
     }
 
     /// Set [`max_pixels`](Self::max_pixels).
@@ -412,8 +471,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_has_no_limits() {
+    fn none_has_no_limits() {
         assert!(!Limits::none().has_any());
+    }
+
+    #[test]
+    fn default_has_production_caps() {
+        let l = Limits::default();
+        assert!(l.has_any(), "default Limits must apply caps");
+        assert!(l.max_pixels.is_some());
+        assert!(l.max_total_pixels.is_some());
+        assert!(l.max_width.is_some());
+        assert!(l.max_height.is_some());
+        assert!(l.max_input_bytes.is_some());
+        assert!(l.max_frames.is_some());
+        assert!(l.max_animation_ms.is_some());
+        assert!(l.max_metadata_bytes.is_some());
+        assert!(l.max_output_bytes.is_some());
+
+        // libwebp's intrinsic 16383 cap should match the default.
+        assert_eq!(l.max_width, Some(16383));
+        assert_eq!(l.max_height, Some(16383));
     }
 
     #[test]

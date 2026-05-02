@@ -48,6 +48,29 @@ mem-profile-print:
 mem-profile-quick:
     cargo run --release --all-features --example alloc_profile
 
+# Memory-leak regression test under heaptrack — runs every webpx
+# surface in a loop and exits cleanly. Anything reported as "leaked"
+# is a bug. Set WEBPX_LEAK_ITERS to override iteration count.
+leak-test:
+    @rm -f heaptrack.leak_test.*.zst
+    cargo build --release --all-features --example leak_test
+    heaptrack ./target/release/examples/leak_test
+    @echo ""
+    @echo "Leak summary:"
+    @heaptrack_print heaptrack.leak_test.*.zst | grep -E "leaked|peak heap memory consumption" | head -20
+    @echo ""
+    @echo "Full report: heaptrack_print heaptrack.leak_test.*.zst"
+
+# Memory-leak regression test under AddressSanitizer with leak
+# detection. Runs the same harness as `leak-test` but instrumented
+# with ASan; faster than heaptrack and suitable for CI.
+leak-test-asan:
+    RUSTFLAGS='-Zsanitizer=address' \
+    ASAN_OPTIONS='detect_leaks=1' \
+        cargo +nightly run -Zbuild-std --release \
+            --target x86_64-unknown-linux-gnu \
+            --all-features --example leak_test
+
 # Collect memory formula data (run specific config with heaptrack)
 mem-formula size="512" mode="lossy" quality="85" method="4":
     cargo build --release --all-features --example mem_formula

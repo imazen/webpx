@@ -291,7 +291,7 @@ impl<'a> Encoder<'a> {
         Self {
             data: EncoderInput::Rgba {
                 data,
-                stride_bytes: width * 4,
+                stride_bytes: width.saturating_mul(4),
             },
             width,
             height,
@@ -328,7 +328,7 @@ impl<'a> Encoder<'a> {
         Self {
             data: EncoderInput::Bgra {
                 data,
-                stride_bytes: width * 4,
+                stride_bytes: width.saturating_mul(4),
             },
             width,
             height,
@@ -365,7 +365,7 @@ impl<'a> Encoder<'a> {
         Self {
             data: EncoderInput::Rgb {
                 data,
-                stride_bytes: width * 3,
+                stride_bytes: width.saturating_mul(3),
             },
             width,
             height,
@@ -402,7 +402,7 @@ impl<'a> Encoder<'a> {
         Self {
             data: EncoderInput::Bgr {
                 data,
-                stride_bytes: width * 3,
+                stride_bytes: width.saturating_mul(3),
             },
             width,
             height,

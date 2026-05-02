@@ -143,3 +143,18 @@ jobs:
           cargo +nightly test -Zbuild-std --release \
             --target x86_64-unknown-linux-gnu --all-features \
             --test fuzz_regression
+      - name: Leak test under ASAN (detect_leaks=1)
+        env:
+          # detect_leaks=1 enabled here so any libwebp allocation that
+          # escapes the FFI RAII wrappers shows up as a CI failure.
+          # Suppression list filters known non-webpx artifacts (std
+          # thread-local stack-overflow info on Linux).
+          ASAN_OPTIONS: 'detect_odr_violation=0:detect_leaks=1'
+          LSAN_OPTIONS: 'suppressions=lsan-suppressions.txt'
+        run: |
+          cat > lsan-suppressions.txt <<'EOF'
+          leak:set_current_info
+          EOF
+          WEBPX_LEAK_ITERS=10 cargo +nightly run -Zbuild-std --release \
+            --target x86_64-unknown-linux-gnu --all-features \
+            --example leak_test
