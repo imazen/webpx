@@ -35,6 +35,34 @@
 //! # Ok::<(), webpx::At<webpx::Error>>(())
 //! ```
 //!
+//! ## Decoding untrusted input
+//!
+//! Apply a [`Limits`] policy any time the bitstream comes from an
+//! untrusted source. Without one, libwebp's intrinsic 16383×16383 cap
+//! still applies but allocations up to ~1 GiB at 4 bpp are reachable.
+//! With limits set, oversized inputs are rejected at parse time.
+//!
+//! ```rust,no_run
+//! use webpx::{Decoder, DecoderConfig, Limits};
+//!
+//! let limits = Limits::none()
+//!     .with_max_pixels(64 * 1024 * 1024)
+//!     .with_max_total_pixels(256 * 1024 * 1024)
+//!     .with_max_frames(1024)
+//!     .with_max_input_bytes(64 * 1024 * 1024)
+//!     .with_max_metadata_bytes(4 * 1024 * 1024);
+//!
+//! let webp_data: &[u8] = &[];
+//! let img = Decoder::new(webp_data)?
+//!     .config(DecoderConfig::new().limits(limits))
+//!     .decode_rgba()?;
+//! # Ok::<(), webpx::At<webpx::Error>>(())
+//! ```
+//!
+//! See the [`Limits`] type for the per-field enforcement matrix and the
+//! `decode_with_limits` example for end-to-end usage across the static
+//! decoder, animation decoder, and metadata extraction paths.
+//!
 //! ## Builder API
 //!
 //! For more control, use the builder pattern:

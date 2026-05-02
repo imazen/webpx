@@ -105,6 +105,11 @@ fn get_chunk(
     fourcc: &[u8; 4],
     limits: &crate::Limits,
 ) -> Result<Option<Vec<u8>>> {
+    // Input-size cap fires before we hand the data to libwebp's demuxer.
+    limits
+        .check_input_size(webp_data.len() as u64)
+        .map_err(|e| at!(Error::LimitExceeded(e)))?;
+
     let demux = unsafe { create_demux(webp_data) };
 
     if demux.is_null() {

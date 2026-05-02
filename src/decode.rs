@@ -870,6 +870,16 @@ impl<'a> Decoder<'a> {
             ))));
         }
 
+        // Input-size cap is the cheapest gate — reject before even creating
+        // the decoder config / probing features.
+        if let Err(e) = self
+            .config
+            .get_limits()
+            .check_input_size(self.data.len() as u64)
+        {
+            return Err(at!(Error::LimitExceeded(e)));
+        }
+
         let mut dec_config = libwebp_sys::WebPDecoderConfig::new()
             .map_err(|_| at!(Error::InvalidConfig("failed to init decoder config".into())))?;
 

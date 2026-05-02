@@ -64,6 +64,10 @@ pub struct AnimationDecoder {
     decoder: *mut libwebp_sys::WebPAnimDecoder,
     info: AnimationInfo,
     bpp: usize,
+    /// Limits stashed at construction so `next_frame` / `decode_all` can
+    /// keep enforcing per-frame and cumulative caps without the caller
+    /// re-passing them.
+    limits: crate::Limits,
     _data: Vec<u8>, // Keep data alive
 }
 
@@ -74,6 +78,11 @@ impl AnimationDecoder {
     /// Create a new animation decoder.
     pub fn new(data: &[u8]) -> Result<Self> {
         Self::with_options(data, ColorMode::Rgba, true)
+    }
+
+    /// Borrow the [`Limits`](crate::Limits) the decoder was built with.
+    pub fn get_limits(&self) -> &crate::Limits {
+        &self.limits
     }
 
     /// Create a new animation decoder with options.
@@ -111,6 +120,10 @@ impl AnimationDecoder {
         use_threads: bool,
         limits: &crate::Limits,
     ) -> Result<Self> {
+        // Cheapest gate: input-size cap before any libwebp work.
+        limits
+            .check_input_size(data.len() as u64)
+            .map_err(|e| at!(Error::LimitExceeded(e)))?;
         // libwebp's WebPAnimDecoder only accepts MODE_RGBA / MODE_BGRA
         // (and the premultiplied variants, which webpx doesn't expose).
         // Reject anything else with a clear error rather than passing it
@@ -183,6 +196,7 @@ impl AnimationDecoder {
                 bgcolor: anim_info.bgcolor,
             },
             bpp,
+            limits: *limits,
             _data: data_copy,
         })
     }
@@ -265,6 +279,13 @@ impl AnimationDecoder {
             // wrap and produce a bogus duration.
             frame.duration_ms = frame.timestamp_ms.saturating_sub(prev_timestamp).max(0) as u32;
             prev_timestamp = frame.timestamp_ms;
+            // Enforce `max_animation_ms` against the cumulative timestamp.
+            // libwebp returns each frame's *end* timestamp, so this rejects
+            // as soon as the running duration exceeds the cap rather than
+            // waiting until all frames are decoded.
+            self.limits
+                .check_animation_ms(frame.timestamp_ms.max(0) as u64)
+                .map_err(|e| at!(Error::LimitExceeded(e)))?;
             frames.push(frame);
         }
 

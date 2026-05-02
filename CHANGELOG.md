@@ -10,6 +10,12 @@
   `max_width`, `max_height`, `max_input_bytes`, `max_frames`,
   `max_animation_ms`, `max_metadata_bytes`, `max_output_bytes`.
   All `Option<T>`; `None` means no webpx-side cap.
+  Auto-enforced fields (`max_pixels`, `max_total_pixels`,
+  `max_width`, `max_height`, `max_frames`, `max_input_bytes`,
+  `max_animation_ms`, `max_metadata_bytes`) are checked at
+  parse time on the `_with_limits` decoder / animation /
+  mux entry points; see the [`Limits`] docs for the per-field
+  enforcement matrix.
 - `webpx::LimitExceeded` — error variant carrying the actual value
   and the limit that was exceeded. Returned via the new
   `Error::LimitExceeded` variant, also implements
@@ -20,10 +26,12 @@
   libwebp allocates the output buffer; if `scale()` is also set,
   the post-scale dimensions are checked too.
 - `AnimationDecoder::with_options_limits(data, mode, threads, &Limits)`
-  — applies limits against the canvas dimensions and declared
-  `frame_count` before any decode work. `max_total_pixels`
-  catches the W × H × N animation-bomb case that per-frame
-  `max_pixels` misses. Closes [#4].
+  + `AnimationDecoder::get_limits()` — applies limits against the
+  canvas dimensions, declared `frame_count`, and input size before
+  any decode work. `max_total_pixels` catches the W × H × N
+  animation-bomb case that per-frame `max_pixels` misses; the
+  decoder also enforces `max_animation_ms` against the cumulative
+  frame timestamp inside `decode_all`. Closes [#4].
 - `mux::get_icc_profile_with_limits` / `get_exif_with_limits` /
   `get_xmp_with_limits` — apply `Limits::max_metadata_bytes` on
   top of the existing 256 MiB internal hard cap.

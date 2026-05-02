@@ -49,3 +49,7 @@ required-features = ["animation", "streaming"]
 [[example]]
 name = "pixel_api_demo"
 required-features = ["animation"]
+
+[[example]]
+name = "decode_with_limits"
+required-features = ["decode", "encode", "animation", "icc"]

@@ -35,6 +35,28 @@
 /// objects map cleanly. Threading is intentionally not in this struct —
 /// it's a performance knob, not a DoS budget; use
 /// [`DecoderConfig::use_threads`](crate::DecoderConfig::use_threads).
+///
+/// # Enforcement matrix
+///
+/// "Auto" means webpx checks the field for you when you pass `Limits` to
+/// the listed entry point. "Manual" means the field is part of `Limits`
+/// for shape compatibility but webpx does not auto-check it on this path
+/// — call the corresponding `check_*` method yourself.
+///
+/// | Field | `DecoderConfig::limits` | `AnimationDecoder::with_options_limits` | `mux::*_with_limits` | Encoder paths |
+/// |---|---|---|---|---|
+/// | `max_input_bytes` | Auto (pre-features) | Auto (pre-decoder) | Auto (pre-demux) | n/a |
+/// | `max_width` / `max_height` / `max_pixels` | Auto (declared dims, post-scale) | Auto (canvas dims) | n/a | Manual via [`check_dimensions`](Self::check_dimensions) |
+/// | `max_total_pixels` | Auto (still = w × h × 1) | Auto (w × h × frame_count) | n/a | n/a |
+/// | `max_frames` | n/a | Auto (declared frame_count) | n/a | n/a |
+/// | `max_animation_ms` | n/a | Auto in [`AnimationDecoder::decode_all`](crate::AnimationDecoder::decode_all) (cumulative timestamp) | n/a | Manual via [`check_animation_ms`](Self::check_animation_ms) |
+/// | `max_metadata_bytes` | n/a | n/a | Auto (chunk size) | n/a |
+/// | `max_output_bytes` | n/a | n/a | n/a | Manual via [`check_output_size`](Self::check_output_size) on the encoded `Vec` |
+///
+/// "Manual" fields are not lying about being available — they're real
+/// caps you can apply with one line of caller code, just not yet wired
+/// into the encoder builder paths. A future minor release will lift the
+/// encoder caps to "Auto" without changing the public `Limits` shape.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Limits {

@@ -20,7 +20,7 @@
 
 ```toml
 [dependencies]
-webpx = "0.1"
+webpx = "0.2"
 ```
 
 ```rust
@@ -34,6 +34,38 @@ let webp = Encoder::new_rgba(&pixels, width, height)
 // Decode WebP back to RGBA
 let (pixels, w, h) = decode_rgba(&webp)?;
 ```
+
+## Decoding untrusted input
+
+If you decode WebP files supplied by users (HTTP request bodies, uploaded
+files, etc.), apply a [`Limits`] policy to bound resource usage *before*
+libwebp allocates pixel buffers. Without one, an attacker can declare a
+16383×16383 canvas (libwebp's intrinsic max ≈ 1 GiB at 4 bpp) and force
+your process into OOM territory. With `Limits` set, oversized inputs are
+rejected at parse time with `Error::LimitExceeded`.
+
+```rust
+use webpx::{Decoder, DecoderConfig, Limits};
+
+let limits = Limits::none()
+    .with_max_pixels(64 * 1024 * 1024)             // 64 MP per frame (≈256 MB at 4 bpp)
+    .with_max_total_pixels(256 * 1024 * 1024)      // 256 MP cumulative across animation frames
+    .with_max_frames(1024)                         // sane animation cap
+    .with_max_metadata_bytes(4 * 1024 * 1024);     // 4 MB ICCP/EXIF/XMP
+
+let img = Decoder::new(webp_data)?
+    .config(DecoderConfig::new().limits(limits))
+    .decode_rgba()?;
+```
+
+The same `Limits` value also wires into [`AnimationDecoder::with_options_limits`]
+and [`mux::get_icc_profile_with_limits`] (and the `_with_limits` variants
+for EXIF / XMP). Field naming matches `zencodec::ResourceLimits` so a
+single shared policy carries cleanly between Imazen codecs.
+
+[`Limits`]: https://docs.rs/webpx/latest/webpx/struct.Limits.html
+[`AnimationDecoder::with_options_limits`]: https://docs.rs/webpx/latest/webpx/struct.AnimationDecoder.html#method.with_options_limits
+[`mux::get_icc_profile_with_limits`]: https://docs.rs/webpx/latest/webpx/fn.get_icc_profile_with_limits.html
 
 ## Features at a Glance
 
@@ -49,6 +81,7 @@ let (pixels, w, h) = decode_rgba(&webp)?;
 | **Cropping/Scaling** | Decode to any size |
 | **YUV Support** | Direct YUV420 input/output |
 | **Content Presets** | Optimized settings for photos, drawings, icons, text |
+| **Resource Limits** | `Limits` policy: per-frame & cumulative pixel caps, frame count, metadata size, ... |
 | **Cancellation** | Cooperative cancellation via [`enough`](https://docs.rs/enough) crate |
 
 ## Examples
@@ -135,7 +168,7 @@ let (pixels, w, h) = decoder
 ### Animation
 
 ```rust
-use webpx::{AnimationEncoder, AnimationDecoder};
+use webpx::{AnimationEncoder, AnimationDecoder, ColorMode, Limits};
 
 // Create animated WebP
 let mut encoder = AnimationEncoder::new(320, 240)?;
@@ -147,8 +180,19 @@ encoder.add_frame_rgba(&frame2_rgba, 100)?;   // Show at 100ms
 encoder.add_frame_rgba(&frame3_rgba, 200)?;   // Show at 200ms
 let webp = encoder.finish(300)?;              // End timestamp
 
-// Decode animation
-let mut decoder = AnimationDecoder::new(&webp)?;
+// Decode animation. Use `with_options_limits` if the input is
+// untrusted — `max_total_pixels` covers the W × H × frame_count
+// case (a 1000×1000 × 200-frame animation has 200 MP cumulative
+// even when each frame fits a per-frame `max_pixels` cap).
+let limits = Limits::none()
+    .with_max_pixels(64 * 1024 * 1024)
+    .with_max_total_pixels(256 * 1024 * 1024)
+    .with_max_frames(1024)
+    .with_max_animation_ms(60_000)            // 60 s of animation
+    .with_max_input_bytes(64 * 1024 * 1024);  // 64 MB bitstream
+let mut decoder = AnimationDecoder::with_options_limits(
+    &webp, ColorMode::Rgba, true, &limits,
+)?;
 let info = decoder.info();
 println!("{} frames, {}x{}", info.frame_count, info.width, info.height);
 
@@ -157,7 +201,8 @@ while let Some(frame) = decoder.next_frame()? {
     render(&frame.data, frame.timestamp_ms);
 }
 
-// Or get all at once
+// Or get all at once (this also enforces `max_animation_ms` against
+// the cumulative timestamp).
 decoder.reset();
 let frames = decoder.decode_all()?;
 ```
@@ -165,19 +210,22 @@ let frames = decoder.decode_all()?;
 ### ICC Profiles & Metadata
 
 ```rust
-use webpx::{embed_icc, get_icc_profile, embed_exif, get_exif};
+use webpx::{embed_icc, get_icc_profile_with_limits, embed_exif, get_exif_with_limits, Limits};
 
 // Embed ICC profile
 let webp_with_icc = embed_icc(&webp_data, &srgb_profile)?;
 
-// Extract ICC profile
-if let Some(icc) = get_icc_profile(&webp_data)? {
+// Extract — apply `max_metadata_bytes` to bound the ICCP/EXIF/XMP
+// chunk size even if the bitstream declares it as huge. Without
+// limits, an internal 256 MiB hard cap still applies.
+let limits = Limits::none().with_max_metadata_bytes(4 * 1024 * 1024);
+if let Some(icc) = get_icc_profile_with_limits(&webp_data, &limits)? {
     println!("ICC profile: {} bytes", icc.len());
 }
 
 // EXIF data
 let webp_with_exif = embed_exif(&webp_data, &exif_bytes)?;
-if let Some(exif) = get_exif(&webp_data)? {
+if let Some(exif) = get_exif_with_limits(&webp_data, &limits)? {
     // Parse EXIF...
 }
 ```
