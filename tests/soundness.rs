@@ -250,3 +250,39 @@ fn streaming_decoder_with_buffer_safe_usage() {
     assert_eq!((decoded_width, decoded_height), (width, height));
     assert_eq!(decoded, rgba);
 }
+
+#[cfg(feature = "streaming")]
+#[test]
+fn streaming_get_partial_respects_external_buffer_minimum_extent() {
+    let width = 1;
+    let height = 2;
+    let rgba = rgba_fixture(width, height);
+    let webp = encode_lossless_rgba(&rgba, width, height);
+
+    // libwebp accepts caller-owned output buffers sized to
+    // `(height - 1) * stride + row_bytes`; the final row does not need
+    // trailing stride padding. The old `get_partial` wrapper exposed
+    // `stride * decoded_rows` bytes instead, so this 1x2 RGBA image with
+    // stride 8 returned a 16-byte slice over a 12-byte buffer. Reading the
+    // last byte of that slice trips ASan as a heap-buffer-overflow.
+    let stride = 8;
+    let row_bytes = width as usize * 4;
+    let expected_partial_len = stride * (height as usize - 1) + row_bytes;
+    let mut output = vec![0xaa; expected_partial_len];
+    let mut decoder = StreamingDecoder::with_buffer(&mut output, stride, ColorMode::Rgba)
+        .expect("streaming decoder with tightly-sized external buffer");
+
+    decoder.append(&webp).expect("streaming decode append");
+    let (partial, partial_width, partial_rows) = decoder
+        .get_partial()
+        .expect("complete decode should be visible");
+
+    assert_eq!((partial_width, partial_rows), (width, height));
+    assert_eq!(partial.len(), expected_partial_len);
+    assert_eq!(partial[partial.len() - 1], rgba[rgba.len() - 1]);
+
+    let (decoded, decoded_width, decoded_height) =
+        decoder.finish().expect("finish on caller-owned buffer");
+    assert_eq!((decoded_width, decoded_height), (width, height));
+    assert_eq!(decoded, rgba);
+}
