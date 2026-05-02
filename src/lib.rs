@@ -154,6 +154,21 @@ mod ffi;
 mod limits;
 mod types;
 
+#[cfg(feature = "zencodec")]
+mod codec;
+
+/// `zencodec` trait implementations.
+///
+/// Mirror of [`zenwebp::zencodec`](https://docs.rs/zenwebp/latest/zenwebp/zencodec/index.html);
+/// use either crate interchangeably under the same call shape.
+#[cfg(feature = "zencodec")]
+pub mod zencodec {
+    pub use crate::codec::{
+        WebpAnimationFrameDecoder, WebpAnimationFrameEncoder, WebpDecodeJob, WebpDecoder,
+        WebpDecoderConfig, WebpEncodeJob, WebpEncoder, WebpEncoderConfig, WebpStreamingDecoder,
+    };
+}
+
 #[cfg(feature = "decode")]
 mod decode;
 

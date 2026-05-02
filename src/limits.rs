@@ -466,6 +466,64 @@ impl core::fmt::Display for LimitExceeded {
 #[cfg(feature = "std")]
 impl std::error::Error for LimitExceeded {}
 
+// Bidirectional conversion between webpx::Limits and zencodec::ResourceLimits.
+//
+// webpx's `Limits` was designed to mirror `ResourceLimits` field-for-field
+// (see the doc comment at the top of this module). The one webpx-only
+// field is `max_metadata_bytes` (zencodec doesn't have a per-chunk metadata
+// cap). webpx-only and zencodec-only fields drop on conversion; everything
+// else round-trips losslessly.
+#[cfg(feature = "zencodec")]
+impl From<Limits> for zencodec::ResourceLimits {
+    fn from(l: Limits) -> Self {
+        let mut r = zencodec::ResourceLimits::none();
+        if let Some(v) = l.max_pixels {
+            r = r.with_max_pixels(v);
+        }
+        if let Some(v) = l.max_total_pixels {
+            r = r.with_max_total_pixels(v);
+        }
+        if let Some(v) = l.max_width {
+            r = r.with_max_width(v);
+        }
+        if let Some(v) = l.max_height {
+            r = r.with_max_height(v);
+        }
+        if let Some(v) = l.max_input_bytes {
+            r = r.with_max_input_bytes(v);
+        }
+        if let Some(v) = l.max_frames {
+            r = r.with_max_frames(v);
+        }
+        if let Some(v) = l.max_animation_ms {
+            r = r.with_max_animation_ms(v);
+        }
+        if let Some(v) = l.max_output_bytes {
+            r = r.with_max_output(v);
+        }
+        // max_metadata_bytes has no zencodec counterpart — webpx still
+        // enforces it internally on its `mux::*_with_limits` paths.
+        r
+    }
+}
+
+#[cfg(feature = "zencodec")]
+impl From<zencodec::ResourceLimits> for Limits {
+    fn from(r: zencodec::ResourceLimits) -> Self {
+        let mut l = Limits::none();
+        l.max_pixels = r.max_pixels;
+        l.max_total_pixels = r.max_total_pixels;
+        l.max_width = r.max_width;
+        l.max_height = r.max_height;
+        l.max_input_bytes = r.max_input_bytes;
+        l.max_frames = r.max_frames;
+        l.max_animation_ms = r.max_animation_ms;
+        l.max_output_bytes = r.max_output_bytes;
+        // max_metadata_bytes stays at None; zencodec has no source field.
+        l
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
