@@ -59,6 +59,10 @@ jobs:
           - decode_animation
           - mux_metadata
           - encode_roundtrip
+          - stride_extremes
+          - dim_extremes
+          - limits_boundaries
+          - yuv_planes
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly

@@ -156,20 +156,15 @@ impl<'a> StreamingDecoder<'a> {
         // cast for libwebp's `output_stride` parameter. libwebp's row
         // pointer arithmetic uses the signed value, so a wrapped-negative
         // stride would write to addresses *before* `output_buffer`.
-        if stride > i32::MAX as usize {
-            return Err(at!(Error::InvalidInput(alloc::format!(
-                "stride too large for libwebp i32 parameter: {} (max {})",
-                stride,
-                i32::MAX
-            ))));
-        }
+        let stride_i32 =
+            crate::ffi::validate::stride_fits_i32(stride, "StreamingDecoder::with_buffer")?;
 
         let decoder = unsafe {
             libwebp_sys::WebPINewRGB(
                 csp_mode,
                 output_buffer.as_mut_ptr(),
                 output_buffer.len(),
-                stride as i32,
+                stride_i32,
             )
         };
 

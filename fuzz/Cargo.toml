@@ -78,3 +78,31 @@ path = "fuzz_targets/image_info.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "stride_extremes"
+path = "fuzz_targets/stride_extremes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dim_extremes"
+path = "fuzz_targets/dim_extremes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "limits_boundaries"
+path = "fuzz_targets/limits_boundaries.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "yuv_planes"
+path = "fuzz_targets/yuv_planes.rs"
+test = false
+doc = false
+bench = false

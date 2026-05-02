@@ -108,13 +108,14 @@ fuzz_target!(|input: Input<'_>| {
         if let Ok(mut anim) = AnimationEncoder::new(w, h) {
             anim.set_quality(quality);
             anim.set_lossless(input.lossless);
-            if anim.add_frame_rgba(frame0, 0).is_ok() && anim.add_frame_rgba(frame1, 100).is_ok() {
-                if let Ok(out) = anim.finish(200) {
-                    // Re-decode as static (first frame) and as animation.
-                    let _ = webpx::decode_rgba(&out);
-                    if let Ok(mut dec) = webpx::AnimationDecoder::new(&out) {
-                        while let Ok(Some(_)) = dec.next_frame() {}
-                    }
+            if anim.add_frame_rgba(frame0, 0).is_ok()
+                && anim.add_frame_rgba(frame1, 100).is_ok()
+                && let Ok(out) = anim.finish(200)
+            {
+                // Re-decode as static (first frame) and as animation.
+                let _ = webpx::decode_rgba(&out);
+                if let Ok(mut dec) = webpx::AnimationDecoder::new(&out) {
+                    while let Ok(Some(_)) = dec.next_frame() {}
                 }
             }
         }

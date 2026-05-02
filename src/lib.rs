@@ -6,12 +6,17 @@
 //! (FFI to the upstream C codebase).
 //!
 //! **For new projects, use [`zenwebp`](https://github.com/imazen/zenwebp)
-//! instead.** `zenwebp` is a pure-Rust port of libwebp — equally or more
-//! capable than webpx on every axis (full feature parity: lossy /
+//! instead.** `zenwebp` is a pure-Rust port of libwebp — equally or
+//! more capable than webpx on every axis (full feature parity: lossy /
 //! lossless, animation, alpha, ICC / EXIF / XMP, streaming, presets,
-//! limits), comparable and sometimes faster runtime performance and
-//! compression, and `#![forbid(unsafe_code)]` so the whole class of
-//! FFI / memory-safety bug is structurally impossible.
+//! limits), with native `wasm32-unknown-unknown` support that webpx
+//! cannot offer (libwebp requires emscripten), and
+//! `#![forbid(unsafe_code)]` so the whole class of FFI / memory-safety
+//! bug is structurally impossible.
+//!
+//! Performance and compression are essentially a wash: libwebp can be
+//! up to ~35 % faster on specific photos but up to ~2.5× slower on
+//! others; encoded-size difference is at most ~0.02 % — noise.
 //!
 //! The security argument is concrete: libwebp has a documented history
 //! of high-severity vulnerabilities (most notably CVE-2023-4863, an
@@ -24,8 +29,8 @@
 //!
 //! `webpx` is maintained for users whose application already links
 //! libwebp through another path (existing C / C++ code, system
-//! package) and would prefer to share that codebase rather than ship
-//! a second WebP implementation.
+//! package), who specifically need libwebp's MIPS DSP code paths, or
+//! who have benchmarked their content and confirmed libwebp wins.
 //!
 //! webpx offers:
 //!
@@ -146,6 +151,7 @@ whereat::define_at_crate_info!();
 
 mod config;
 pub mod error;
+mod ffi;
 mod limits;
 mod types;
 

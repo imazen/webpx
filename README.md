@@ -13,8 +13,13 @@
 For any new project, reach for **[`zenwebp`](https://github.com/imazen/zenwebp)**. It is equally or more capable than `webpx` on every axis that matters:
 
 - **Full feature parity** with libwebp: lossy and lossless encode and decode, animation, alpha, ICC / EXIF / XMP metadata, streaming, content presets, resource limits.
-- **Comparable runtime performance and compression ratio**, sometimes faster on the codecs we've benchmarked.
-- **`#![forbid(unsafe_code)]`** — pure Rust top to bottom. Zero FFI surface, zero `unsafe` blocks, no C compiler required.
+- **Native `wasm32-unknown-unknown` support** — pure Rust, no C compiler, no emscripten. `webpx` requires emscripten because libwebp is C.
+- **`#![forbid(unsafe_code)]`** — pure Rust top to bottom. Zero FFI surface, zero `unsafe` blocks.
+
+Performance and compression are essentially a wash:
+
+- libwebp can be **up to 35 % faster on specific photos**, but it can also be **up to 2.5× slower** on others. Net wash unless you're tuned to specific content types.
+- Encoded-size difference is at most **~0.02 %** — noise, not meaningful.
 
 The security argument is concrete, not theoretical:
 
@@ -23,13 +28,14 @@ The security argument is concrete, not theoretical:
 
 `zenwebp`'s `#![forbid(unsafe_code)]` makes that whole class of bug structurally impossible. Use it.
 
-`webpx` is maintained for users whose application already links libwebp through another path (existing C / C++ code, system package) and would prefer to share that codebase rather than ship a second WebP implementation. If that's not you, switch.
+`webpx` is maintained for users whose application already links libwebp through another path (existing C / C++ code, system package) and would prefer to share that codebase, or who specifically need libwebp's MIPS DSP code paths. If that's not you, switch.
 
 ## Why use webpx anyway?
 
 - **Ergonomic Rust API** — Builder patterns, strong types, comprehensive error handling, `Limits` policy for untrusted-input decoding
 - **Shares an existing libwebp link** — If your application already links libwebp via another path (C / C++ code, system package), `webpx` reuses that codebase rather than pulling in a second WebP implementation
-- **`no_std` + WebAssembly (emscripten)** — Works with `no_std` + `alloc`, builds for `wasm32-unknown-emscripten`. For pure-Rust WASM (`wasm32-unknown-unknown`), use `zenwebp`.
+- **MIPS DSP** — libwebp ships hand-written MIPS DSP-R2 / DSP-ASE assembly paths. If you target that hardware, `webpx` inherits them; `zenwebp` does not.
+- **Up to 35 % faster on specific photos** — libwebp's hand-tuned VP8 path beats pure-Rust on some content. Note that it can also be up to 2.5× slower on other content; benchmark your actual workload.
 
 ## Quick Start
 
@@ -357,9 +363,8 @@ let webp = Encoder::new_rgba(&data, w, h)
 | macOS x64/ARM64 | ✅ Full support |
 | Windows x64/ARM64 | ✅ Full support |
 | WebAssembly (emscripten) | ✅ Supported |
-| WebAssembly (wasm32-unknown-unknown) | ❌ Not supported* |
-
-*libwebp requires C compilation. For pure-Rust WASM with full lossy + lossless support, use [`zenwebp`](https://github.com/imazen/zenwebp).
+| WebAssembly (wasm32-unknown-unknown) | ❌ Not supported (use [`zenwebp`](https://github.com/imazen/zenwebp), which is native to this target) |
+| MIPS / MIPS DSP | ✅ Inherits libwebp's hand-tuned DSP-R2 paths |
 
 ### Building for WebAssembly
 

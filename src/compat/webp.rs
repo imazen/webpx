@@ -20,13 +20,15 @@
 //! - **Migrate to [`zenwebp`](https://github.com/imazen/zenwebp)** — a
 //!   pure-Rust WebP codec built with `#![forbid(unsafe_code)]`. Equally
 //!   or more capable than `webpx` (full feature parity with libwebp,
-//!   comparable and sometimes faster runtime performance), and with no
+//!   native `wasm32-unknown-unknown` support, performance and
+//!   compression within noise of libwebp on average), and with no
 //!   exposure to libwebp's CVE pipeline (most recently CVE-2023-4863,
 //!   the actively-exploited 0-click heap overflow) or the FFI
 //!   soundness bugs every libwebp wrapper — including this one — has
 //!   shipped. Recommended.
-//! - Or use the main `webpx` API directly if you need the libwebp
-//!   codebase specifically:
+//! - Or use the main `webpx` API directly if you specifically need
+//!   libwebp (existing link in your stack, MIPS DSP code paths, or
+//!   benchmark-confirmed wins on your content):
 //!   - `Encoder::new_rgba(...).quality(q).encode(Unstoppable)` instead of
 //!     [`Encoder::new`]
 //!   - `Decoder::new(data)?.config(DecoderConfig::new().limits(...)).decode_rgba()`

@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-05-02
+
+### Testing
+
+- Four new fuzz targets focused on numeric input boundaries:
+  `stride_extremes` (every encoder / decoder / streaming entry point
+  with strides drawn from `i32::MAX ± N`, `u32::MAX`, and arbitrary),
+  `dim_extremes` (width / height at libwebp's 16383 cap and beyond),
+  `limits_boundaries` (`Limits` values at u32 / u64 boundaries with
+  monotonicity probe), and `yuv_planes` (Y/U/V/A plane sizes /
+  strides for `Encoder::new_yuv`). Wired into the cron fuzz matrix.
+
+### Changed (internal — no public API change)
+
+- Introduced an internal `crate::ffi` module with RAII wrappers for
+  every libwebp resource that webpx owns. `Demux<'a>` and
+  `ChunkIter<'_>` (used by the mux metadata path), `Picture` (used by
+  every encode entry point), and `MemWriter` (the encode output
+  buffer) auto-release on drop, replacing the bespoke
+  `WebPPictureFree` / `WebPMemoryWriterClear` /
+  `WebPDemuxReleaseChunkIterator` calls that used to be duplicated at
+  every error branch — six sites in `encode.rs` alone, two in `mux.rs`.
+  The audit surface for resource cleanup shrinks to one wrapper per
+  resource. The wrappers are `pub(crate)`; this is purely an internal
+  refactor and the public API is unchanged.
+- Stride bounds checks for libwebp's `i32` parameters now live in one
+  place: `crate::ffi::validate::stride_fits_i32`. Replaces five
+  hand-rolled `if stride > i32::MAX` checks in `encode.rs` and
+  `streaming.rs`.
+
+### Documentation
+
+- README, lib-level rustdoc, and the deprecation notes on
+  `compat::webp` and `compat::webp_animation` now characterize
+  webpx-vs-zenwebp performance honestly: libwebp can be up to ~35 %
+  faster on specific photos but up to ~2.5× slower on others, and
+  encoded-size differences are at most ~0.02 % (noise). Replaces the
+  prior "comparable and sometimes faster" framing.
+- Added native `wasm32-unknown-unknown` support to zenwebp's pros
+  (webpx requires emscripten because libwebp is C).
+- Added libwebp's MIPS DSP-R2 / DSP-ASE assembly paths to webpx's
+  narrow set of remaining advantages.
+
 ## [0.2.2] - 2026-05-01
 
 ### Fixed

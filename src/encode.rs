@@ -15,6 +15,8 @@
 
 use crate::config::{EncodeStats, EncoderConfig, Preset};
 use crate::error::{EncodingError, Error, Result};
+use crate::ffi::mem_writer::MemWriter;
+use crate::ffi::picture::Picture;
 use crate::types::{EncodePixel, PixelLayout, YuvPlanesRef};
 use alloc::vec::Vec;
 use enough::Stop;
@@ -55,63 +57,54 @@ pub(crate) fn encode_with_config_stats(
 
     let webp_config = config.to_libwebp()?;
 
-    // Initialize picture
-    let mut picture = libwebp_sys::WebPPicture::new()
-        .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
-
-    picture.width = width as i32;
-    picture.height = height as i32;
-    picture.use_argb = 1;
+    // RAII: Picture::Drop runs WebPPictureFree, MemWriter::Drop runs
+    // WebPMemoryWriterClear — every error path below releases libwebp's
+    // internal allocations without an explicit cleanup call.
+    let mut picture = Picture::new()?;
+    picture.inner_mut().width = width as i32;
+    picture.inner_mut().height = height as i32;
+    picture.inner_mut().use_argb = 1;
 
     // Initialize stats
     let mut stats = core::mem::MaybeUninit::<libwebp_sys::WebPAuxStats>::zeroed();
-    picture.stats = stats.as_mut_ptr();
+    picture.inner_mut().stats = stats.as_mut_ptr();
 
     // Import pixel data
     let import_ok = if bpp == 4 {
         unsafe {
-            libwebp_sys::WebPPictureImportRGBA(&mut picture, data.as_ptr(), (width * 4) as i32)
+            libwebp_sys::WebPPictureImportRGBA(
+                picture.as_mut_ptr(),
+                data.as_ptr(),
+                (width * 4) as i32,
+            )
         }
     } else {
         unsafe {
-            libwebp_sys::WebPPictureImportRGB(&mut picture, data.as_ptr(), (width * 3) as i32)
+            libwebp_sys::WebPPictureImportRGB(
+                picture.as_mut_ptr(),
+                data.as_ptr(),
+                (width * 3) as i32,
+            )
         }
     };
 
     if import_ok == 0 {
-        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
         return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
     }
 
-    // Setup memory writer
-    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
-    unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
-    let mut writer = unsafe { writer.assume_init() };
+    let mut writer = MemWriter::new();
+    picture.inner_mut().writer = Some(libwebp_sys::WebPMemoryWrite);
+    picture.inner_mut().custom_ptr = writer.as_mut_ptr() as *mut _;
 
-    picture.writer = Some(libwebp_sys::WebPMemoryWrite);
-    picture.custom_ptr = &mut writer as *mut _ as *mut _;
-
-    // Encode
-    let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
+    let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
 
     let result = if ok == 0 {
-        let error = EncodingError::from(picture.error_code as i32);
-        unsafe {
-            libwebp_sys::WebPPictureFree(&mut picture);
-            libwebp_sys::WebPMemoryWriterClear(&mut writer);
-        }
+        let error = EncodingError::from(picture.inner_mut().error_code as i32);
         Err(at!(Error::EncodeFailed(error)))
     } else {
-        let webp_data = unsafe {
-            let slice = core::slice::from_raw_parts(writer.mem, writer.size);
-            slice.to_vec()
-        };
+        let webp_data = writer.to_vec();
         let stats_val = unsafe { stats.assume_init() };
         let encode_stats = EncodeStats::from_libwebp(&stats_val);
-        unsafe {
-            libwebp_sys::WebPPictureFree(&mut picture);
-            libwebp_sys::WebPMemoryWriterClear(&mut writer);
-        }
         Ok((webp_data, encode_stats))
     };
 
@@ -150,56 +143,51 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
 
     let webp_config = config.to_libwebp()?;
 
-    // Initialize picture
-    let mut picture = libwebp_sys::WebPPicture::new()
-        .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
-
-    picture.width = width as i32;
-    picture.height = height as i32;
-    picture.use_argb = 1;
+    // RAII: see `encode_with_config_stats` for the cleanup discipline.
+    let mut picture = Picture::new()?;
+    picture.inner_mut().width = width as i32;
+    picture.inner_mut().height = height as i32;
+    picture.inner_mut().use_argb = 1;
 
     // Import pixel data
     let import_ok = if bpp == 4 {
         unsafe {
-            libwebp_sys::WebPPictureImportRGBA(&mut picture, data.as_ptr(), (width * 4) as i32)
+            libwebp_sys::WebPPictureImportRGBA(
+                picture.as_mut_ptr(),
+                data.as_ptr(),
+                (width * 4) as i32,
+            )
         }
     } else {
         unsafe {
-            libwebp_sys::WebPPictureImportRGB(&mut picture, data.as_ptr(), (width * 3) as i32)
+            libwebp_sys::WebPPictureImportRGB(
+                picture.as_mut_ptr(),
+                data.as_ptr(),
+                (width * 3) as i32,
+            )
         }
     };
 
     if import_ok == 0 {
-        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
         return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
     }
 
-    // Setup memory writer
-    let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
-    unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
-    let mut writer = unsafe { writer.assume_init() };
-
-    picture.writer = Some(libwebp_sys::WebPMemoryWrite);
-    picture.custom_ptr = &mut writer as *mut _ as *mut _;
+    let mut writer = MemWriter::new();
+    picture.inner_mut().writer = Some(libwebp_sys::WebPMemoryWrite);
+    picture.inner_mut().custom_ptr = writer.as_mut_ptr() as *mut _;
 
     // Setup progress hook for cancellation
     let ctx = StopContext { stop };
-    picture.progress_hook = Some(progress_hook::<S>);
-    picture.user_data = &ctx as *const _ as *mut _;
+    picture.inner_mut().progress_hook = Some(progress_hook::<S>);
+    picture.inner_mut().user_data = &ctx as *const _ as *mut _;
 
-    // Encode
-    let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
+    let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
 
     let result = if ok == 0 {
-        let error_code = picture.error_code as i32;
-        unsafe {
-            libwebp_sys::WebPPictureFree(&mut picture);
-            libwebp_sys::WebPMemoryWriterClear(&mut writer);
-        }
+        let error_code = picture.inner_mut().error_code as i32;
         // Check if this was a user abort (cancellation)
         if error_code == 10 {
             // VP8_ENC_ERROR_USER_ABORT
-            // Get the actual stop reason
             if let Err(reason) = stop.check() {
                 return Err(at!(Error::Stopped(reason)));
             }
@@ -209,15 +197,7 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
             Err(at!(Error::EncodeFailed(EncodingError::from(error_code))))
         }
     } else {
-        let webp_data = unsafe {
-            let slice = core::slice::from_raw_parts(writer.mem, writer.size);
-            slice.to_vec()
-        };
-        unsafe {
-            libwebp_sys::WebPPictureFree(&mut picture);
-            libwebp_sys::WebPMemoryWriterClear(&mut writer);
-        }
-        Ok(webp_data)
+        Ok(writer.to_vec())
     };
 
     // Embed metadata if present
@@ -805,21 +785,20 @@ impl<'a> Encoder<'a> {
             webp_config.exact = 1;
         }
 
-        // Initialize picture
-        let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
-
-        picture.width = self.width as i32;
-        picture.height = self.height as i32;
+        // RAII picture: WebPPictureFree on drop, including the YUV
+        // validation early return below.
+        let mut picture = Picture::new()?;
+        picture.inner_mut().width = self.width as i32;
+        picture.inner_mut().height = self.height as i32;
 
         // Import pixel data
         let import_ok = match &self.data {
             EncoderInput::Rgba { data, stride_bytes } => {
                 validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
-                picture.use_argb = 1;
+                picture.inner_mut().use_argb = 1;
                 unsafe {
                     libwebp_sys::WebPPictureImportRGBA(
-                        &mut picture,
+                        picture.as_mut_ptr(),
                         data.as_ptr(),
                         *stride_bytes as i32,
                     )
@@ -827,10 +806,10 @@ impl<'a> Encoder<'a> {
             }
             EncoderInput::Bgra { data, stride_bytes } => {
                 validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
-                picture.use_argb = 1;
+                picture.inner_mut().use_argb = 1;
                 unsafe {
                     libwebp_sys::WebPPictureImportBGRA(
-                        &mut picture,
+                        picture.as_mut_ptr(),
                         data.as_ptr(),
                         *stride_bytes as i32,
                     )
@@ -838,10 +817,10 @@ impl<'a> Encoder<'a> {
             }
             EncoderInput::Rgb { data, stride_bytes } => {
                 validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 3)?;
-                picture.use_argb = 1;
+                picture.inner_mut().use_argb = 1;
                 unsafe {
                     libwebp_sys::WebPPictureImportRGB(
-                        &mut picture,
+                        picture.as_mut_ptr(),
                         data.as_ptr(),
                         *stride_bytes as i32,
                     )
@@ -849,10 +828,10 @@ impl<'a> Encoder<'a> {
             }
             EncoderInput::Bgr { data, stride_bytes } => {
                 validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 3)?;
-                picture.use_argb = 1;
+                picture.inner_mut().use_argb = 1;
                 unsafe {
                     libwebp_sys::WebPPictureImportBGR(
-                        &mut picture,
+                        picture.as_mut_ptr(),
                         data.as_ptr(),
                         *stride_bytes as i32,
                     )
@@ -882,71 +861,57 @@ impl<'a> Encoder<'a> {
                 }
                 // Reject stride values that would wrap to a negative i32
                 // when cast for libwebp's i32 stride parameter.
-                if *stride_pixels > i32::MAX as u32 {
-                    return Err(at!(Error::InvalidInput(alloc::format!(
-                        "ARGB stride too large for libwebp i32 parameter: {} (max {})",
-                        stride_pixels,
-                        i32::MAX
-                    ))));
-                }
-                picture.use_argb = 1;
-                picture.argb = data.as_ptr() as *mut u32;
-                picture.argb_stride = *stride_pixels as i32;
+                crate::ffi::validate::stride_fits_i32(
+                    *stride_pixels as usize,
+                    "Encoder::new_argb_stride",
+                )?;
+                let pic = picture.inner_mut();
+                pic.use_argb = 1;
+                pic.argb = data.as_ptr() as *mut u32;
+                pic.argb_stride = *stride_pixels as i32;
                 1 // Success - no import function needed (zero-copy)
             }
             EncoderInput::Yuv(planes) => {
-                if let Err(e) = validate_yuv_planes(planes) {
-                    unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-                    return Err(e);
-                }
-                picture.use_argb = 0;
-                picture.colorspace = if planes.a.is_some() {
+                validate_yuv_planes(planes)?;
+                let pic = picture.inner_mut();
+                pic.use_argb = 0;
+                pic.colorspace = if planes.a.is_some() {
                     libwebp_sys::WebPEncCSP::WEBP_YUV420A
                 } else {
                     libwebp_sys::WebPEncCSP::WEBP_YUV420
                 };
-                picture.y = planes.y.as_ptr() as *mut _;
-                picture.u = planes.u.as_ptr() as *mut _;
-                picture.v = planes.v.as_ptr() as *mut _;
-                picture.y_stride = planes.y_stride as i32;
+                pic.y = planes.y.as_ptr() as *mut _;
+                pic.u = planes.u.as_ptr() as *mut _;
+                pic.v = planes.v.as_ptr() as *mut _;
+                pic.y_stride = planes.y_stride as i32;
                 // u_stride == v_stride is enforced by validate_yuv_planes;
                 // libwebp uses a single uv_stride field for both planes.
-                picture.uv_stride = planes.u_stride as i32;
+                pic.uv_stride = planes.u_stride as i32;
                 if let Some(a) = &planes.a {
-                    picture.a = a.as_ptr() as *mut _;
-                    picture.a_stride = planes.a_stride as i32;
+                    pic.a = a.as_ptr() as *mut _;
+                    pic.a_stride = planes.a_stride as i32;
                 }
                 1 // YUV doesn't use import functions
             }
         };
 
         if import_ok == 0 {
-            unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
             return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
         }
 
-        // Setup memory writer
-        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
-        unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
-        let mut writer = unsafe { writer.assume_init() };
-
-        picture.writer = Some(libwebp_sys::WebPMemoryWrite);
-        picture.custom_ptr = &mut writer as *mut _ as *mut _;
+        let mut writer = MemWriter::new();
+        picture.inner_mut().writer = Some(libwebp_sys::WebPMemoryWrite);
+        picture.inner_mut().custom_ptr = writer.as_mut_ptr() as *mut _;
 
         // Setup progress hook for cancellation
         let ctx = StopContext { stop: &stop };
-        picture.progress_hook = Some(progress_hook::<S>);
-        picture.user_data = &ctx as *const _ as *mut _;
+        picture.inner_mut().progress_hook = Some(progress_hook::<S>);
+        picture.inner_mut().user_data = &ctx as *const _ as *mut _;
 
-        // Encode
-        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
+        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
 
         if ok == 0 {
-            let error_code = picture.error_code as i32;
-            unsafe {
-                libwebp_sys::WebPPictureFree(&mut picture);
-                libwebp_sys::WebPMemoryWriterClear(&mut writer);
-            }
+            let error_code = picture.inner_mut().error_code as i32;
             // Check if this was a user abort (cancellation)
             if error_code == 10 {
                 // VP8_ENC_ERROR_USER_ABORT
@@ -958,14 +923,7 @@ impl<'a> Encoder<'a> {
                 Err(at!(Error::EncodeFailed(EncodingError::from(error_code))))
             }
         } else {
-            let webp_data = unsafe {
-                let slice = core::slice::from_raw_parts(writer.mem, writer.size);
-                slice.to_vec()
-            };
-            unsafe {
-                libwebp_sys::WebPPictureFree(&mut picture);
-                libwebp_sys::WebPMemoryWriterClear(&mut writer);
-            }
+            let webp_data = writer.to_vec();
 
             #[cfg(feature = "icc")]
             if let Some(icc) = self.icc_profile {
@@ -1012,43 +970,32 @@ impl<'a> Encoder<'a> {
             webp_config.exact = 1;
         }
 
-        // Initialize picture
-        let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
+        // RAII picture + writer. Picture::Drop runs WebPPictureFree on
+        // every error path. MemWriter::into_webp_data transfers
+        // ownership of the encoded buffer to a WebPData (which frees
+        // via WebPFree on drop) and suppresses our destructor.
+        let mut picture = Picture::new()?;
+        picture.inner_mut().width = self.width as i32;
+        picture.inner_mut().height = self.height as i32;
 
-        picture.width = self.width as i32;
-        picture.height = self.height as i32;
-
-        // Import pixel data (same as encode())
-        let import_ok = self.import_pixels(&mut picture)?;
-
+        let import_ok = self.import_pixels(picture.inner_mut())?;
         if import_ok == 0 {
-            unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
             return Err(at!(Error::EncodeFailed(EncodingError::OutOfMemory)));
         }
 
-        // Setup memory writer
-        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
-        unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
-        let mut writer = unsafe { writer.assume_init() };
-
-        picture.writer = Some(libwebp_sys::WebPMemoryWrite);
-        picture.custom_ptr = &mut writer as *mut _ as *mut _;
+        let mut writer = MemWriter::new();
+        picture.inner_mut().writer = Some(libwebp_sys::WebPMemoryWrite);
+        picture.inner_mut().custom_ptr = writer.as_mut_ptr() as *mut _;
 
         // Setup progress hook for cancellation
         let ctx = StopContext { stop: &stop };
-        picture.progress_hook = Some(progress_hook::<S>);
-        picture.user_data = &ctx as *const _ as *mut _;
+        picture.inner_mut().progress_hook = Some(progress_hook::<S>);
+        picture.inner_mut().user_data = &ctx as *const _ as *mut _;
 
-        // Encode
-        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
+        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
 
         if ok == 0 {
-            let error_code = picture.error_code as i32;
-            unsafe {
-                libwebp_sys::WebPPictureFree(&mut picture);
-                libwebp_sys::WebPMemoryWriterClear(&mut writer);
-            }
+            let error_code = picture.inner_mut().error_code as i32;
             if error_code == 10 {
                 if let Err(reason) = stop.check() {
                     return Err(at!(Error::Stopped(reason)));
@@ -1058,26 +1005,18 @@ impl<'a> Encoder<'a> {
             return Err(at!(Error::EncodeFailed(EncodingError::from(error_code))));
         }
 
-        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
-
-        // Transfer ownership to WebPData (don't clear the writer!)
-        let webp_data = unsafe { crate::WebPData::from_raw(writer.mem, writer.size) };
-
         // Note: ICC profile embedding is not supported with encode_owned()
         // because it requires reallocating the buffer. Use encode() instead.
         #[cfg(feature = "icc")]
         if self.icc_profile.is_some() {
-            // Drop webp_data (frees libwebp memory), then use regular encode path
-            drop(webp_data);
-            // Re-encode through the Vec path which handles ICC
-            // This is inefficient but ICC embedding is rare
+            // writer drops here (frees libwebp memory via Clear)
             return Err(at!(Error::InvalidConfig(
                 "ICC profile embedding not supported with encode_owned(), use encode() instead"
                     .into()
             )));
         }
 
-        Ok(webp_data)
+        Ok(writer.into_webp_data())
     }
 
     /// Encode to WebP, appending to an existing Vec.
@@ -1198,13 +1137,10 @@ impl<'a> Encoder<'a> {
                 }
                 // Reject stride values that would wrap to a negative i32
                 // when cast for libwebp's i32 stride parameter.
-                if *stride_pixels > i32::MAX as u32 {
-                    return Err(at!(Error::InvalidInput(alloc::format!(
-                        "ARGB stride too large for libwebp i32 parameter: {} (max {})",
-                        stride_pixels,
-                        i32::MAX
-                    ))));
-                }
+                crate::ffi::validate::stride_fits_i32(
+                    *stride_pixels as usize,
+                    "Encoder::new_argb_stride",
+                )?;
                 picture.use_argb = 1;
                 picture.argb = data.as_ptr() as *mut u32;
                 picture.argb_stride = *stride_pixels as i32;
@@ -1318,21 +1254,8 @@ pub(crate) fn validate_yuv_planes(planes: &YuvPlanesRef<'_>) -> Result<()> {
     // memory. The plane-length checks above don't catch this — a caller
     // can construct an oversized `&[u8]` (>=2 GB on 64-bit) that
     // satisfies `slice.len() >= stride * rows` for `stride >= 2^31`.
-    let i32_max = i32::MAX as usize;
-    if planes.y_stride > i32_max {
-        return Err(at!(Error::InvalidInput(alloc::format!(
-            "Y stride too large for libwebp i32 parameter: {} (max {})",
-            planes.y_stride,
-            i32_max
-        ))));
-    }
-    if planes.u_stride > i32_max {
-        return Err(at!(Error::InvalidInput(alloc::format!(
-            "UV stride too large for libwebp i32 parameter: {} (max {})",
-            planes.u_stride,
-            i32_max
-        ))));
-    }
+    crate::ffi::validate::stride_fits_i32(planes.y_stride, "YuvPlanes::y_stride")?;
+    crate::ffi::validate::stride_fits_i32(planes.u_stride, "YuvPlanes::uv_stride")?;
 
     // Plane-length floors. The last row only needs `width` (chroma_width)
     // samples, but libwebp treats the slice as a contiguous stride×rows
@@ -1376,13 +1299,7 @@ pub(crate) fn validate_yuv_planes(planes: &YuvPlanesRef<'_>) -> Result<()> {
                 width
             ))));
         }
-        if planes.a_stride > i32_max {
-            return Err(at!(Error::InvalidInput(alloc::format!(
-                "A stride too large for libwebp i32 parameter: {} (max {})",
-                planes.a_stride,
-                i32_max
-            ))));
-        }
+        crate::ffi::validate::stride_fits_i32(planes.a_stride, "YuvPlanes::a_stride")?;
         let a_min = planes.a_stride.saturating_mul(height);
         if a.len() < a_min {
             return Err(at!(Error::InvalidInput(alloc::format!(
@@ -1413,13 +1330,7 @@ pub(crate) fn validate_buffer_size_stride(
     // A `u32` value >= 2^31 wraps to a negative `i32`; libwebp's pointer
     // arithmetic then walks backwards through process memory. Reject
     // before the cast.
-    if stride_bytes > i32::MAX as u32 {
-        return Err(at!(Error::InvalidInput(alloc::format!(
-            "stride too large for libwebp i32 stride parameter: {} (max {})",
-            stride_bytes,
-            i32::MAX
-        ))));
-    }
+    crate::ffi::validate::stride_fits_i32(stride_bytes as usize, "validate_buffer_size_stride")?;
 
     let min_stride = (width as usize).saturating_mul(bpp as usize);
     if (stride_bytes as usize) < min_stride {
