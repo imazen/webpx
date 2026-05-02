@@ -12,9 +12,21 @@
 //! decoding, so callers can't apply `max_total_pixels` /
 //! `max_frame_count` / `max_input_bytes` policies through this API.
 //! [`Decoder::into_iter`] also silently produces an empty iterator on
-//! construction failure instead of returning the error. New code
-//! should use [`crate::AnimationDecoder::with_options_limits`] /
-//! [`crate::AnimationEncoder`] directly.
+//! construction failure instead of returning the error.
+//!
+//! New code should:
+//!
+//! - **Migrate to [`zenwebp`](https://github.com/imazen/zenwebp)** — a
+//!   pure-Rust WebP codec built with `#![forbid(unsafe_code)]`. Equally
+//!   or more capable than `webpx` (full feature parity with libwebp,
+//!   comparable and sometimes faster runtime performance), and with no
+//!   exposure to libwebp's CVE pipeline (most recently CVE-2023-4863,
+//!   the actively-exploited 0-click heap overflow) or the FFI
+//!   soundness bugs every libwebp wrapper — including this one — has
+//!   shipped. Recommended.
+//! - Or use [`crate::AnimationDecoder::with_options_limits`] /
+//!   [`crate::AnimationEncoder`] directly if you need the libwebp
+//!   codebase specifically.
 //!
 //! This module will be retained for at least one minor release; all
 //! public items carry `#[deprecated]` attributes that surface as
@@ -278,14 +290,14 @@ pub struct DecoderOptions {
     since = "0.2.1",
     note = "use the main webpx animation API; see module docs"
 )]
-#[cfg(feature = "animation")]
+#[cfg(all(feature = "animation", feature = "encode"))]
 pub struct Encoder {
     inner: crate::AnimationEncoder,
     previous_timestamp: i32,
     frame_count: u32,
 }
 
-#[cfg(feature = "animation")]
+#[cfg(all(feature = "animation", feature = "encode"))]
 impl Encoder {
     /// Create a new encoder with dimensions.
     pub fn new(dimensions: (u32, u32)) -> Result<Self, Error> {
@@ -360,13 +372,13 @@ impl Encoder {
     since = "0.2.1",
     note = "use the main webpx animation API; see module docs"
 )]
-#[cfg(feature = "animation")]
+#[cfg(all(feature = "animation", feature = "decode"))]
 pub struct Decoder<'a> {
     data: &'a [u8],
     options: DecoderOptions,
 }
 
-#[cfg(feature = "animation")]
+#[cfg(all(feature = "animation", feature = "decode"))]
 impl<'a> Decoder<'a> {
     /// Create a new decoder from WebP data.
     pub fn new(data: &'a [u8]) -> Result<Self, Error> {
@@ -406,7 +418,7 @@ impl<'a> Decoder<'a> {
     }
 }
 
-#[cfg(feature = "animation")]
+#[cfg(all(feature = "animation", feature = "decode"))]
 impl<'a> IntoIterator for Decoder<'a> {
     type Item = Frame;
     type IntoIter = DecoderIterator;
@@ -431,13 +443,13 @@ impl<'a> IntoIterator for Decoder<'a> {
     since = "0.2.1",
     note = "use the main webpx animation API; see module docs"
 )]
-#[cfg(feature = "animation")]
+#[cfg(all(feature = "animation", feature = "decode"))]
 pub struct DecoderIterator {
     inner: Option<crate::AnimationDecoder>,
     color_mode: ColorMode,
 }
 
-#[cfg(feature = "animation")]
+#[cfg(all(feature = "animation", feature = "decode"))]
 impl Iterator for DecoderIterator {
     type Item = Frame;
 
@@ -458,13 +470,17 @@ impl Iterator for DecoderIterator {
 /// Prelude for common imports.
 pub mod prelude {
     pub use super::ColorMode;
+    #[cfg(all(feature = "animation", feature = "decode"))]
+    pub use super::Decoder;
+    #[cfg(all(feature = "animation", feature = "encode"))]
+    pub use super::Encoder;
     #[cfg(feature = "animation")]
-    pub use super::{Decoder, DecoderOptions, Encoder, EncoderOptions};
+    pub use super::{DecoderOptions, EncoderOptions};
     #[cfg(feature = "animation")]
     pub use super::{EncodingConfig, EncodingType, LossyEncodingConfig};
 }
 
-#[cfg(all(test, feature = "animation"))]
+#[cfg(all(test, feature = "animation", feature = "decode", feature = "encode"))]
 mod tests {
     use super::*;
 

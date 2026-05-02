@@ -1,4 +1,10 @@
 //! Integration tests for webpx crate.
+//!
+//! Most tests here exercise roundtrip behavior, so the whole file is
+//! gated on both `decode` and `encode`. Sub-modules already gate
+//! themselves on optional features (`icc`, `streaming`, `animation`).
+
+#![cfg(all(feature = "decode", feature = "encode"))]
 
 use webpx::*;
 

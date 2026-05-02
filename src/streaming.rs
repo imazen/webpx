@@ -51,6 +51,7 @@ pub enum DecodeStatus {
 /// let (pixels, width, height) = decoder.finish()?;
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
+#[cfg(feature = "decode")]
 pub struct StreamingDecoder<'a> {
     decoder: *mut libwebp_sys::WebPIDecoder,
     color_mode: ColorMode,
@@ -64,8 +65,10 @@ pub struct StreamingDecoder<'a> {
 }
 
 // SAFETY: The WebPIDecoder is internally thread-safe for single-threaded access
+#[cfg(feature = "decode")]
 unsafe impl Send for StreamingDecoder<'_> {}
 
+#[cfg(feature = "decode")]
 impl StreamingDecoder<'static> {
     /// Create a new streaming decoder.
     ///
@@ -74,7 +77,11 @@ impl StreamingDecoder<'static> {
     ///
     /// # Arguments
     ///
-    /// * `color_mode` - Output color format (RGBA, RGB, etc.)
+    /// * `color_mode` - Output color format (RGBA, RGB, etc.). YUV modes
+    ///   ([`ColorMode::Yuv420`], [`ColorMode::Yuva420`]) are rejected with
+    ///   [`Error::InvalidInput`] — `WebPINewRGB` only constructs RGB-family
+    ///   decoders. Use the static [`crate::decode_yuv`] entry point for YUV
+    ///   output instead.
     pub fn new(color_mode: ColorMode) -> Result<Self> {
         let csp_mode = match color_mode {
             ColorMode::Rgba => libwebp_sys::WEBP_CSP_MODE::MODE_RGBA,
@@ -82,8 +89,11 @@ impl StreamingDecoder<'static> {
             ColorMode::Argb => libwebp_sys::WEBP_CSP_MODE::MODE_ARGB,
             ColorMode::Rgb => libwebp_sys::WEBP_CSP_MODE::MODE_RGB,
             ColorMode::Bgr => libwebp_sys::WEBP_CSP_MODE::MODE_BGR,
-            ColorMode::Yuv420 => libwebp_sys::WEBP_CSP_MODE::MODE_YUV,
-            ColorMode::Yuva420 => libwebp_sys::WEBP_CSP_MODE::MODE_YUVA,
+            ColorMode::Yuv420 | ColorMode::Yuva420 => {
+                return Err(at!(Error::InvalidInput(
+                    "StreamingDecoder does not support YUV output; use webpx::decode_yuv".into(),
+                )));
+            }
         };
 
         let decoder = unsafe {
@@ -110,6 +120,7 @@ impl StreamingDecoder<'static> {
     }
 }
 
+#[cfg(feature = "decode")]
 impl<'a> StreamingDecoder<'a> {
     /// Create a streaming decoder with a pre-allocated output buffer.
     ///
@@ -351,6 +362,7 @@ impl<'a> StreamingDecoder<'a> {
     }
 }
 
+#[cfg(feature = "decode")]
 impl Drop for StreamingDecoder<'_> {
     fn drop(&mut self) {
         if !self.decoder.is_null() {
@@ -385,12 +397,14 @@ impl Drop for StreamingDecoder<'_> {
 /// })?;
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
+#[cfg(feature = "encode")]
 pub struct StreamingEncoder {
     width: u32,
     height: u32,
     config: crate::config::EncoderConfig,
 }
 
+#[cfg(feature = "encode")]
 impl StreamingEncoder {
     /// Create a new streaming encoder.
     pub fn new(width: u32, height: u32) -> Result<Self> {
@@ -565,7 +579,7 @@ impl StreamingEncoder {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "decode", feature = "encode"))]
 mod tests {
     use super::*;
 

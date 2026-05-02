@@ -10,6 +10,8 @@
 //!     --target x86_64-unknown-linux-gnu --test soundness
 //! ```
 
+#![cfg(feature = "encode")]
+
 use webpx::*;
 
 #[cfg(feature = "streaming")]
@@ -205,6 +207,7 @@ mod stride_overflow {
     }
 
     #[cfg(feature = "streaming")]
+    #[cfg(all(feature = "streaming", feature = "decode"))]
     #[test]
     fn streaming_with_buffer_rejects_stride_above_i32_max() {
         // `WebPINewRGB` takes the stride as `i32`; a wrapped-negative
@@ -230,7 +233,7 @@ mod stride_overflow {
 // After the soundness fix added a lifetime to `StreamingDecoder<'_>`, the
 // borrow checker rejects that shape outright. The runtime test below
 // verifies the legitimate (buffer-outlives-decoder) path still works.
-#[cfg(feature = "streaming")]
+#[cfg(all(feature = "streaming", feature = "decode"))]
 #[test]
 fn streaming_decoder_with_buffer_safe_usage() {
     let width = 16;
@@ -251,7 +254,7 @@ fn streaming_decoder_with_buffer_safe_usage() {
     assert_eq!(decoded, rgba);
 }
 
-#[cfg(feature = "streaming")]
+#[cfg(all(feature = "streaming", feature = "decode"))]
 #[test]
 fn streaming_get_partial_respects_external_buffer_minimum_extent() {
     let width = 1;
@@ -285,4 +288,29 @@ fn streaming_get_partial_respects_external_buffer_minimum_extent() {
         decoder.finish().expect("finish on caller-owned buffer");
     assert_eq!((decoded_width, decoded_height), (width, height));
     assert_eq!(decoded, rgba);
+}
+
+// `StreamingDecoder::new` is the libwebp-allocated path that calls
+// `WebPINewRGB`. That FFI only constructs RGB-family decoders; passing a
+// YUV color mode used to fall through to `WebPINewRGB` and surface as
+// `Error::OutOfMemory` when libwebp returned a NULL pointer. The
+// rejection added in 0.2.2 routes both YUV variants to a clear
+// `Error::InvalidInput` instead of the misleading OOM.
+#[cfg(all(feature = "streaming", feature = "decode"))]
+#[test]
+fn streaming_decoder_new_rejects_yuv_modes() {
+    for mode in [ColorMode::Yuv420, ColorMode::Yuva420] {
+        let r = StreamingDecoder::new(mode);
+        match r {
+            Err(at) => {
+                let (err, _) = at.decompose();
+                assert!(
+                    matches!(err, Error::InvalidInput(_)),
+                    "{:?} must surface InvalidInput, not OutOfMemory",
+                    mode,
+                );
+            }
+            Ok(_) => panic!("StreamingDecoder::new accepted {:?}", mode),
+        }
+    }
 }

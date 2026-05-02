@@ -1,8 +1,11 @@
 //! Encoder and decoder configuration types.
 
 use crate::error::{Error, Result};
+#[cfg(feature = "encode")]
 use crate::types::{EncodePixel, PixelLayout};
+#[cfg(feature = "encode")]
 use alloc::vec::Vec;
+#[cfg(feature = "encode")]
 use enough::Stop;
 use whereat::*;
 
@@ -121,6 +124,7 @@ pub struct EncodeStats {
 
 impl EncodeStats {
     /// Create from libwebp WebPAuxStats.
+    #[cfg(feature = "encode")]
     pub(crate) fn from_libwebp(stats: &libwebp_sys::WebPAuxStats) -> Self {
         Self {
             coded_size: stats.coded_size as u32,
@@ -1111,6 +1115,7 @@ impl DecoderConfig {
 
     /// Apply the configured pixel-budget limits against the still-image
     /// dimensions. Used internally by [`crate::Decoder`].
+    #[cfg(feature = "decode")]
     pub(crate) fn check_still_image(&self, width: u32, height: u32) -> Result<()> {
         self.limits
             .check_still_image(width, height)
@@ -1120,6 +1125,7 @@ impl DecoderConfig {
     /// Returns true if any option requires the advanced WebPDecode API
     /// instead of the simple WebPDecodeRGBA/etc functions. `Limits`
     /// counts here too — the budget gates live in `decode_advanced`.
+    #[cfg(feature = "decode")]
     pub(crate) fn needs_advanced_api(&self) -> bool {
         self.use_cropping
             || self.use_scaling

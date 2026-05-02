@@ -1,8 +1,11 @@
 //! Animated WebP encoding and decoding.
 
+#[cfg(feature = "encode")]
 use crate::config::{EncoderConfig, Preset};
 use crate::error::{Error, Result};
-use crate::types::{ColorMode, EncodePixel, PixelLayout};
+use crate::types::ColorMode;
+#[cfg(feature = "encode")]
+use crate::types::{EncodePixel, PixelLayout};
 use alloc::vec::Vec;
 use core::ptr;
 use whereat::*;
@@ -337,6 +340,7 @@ impl Drop for AnimationDecoder {
 /// let webp_data = encoder.finish(300)?;     // Total duration 300ms
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
+#[cfg(feature = "encode")]
 pub struct AnimationEncoder {
     encoder: *mut libwebp_sys::WebPAnimEncoder,
     width: u32,
@@ -347,8 +351,10 @@ pub struct AnimationEncoder {
 }
 
 // SAFETY: WebPAnimEncoder is thread-safe for single-threaded access
+#[cfg(feature = "encode")]
 unsafe impl Send for AnimationEncoder {}
 
+#[cfg(feature = "encode")]
 impl AnimationEncoder {
     /// Create a new animation encoder.
     pub fn new(width: u32, height: u32) -> Result<Self> {
@@ -625,6 +631,7 @@ impl AnimationEncoder {
     }
 }
 
+#[cfg(feature = "encode")]
 impl Drop for AnimationEncoder {
     fn drop(&mut self) {
         if !self.encoder.is_null() {
@@ -635,7 +642,7 @@ impl Drop for AnimationEncoder {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "encode"))]
 mod tests {
     use super::*;
 

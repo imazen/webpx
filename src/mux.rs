@@ -126,58 +126,58 @@ fn get_chunk(
         )
     };
 
-    let result = if found != 0 {
-        let chunk_iter = unsafe { chunk_iter.assume_init() };
-        if !chunk_iter.chunk.bytes.is_null() && chunk_iter.chunk.size > 0 {
-            // Internal hard cap: protects against `Limits::default()` callers
-            // who didn't set max_metadata_bytes themselves.
-            if chunk_iter.chunk.size > MAX_METADATA_CHUNK_BYTES {
-                unsafe {
-                    let mut iter = chunk_iter;
-                    libwebp_sys::WebPDemuxReleaseChunkIterator(&mut iter);
-                    libwebp_sys::WebPDemuxDelete(demux);
-                }
-                return Err(at!(Error::InvalidInput(alloc::format!(
-                    "metadata chunk exceeds internal hard cap: {} bytes (max {})",
-                    chunk_iter.chunk.size,
-                    MAX_METADATA_CHUNK_BYTES
-                ))));
-            }
-            // Caller-side `Limits::max_metadata_bytes`. Saturate the cast
-            // because chunk.size is usize but max_metadata_bytes is u32; on
-            // 64-bit a > 4 GiB chunk would already be caught by the hard
-            // cap above, so this saturation never widens the threshold.
-            if let Err(e) = limits
-                .check_metadata_bytes(u32::try_from(chunk_iter.chunk.size).unwrap_or(u32::MAX))
-            {
-                unsafe {
-                    let mut iter = chunk_iter;
-                    libwebp_sys::WebPDemuxReleaseChunkIterator(&mut iter);
-                    libwebp_sys::WebPDemuxDelete(demux);
-                }
-                return Err(at!(Error::LimitExceeded(e)));
-            }
-            let chunk_data = unsafe {
-                core::slice::from_raw_parts(chunk_iter.chunk.bytes, chunk_iter.chunk.size)
-            };
-            let vec = Some(chunk_data.to_vec());
-            unsafe {
-                let mut iter = chunk_iter;
-                libwebp_sys::WebPDemuxReleaseChunkIterator(&mut iter);
-            }
-            vec
-        } else {
-            None
+    // libwebp's contract: when `WebPDemuxGetChunk` returns non-zero, the
+    // iterator has been initialized and must be released with
+    // `WebPDemuxReleaseChunkIterator` regardless of chunk contents.
+    // Failing to release it leaks the iterator's internal allocation.
+    let outcome = if found != 0 {
+        let mut chunk_iter = unsafe { chunk_iter.assume_init() };
+        let outcome = inspect_chunk(&chunk_iter, limits);
+        unsafe {
+            libwebp_sys::WebPDemuxReleaseChunkIterator(&mut chunk_iter);
         }
+        outcome
     } else {
-        None
+        Ok(None)
     };
 
     unsafe {
         libwebp_sys::WebPDemuxDelete(demux);
     }
 
-    Ok(result)
+    outcome
+}
+
+/// Pure inspection of a populated `WebPChunkIterator`. Splitting this out
+/// keeps `get_chunk`'s release path single-pass: we always run
+/// `WebPDemuxReleaseChunkIterator` after this returns, whether the chunk
+/// was empty, oversize, or successfully extracted.
+fn inspect_chunk(
+    chunk_iter: &libwebp_sys::WebPChunkIterator,
+    limits: &crate::Limits,
+) -> Result<Option<Vec<u8>>> {
+    if chunk_iter.chunk.bytes.is_null() || chunk_iter.chunk.size == 0 {
+        return Ok(None);
+    }
+    // Internal hard cap: protects against `Limits::default()` callers
+    // who didn't set max_metadata_bytes themselves.
+    if chunk_iter.chunk.size > MAX_METADATA_CHUNK_BYTES {
+        return Err(at!(Error::InvalidInput(alloc::format!(
+            "metadata chunk exceeds internal hard cap: {} bytes (max {})",
+            chunk_iter.chunk.size,
+            MAX_METADATA_CHUNK_BYTES
+        ))));
+    }
+    // Caller-side `Limits::max_metadata_bytes`. Saturate the cast
+    // because chunk.size is usize but max_metadata_bytes is u32; on
+    // 64-bit a > 4 GiB chunk would already be caught by the hard
+    // cap above, so this saturation never widens the threshold.
+    limits
+        .check_metadata_bytes(u32::try_from(chunk_iter.chunk.size).unwrap_or(u32::MAX))
+        .map_err(|e| at!(Error::LimitExceeded(e)))?;
+    let chunk_data =
+        unsafe { core::slice::from_raw_parts(chunk_iter.chunk.bytes, chunk_iter.chunk.size) };
+    Ok(Some(chunk_data.to_vec()))
 }
 
 /// Embed ICC profile into WebP data.

@@ -2,6 +2,61 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-05-01
+
+### Fixed
+
+- `tests/integration.rs`, `tests/soundness.rs`, `tests/fuzz_regression.rs`,
+  and several examples (`quick_encode`, `quick_encode_lossless`,
+  `real_image_test`, `wasm_demo`, `mem_formula`) failed to compile
+  under `--no-default-features --features decode` (or the symmetric
+  `encode`-only build). Tests are now gated on the features they
+  exercise; examples carry `required-features` entries; the
+  feature-combo CI matrix gained `--tests --examples` builds and
+  more single-feature combos so this kind of regression fails fast.
+- `src/types.rs` and `src/streaming.rs` exposed encode-side helpers
+  (`EncodePixel`, `WebPData::from_raw`, `StreamingEncoder`,
+  `AnimationEncoder`) without an `encode` cfg and decode-side
+  helpers (`DecodePixel`, `StreamingDecoder`,
+  `DecoderConfig::check_still_image`) without a `decode` cfg.
+  `cargo build --no-default-features --features <single>` is now
+  warning-free.
+- `StreamingDecoder::new` rejects `ColorMode::Yuv420` and
+  `ColorMode::Yuva420` with `Error::InvalidInput` upfront. The
+  prior code mapped them to `MODE_YUV` / `MODE_YUVA` and called
+  `WebPINewRGB`, which returns NULL because that FFI only
+  constructs RGB-family decoders — callers saw a misleading
+  `Error::OutOfMemory`. `with_buffer` already had this rejection;
+  `new` now matches.
+- `mux::get_chunk` always calls `WebPDemuxReleaseChunkIterator` when
+  `WebPDemuxGetChunk` returned non-zero, including the
+  empty-chunk / null-bytes branch where the iterator was previously
+  leaked. Refactored into a small `inspect_chunk` helper so the
+  release path is single-pass.
+
+### Documentation
+
+- README, lib-level rustdoc, and the deprecation notes on
+  `compat::webp` and `compat::webp_animation` now position
+  **[`zenwebp`](https://github.com/imazen/zenwebp)** as the
+  recommended default for any new project. `zenwebp` is equally or
+  more capable than `webpx` on every axis (full feature parity:
+  lossy / lossless encode and decode, animation, alpha, ICC / EXIF /
+  XMP metadata, streaming, presets, limits), with comparable and
+  sometimes faster runtime performance and compression, built with
+  `#![forbid(unsafe_code)]`. The security argument is concrete:
+  libwebp has a documented high-severity CVE history (CVE-2023-4863
+  was an actively-exploited 0-click heap overflow patched out of
+  band in every major browser), and every libwebp wrapper that has
+  been audited — `webpx` included — has shipped soundness bugs
+  (0.1.x is yanked; 0.2.0 + 0.2.1 closed multiple FFI issues
+  across two audit passes). `zenwebp`'s pure-safe-Rust
+  implementation does not have that exposure.
+- Dropped "safe Rust" / "safe bindings" framing from the webpx
+  positioning (this crate is FFI to libwebp; it inherits whatever
+  soundness properties the underlying C provides). Replaced with
+  "ergonomic Rust API".
+
 ## [0.2.1] - 2026-05-01
 
 ### Security

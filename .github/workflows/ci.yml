@@ -44,7 +44,8 @@ jobs:
 
   # Build under each minimal feature combination so disabling encode or
   # decode (or both) doesn't regress into a compile error. Catches
-  # imazen/webpx#1.
+  # imazen/webpx#1. Also builds tests and examples to catch test-side
+  # feature-gate regressions.
   feature-matrix:
     name: Feature combo (${{ matrix.features }})
     runs-on: ubuntu-latest
@@ -59,12 +60,18 @@ jobs:
           - "decode encode std streaming"
           - "decode encode std animation"
           - "decode encode std icc"
+          - "decode std streaming"
+          - "encode std streaming"
+          - "decode std animation"
+          - "decode std icc"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build
+      - name: Build lib
         run: cargo build --no-default-features --features "${{ matrix.features }}"
+      - name: Build tests + examples
+        run: cargo build --tests --examples --no-default-features --features "${{ matrix.features }}"
 
   clippy:
     name: Clippy

@@ -1,11 +1,14 @@
 //! Core types for image data representation.
 
 use alloc::vec::Vec;
+#[cfg(any(feature = "encode", feature = "decode"))]
 use rgb::alt::{BGR8, BGRA8};
+#[cfg(any(feature = "encode", feature = "decode"))]
 use rgb::{RGB8, RGBA8};
 use whereat::*;
 
 /// Pixel layout describing channel order (implementation detail).
+#[cfg(any(feature = "encode", feature = "decode"))]
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelLayout {
@@ -19,6 +22,7 @@ pub enum PixelLayout {
     Bgr,
 }
 
+#[cfg(any(feature = "encode", feature = "decode"))]
 impl PixelLayout {
     /// Bytes per pixel for this layout.
     #[must_use]
@@ -41,24 +45,29 @@ impl PixelLayout {
 /// This trait is an implementation detail and should not be referenced directly.
 /// Use concrete types like [`RGB8`], [`RGBA8`], [`BGR8`], [`BGRA8`] with
 /// [`Encoder::from_pixels`](crate::Encoder::from_pixels).
+#[cfg(feature = "encode")]
 #[doc(hidden)]
 pub trait EncodePixel: Copy + 'static + private::Sealed {
     /// The pixel layout corresponding to this type.
     const LAYOUT: PixelLayout;
 }
 
+#[cfg(feature = "encode")]
 impl EncodePixel for RGBA8 {
     const LAYOUT: PixelLayout = PixelLayout::Rgba;
 }
 
+#[cfg(feature = "encode")]
 impl EncodePixel for BGRA8 {
     const LAYOUT: PixelLayout = PixelLayout::Bgra;
 }
 
+#[cfg(feature = "encode")]
 impl EncodePixel for RGB8 {
     const LAYOUT: PixelLayout = PixelLayout::Rgb;
 }
 
+#[cfg(feature = "encode")]
 impl EncodePixel for BGR8 {
     const LAYOUT: PixelLayout = PixelLayout::Bgr;
 }
@@ -68,6 +77,7 @@ impl EncodePixel for BGR8 {
 /// This trait is an implementation detail and should not be referenced directly.
 /// Use concrete types like [`RGB8`], [`RGBA8`], [`BGR8`], [`BGRA8`] with
 /// decode functions.
+#[cfg(feature = "decode")]
 #[doc(hidden)]
 pub trait DecodePixel: Copy + 'static + private::Sealed {
     /// The pixel layout corresponding to this type.
@@ -89,6 +99,7 @@ pub trait DecodePixel: Copy + 'static + private::Sealed {
     unsafe fn decode_into(data: &[u8], output: *mut u8, output_len: usize, stride: i32) -> bool;
 }
 
+#[cfg(feature = "decode")]
 impl DecodePixel for RGBA8 {
     const LAYOUT: PixelLayout = PixelLayout::Rgba;
 
@@ -114,6 +125,7 @@ impl DecodePixel for RGBA8 {
     }
 }
 
+#[cfg(feature = "decode")]
 impl DecodePixel for BGRA8 {
     const LAYOUT: PixelLayout = PixelLayout::Bgra;
 
@@ -139,6 +151,7 @@ impl DecodePixel for BGRA8 {
     }
 }
 
+#[cfg(feature = "decode")]
 impl DecodePixel for RGB8 {
     const LAYOUT: PixelLayout = PixelLayout::Rgb;
 
@@ -164,6 +177,7 @@ impl DecodePixel for RGB8 {
     }
 }
 
+#[cfg(feature = "decode")]
 impl DecodePixel for BGR8 {
     const LAYOUT: PixelLayout = PixelLayout::Bgr;
 
@@ -189,6 +203,7 @@ impl DecodePixel for BGR8 {
     }
 }
 
+#[cfg(any(feature = "encode", feature = "decode"))]
 mod private {
     use super::*;
 
@@ -494,6 +509,7 @@ impl WebPData {
     /// - `ptr` must be a valid pointer allocated by libwebp's memory allocator
     /// - `len` must be the exact size of the allocation
     /// - The caller transfers ownership of the memory to this struct
+    #[cfg(feature = "encode")]
     #[must_use]
     pub(crate) unsafe fn from_raw(ptr: *mut u8, len: usize) -> Self {
         Self { ptr, len }

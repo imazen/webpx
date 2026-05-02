@@ -6,15 +6,30 @@
 [![codecov](https://codecov.io/gh/imazen/webpx/branch/main/graph/badge.svg)](https://codecov.io/gh/imazen/webpx)
 [![License](https://img.shields.io/crates/l/webpx.svg)](https://github.com/imazen/webpx#license)
 
-**Complete WebP encoding and decoding for Rust** - safe bindings to Google's libwebp with support for static images, animations, ICC profiles, streaming, and `no_std`.
+**Ergonomic FFI bindings to Google's libwebp**, with support for static images, animations, ICC profiles, streaming, and `no_std`.
 
-## Why webpx?
+## Use [`zenwebp`](https://github.com/imazen/zenwebp) instead
 
-- **Full libwebp features** - Lossy, lossless, animation, alpha, metadata
-- **Safe & ergonomic API** - Builder patterns, strong types, comprehensive error handling
-- **High performance** - Zero-copy where possible, direct FFI to optimized C code
-- **Flexible** - Works with `no_std`, supports WebAssembly via emscripten
-- **Migration-friendly** - Compatibility shims for `webp` and `webp-animation` crates
+For any new project, reach for **[`zenwebp`](https://github.com/imazen/zenwebp)**. It is equally or more capable than `webpx` on every axis that matters:
+
+- **Full feature parity** with libwebp: lossy and lossless encode and decode, animation, alpha, ICC / EXIF / XMP metadata, streaming, content presets, resource limits.
+- **Comparable runtime performance and compression ratio**, sometimes faster on the codecs we've benchmarked.
+- **`#![forbid(unsafe_code)]`** — pure Rust top to bottom. Zero FFI surface, zero `unsafe` blocks, no C compiler required.
+
+The security argument is concrete, not theoretical:
+
+- **libwebp has a documented history of high-severity vulnerabilities.** CVE-2023-4863 was a heap buffer overflow in `BuildHuffmanTable` actively exploited in the wild against Chrome, Safari, Firefox, and Electron apps via a 0-click attack chain — patched out of band on every major platform. That is the failure mode an FFI wrapper inherits, not a hypothetical.
+- **Every libwebp wrapper that has been audited has shipped soundness bugs**, `webpx` included. Versions 0.1.0–0.1.4 are yanked, and 0.2.0 + 0.2.1 fixed multiple stride-overflow / use-after-free / aliasing issues found across two parallel audit passes. If you adopt a libwebp wrapper, you are taking on that exposure.
+
+`zenwebp`'s `#![forbid(unsafe_code)]` makes that whole class of bug structurally impossible. Use it.
+
+`webpx` is maintained for users whose application already links libwebp through another path (existing C / C++ code, system package) and would prefer to share that codebase rather than ship a second WebP implementation. If that's not you, switch.
+
+## Why use webpx anyway?
+
+- **Ergonomic Rust API** — Builder patterns, strong types, comprehensive error handling, `Limits` policy for untrusted-input decoding
+- **Shares an existing libwebp link** — If your application already links libwebp via another path (C / C++ code, system package), `webpx` reuses that codebase rather than pulling in a second WebP implementation
+- **`no_std` + WebAssembly (emscripten)** — Works with `no_std` + `alloc`, builds for `wasm32-unknown-emscripten`. For pure-Rust WASM (`wasm32-unknown-unknown`), use `zenwebp`.
 
 ## Quick Start
 
@@ -344,7 +359,7 @@ let webp = Encoder::new_rgba(&data, w, h)
 | WebAssembly (emscripten) | ✅ Supported |
 | WebAssembly (wasm32-unknown-unknown) | ❌ Not supported* |
 
-*libwebp requires C compilation. For pure-Rust WASM, see [image-webp](https://crates.io/crates/image-webp) (lossless only).
+*libwebp requires C compilation. For pure-Rust WASM with full lossy + lossless support, use [`zenwebp`](https://github.com/imazen/zenwebp).
 
 ### Building for WebAssembly
 

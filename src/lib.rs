@@ -2,7 +2,32 @@
 //!
 //! Complete WebP encoding and decoding with ICC profiles, streaming, and animation support.
 //!
-//! `webpx` provides safe Rust bindings to Google's libwebp library, offering:
+//! `webpx` provides ergonomic Rust bindings to Google's libwebp library
+//! (FFI to the upstream C codebase).
+//!
+//! **For new projects, use [`zenwebp`](https://github.com/imazen/zenwebp)
+//! instead.** `zenwebp` is a pure-Rust port of libwebp — equally or more
+//! capable than webpx on every axis (full feature parity: lossy /
+//! lossless, animation, alpha, ICC / EXIF / XMP, streaming, presets,
+//! limits), comparable and sometimes faster runtime performance and
+//! compression, and `#![forbid(unsafe_code)]` so the whole class of
+//! FFI / memory-safety bug is structurally impossible.
+//!
+//! The security argument is concrete: libwebp has a documented history
+//! of high-severity vulnerabilities (most notably CVE-2023-4863, an
+//! actively-exploited 0-click heap overflow patched out of band in
+//! every major browser), and every libwebp wrapper that has been
+//! audited — webpx included — has shipped soundness bugs (versions
+//! 0.1.0–0.1.4 are yanked; 0.2.0 + 0.2.1 fixed multiple FFI issues
+//! found across two parallel audits). `zenwebp`'s pure-safe-Rust
+//! implementation does not have that exposure.
+//!
+//! `webpx` is maintained for users whose application already links
+//! libwebp through another path (existing C / C++ code, system
+//! package) and would prefer to share that codebase rather than ship
+//! a second WebP implementation.
+//!
+//! webpx offers:
 //!
 //! - **Static Images**: Encode/decode RGB, RGBA, and YUV formats with lossy or lossless compression
 //! - **Animations**: Create and decode animated WebP files frame-by-frame or in batch
@@ -174,10 +199,18 @@ pub use mux::{
 };
 
 #[cfg(feature = "streaming")]
-pub use streaming::{DecodeStatus, StreamingDecoder, StreamingEncoder};
+pub use streaming::DecodeStatus;
+#[cfg(all(feature = "streaming", feature = "decode"))]
+pub use streaming::StreamingDecoder;
+#[cfg(all(feature = "streaming", feature = "encode"))]
+pub use streaming::StreamingEncoder;
 
 #[cfg(feature = "animation")]
-pub use animation::{AnimationDecoder, AnimationEncoder, AnimationInfo, Frame};
+pub use animation::AnimationDecoder;
+#[cfg(all(feature = "animation", feature = "encode"))]
+pub use animation::AnimationEncoder;
+#[cfg(feature = "animation")]
+pub use animation::{AnimationInfo, Frame};
 
 /// Library version information.
 pub fn version() -> (u32, u32, u32) {

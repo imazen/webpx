@@ -14,12 +14,14 @@
 use std::fs;
 use std::path::PathBuf;
 
+#[cfg(feature = "decode")]
 const MAX_PIXEL_BYTES: usize = 256 * 1024 * 1024;
 
 fn regression_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fuzz/regression")
 }
 
+#[cfg(feature = "decode")]
 fn run_decode_static(input: &[u8]) {
     let _ = webpx::ImageInfo::from_webp(input);
     let info = match webpx::ImageInfo::from_webp(input) {
@@ -39,6 +41,7 @@ fn run_decode_static(input: &[u8]) {
     let _ = webpx::decode_yuv(input);
 }
 
+#[cfg(feature = "decode")]
 fn run_decoder_builder(input: &[u8]) {
     if let Ok(dec) = webpx::Decoder::new(input) {
         let _ = dec.decode_rgba();
@@ -60,6 +63,7 @@ fn run_decoder_builder(input: &[u8]) {
     }
 }
 
+#[cfg(all(feature = "decode", feature = "streaming"))]
 fn run_streaming(input: &[u8]) {
     use webpx::{ColorMode, StreamingDecoder};
     if let Ok(mut dec) = StreamingDecoder::new(ColorMode::Rgba) {
@@ -68,6 +72,7 @@ fn run_streaming(input: &[u8]) {
     }
 }
 
+#[cfg(all(feature = "decode", feature = "animation"))]
 fn run_animation(input: &[u8]) {
     if let Ok(mut dec) = webpx::AnimationDecoder::new(input) {
         let mut count = 0;
@@ -80,6 +85,7 @@ fn run_animation(input: &[u8]) {
     }
 }
 
+#[cfg(feature = "icc")]
 fn run_mux(input: &[u8]) {
     let _ = webpx::get_icc_profile(input);
     let _ = webpx::get_exif(input);
@@ -119,10 +125,15 @@ fn fuzz_regression_seeds_do_not_panic() {
             .unwrap_or("<unnamed>");
         let input = fs::read(&path).unwrap_or_else(|e| panic!("read {name}: {e}"));
 
+        #[cfg(feature = "decode")]
         run_decode_static(&input);
+        #[cfg(feature = "decode")]
         run_decoder_builder(&input);
+        #[cfg(all(feature = "decode", feature = "streaming"))]
         run_streaming(&input);
+        #[cfg(all(feature = "decode", feature = "animation"))]
         run_animation(&input);
+        #[cfg(feature = "icc")]
         run_mux(&input);
 
         eprintln!("ok: {name} ({} bytes)", input.len());

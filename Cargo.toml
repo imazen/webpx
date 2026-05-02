@@ -1,6 +1,6 @@
 [package]
 name = "webpx"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -44,12 +44,32 @@ required-features = ["animation", "streaming"]
 
 [[example]]
 name = "alloc_profile"
-required-features = ["animation", "streaming"]
+required-features = ["animation", "streaming", "decode", "encode"]
 
 [[example]]
 name = "pixel_api_demo"
-required-features = ["animation"]
+required-features = ["animation", "encode"]
 
 [[example]]
 name = "decode_with_limits"
 required-features = ["decode", "encode", "animation", "icc"]
+
+[[example]]
+name = "quick_encode"
+required-features = ["encode"]
+
+[[example]]
+name = "quick_encode_lossless"
+required-features = ["encode"]
+
+[[example]]
+name = "real_image_test"
+required-features = ["encode"]
+
+[[example]]
+name = "wasm_demo"
+required-features = ["encode", "decode"]
+
+[[example]]
+name = "mem_formula"
+required-features = ["encode", "decode"]
