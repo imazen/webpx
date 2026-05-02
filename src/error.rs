@@ -128,6 +128,7 @@ impl std::error::Error for Error {}
 
 /// Encoding error codes from libwebp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 #[repr(i32)]
 pub enum EncodingError {
     /// No error
@@ -197,6 +198,7 @@ impl fmt::Display for EncodingError {
 
 /// Decoding error codes from libwebp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 #[repr(i32)]
 pub enum DecodingError {
     /// No error
@@ -250,6 +252,7 @@ impl fmt::Display for DecodingError {
 
 /// Mux error codes from libwebp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 #[repr(i32)]
 pub enum MuxError {
     /// Operation completed successfully

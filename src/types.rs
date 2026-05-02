@@ -201,6 +201,7 @@ mod private {
 
 /// Information about a WebP image.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ImageInfo {
     /// Image width in pixels.
     pub width: u32,

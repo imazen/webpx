@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- `error::EncodingError`, `error::DecodingError`, `error::MuxError`
+  and `types::ImageInfo` are now `#[non_exhaustive]`. Match arms must
+  add `_ =>` and struct construction must go through a constructor.
+  This closes the door on adding new libwebp error variants or new
+  bitstream-info fields requiring another minor bump.
+
 ### Fixed
 
 - The crate now compiles under every feature combination
