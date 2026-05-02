@@ -198,6 +198,7 @@ impl Preset {
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct EncoderConfig {
     pub(crate) quality: f32,
     pub(crate) preset: Preset,
@@ -993,6 +994,7 @@ impl EncoderConfig {
 
 /// Decoder configuration.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct DecoderConfig {
     pub(crate) bypass_filtering: bool,
     pub(crate) no_fancy_upsampling: bool,
@@ -1007,6 +1009,8 @@ pub struct DecoderConfig {
     pub(crate) use_threads: bool,
     pub(crate) flip: bool,
     pub(crate) alpha_dithering: u8,
+    /// Resource limits applied at parse time. See [`crate::Limits`].
+    pub(crate) limits: crate::Limits,
 }
 
 impl DecoderConfig {
@@ -1071,8 +1075,51 @@ impl DecoderConfig {
         self
     }
 
+    /// Apply a [`Limits`](crate::Limits) policy to the decoder.
+    ///
+    /// Limits are checked via `WebPGetFeatures` (or the equivalent demuxer
+    /// path) *before* libwebp allocates its output buffer, so a hostile
+    /// WebP declaring an in-spec-but-huge canvas is rejected up front
+    /// rather than triggering an OOM.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use webpx::{Decoder, DecoderConfig, Limits};
+    ///
+    /// let limits = Limits::none()
+    ///     .with_max_pixels(64 * 1024 * 1024)
+    ///     .with_max_total_pixels(256 * 1024 * 1024)
+    ///     .with_max_frames(1024);
+    ///
+    /// let webp_data: &[u8] = &[];
+    /// let config = DecoderConfig::new().limits(limits);
+    /// let img = Decoder::new(webp_data)?.config(config).decode_rgba()?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn limits(mut self, limits: crate::Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Borrow the configured [`Limits`](crate::Limits).
+    #[must_use]
+    pub fn get_limits(&self) -> &crate::Limits {
+        &self.limits
+    }
+
+    /// Apply the configured pixel-budget limits against the still-image
+    /// dimensions. Used internally by [`crate::Decoder`].
+    pub(crate) fn check_still_image(&self, width: u32, height: u32) -> Result<()> {
+        self.limits
+            .check_still_image(width, height)
+            .map_err(|e| at!(Error::LimitExceeded(e)))
+    }
+
     /// Returns true if any option requires the advanced WebPDecode API
-    /// instead of the simple WebPDecodeRGBA/etc functions.
+    /// instead of the simple WebPDecodeRGBA/etc functions. `Limits`
+    /// counts here too — the budget gates live in `decode_advanced`.
     pub(crate) fn needs_advanced_api(&self) -> bool {
         self.use_cropping
             || self.use_scaling
@@ -1081,5 +1128,6 @@ impl DecoderConfig {
             || self.no_fancy_upsampling
             || self.flip
             || self.alpha_dithering > 0
+            || self.limits.has_any()
     }
 }

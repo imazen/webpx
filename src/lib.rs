@@ -93,6 +93,7 @@ whereat::define_at_crate_info!();
 
 mod config;
 pub mod error;
+mod limits;
 mod types;
 
 #[cfg(feature = "decode")]
@@ -117,6 +118,7 @@ pub mod compat;
 // Re-exports
 pub use config::{AlphaFilter, DecoderConfig, EncodeStats, EncoderConfig, ImageHint, Preset};
 pub use error::{DecodingError, EncodingError, Error, MuxError, Result};
+pub use limits::{LimitExceeded, Limits};
 pub use types::{BitstreamFormat, ColorMode, ImageInfo, WebPData, YuvPlanes, YuvPlanesRef};
 
 // Re-export enough crate types for cooperative cancellation
@@ -139,8 +141,8 @@ pub use encode::Encoder;
 
 #[cfg(feature = "icc")]
 pub use mux::{
-    embed_exif, embed_icc, embed_xmp, get_exif, get_icc_profile, get_xmp, remove_exif, remove_icc,
-    remove_xmp,
+    embed_exif, embed_icc, embed_xmp, get_exif, get_exif_with_limits, get_icc_profile,
+    get_icc_profile_with_limits, get_xmp, get_xmp_with_limits, remove_exif, remove_icc, remove_xmp,
 };
 
 #[cfg(feature = "streaming")]

@@ -78,12 +78,39 @@ impl AnimationDecoder {
 
     /// Create a new animation decoder with options.
     ///
+    /// Equivalent to [`Self::with_options_limits`] with [`crate::Limits::none`].
+    ///
     /// # Arguments
     ///
     /// * `data` - WebP animation data
     /// * `color_mode` - Output color format
     /// * `use_threads` - Enable multi-threaded decoding
     pub fn with_options(data: &[u8], color_mode: ColorMode, use_threads: bool) -> Result<Self> {
+        Self::with_options_limits(data, color_mode, use_threads, &crate::Limits::none())
+    }
+
+    /// Create a new animation decoder with options and a [`crate::Limits`]
+    /// policy.
+    ///
+    /// Caps from `limits` are checked against the canvas dimensions and
+    /// declared frame count *before* the decoder is opened, so a hostile
+    /// animation declaring 16383×16383 × 100k frames is rejected up
+    /// front. `max_total_pixels` is the most useful budget here — it
+    /// catches the cumulative cost of `width × height × frame_count`
+    /// that per-frame caps miss.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - WebP animation data
+    /// * `color_mode` - Output color format
+    /// * `use_threads` - Enable multi-threaded decoding
+    /// * `limits` - Resource limits policy (use [`crate::Limits::none`] for none)
+    pub fn with_options_limits(
+        data: &[u8],
+        color_mode: ColorMode,
+        use_threads: bool,
+        limits: &crate::Limits,
+    ) -> Result<Self> {
         // libwebp's WebPAnimDecoder only accepts MODE_RGBA / MODE_BGRA
         // (and the premultiplied variants, which webpx doesn't expose).
         // Reject anything else with a clear error rather than passing it
@@ -132,6 +159,18 @@ impl AnimationDecoder {
         if ok == 0 {
             unsafe { libwebp_sys::WebPAnimDecoderDelete(decoder) };
             return Err(at!(Error::InvalidWebP));
+        }
+
+        // Apply Limits against the declared canvas + frame count *before*
+        // any decode work. `max_total_pixels` (canvas area × frame count)
+        // is the budget that catches the W×H×N animation-bomb case.
+        if let Err(e) = limits.check_animation(
+            anim_info.canvas_width,
+            anim_info.canvas_height,
+            anim_info.frame_count,
+        ) {
+            unsafe { libwebp_sys::WebPAnimDecoderDelete(decoder) };
+            return Err(at!(Error::LimitExceeded(e)));
         }
 
         Ok(Self {
