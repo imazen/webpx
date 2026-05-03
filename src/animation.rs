@@ -236,6 +236,16 @@ impl AnimationDecoder {
             )));
         }
 
+        // libwebp's contract is that on success `buf` is non-null and
+        // points at `width × height × bpp` bytes. Guard against a
+        // contract violation rather than constructing a Rust slice
+        // from a null pointer (UB).
+        if buf.is_null() {
+            return Err(at!(Error::DecodeFailed(
+                crate::error::DecodingError::BitstreamError,
+            )));
+        }
+
         // Copy the frame data (buffer is owned by decoder). Buffer size
         // matches the configured color mode (3 bpp for RGB/BGR, 4 bpp
         // otherwise). saturating_mul guards against 32-bit usize wrap if
@@ -538,7 +548,7 @@ impl AnimationEncoder {
         picture.inner_mut().height = self.height as i32;
         picture.inner_mut().use_argb = 1;
 
-        let stride = (self.width as usize * bpp) as i32;
+        let stride = ((self.width as usize).saturating_mul(bpp)) as i32;
         let import_ok = unsafe {
             match layout {
                 PixelLayout::Rgba => {

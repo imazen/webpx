@@ -26,23 +26,76 @@ use whereat::*;
 /// Context for progress hook callback.
 struct StopContext<'a, S: Stop> {
     stop: &'a S,
+    /// Captured panic payload from a user `Stop::should_stop()` impl
+    /// that unwound. We can't let the panic cross libwebp's C frames
+    /// (UB), so we catch it, abort the encode, and re-raise after
+    /// `WebPEncode` returns control to Rust.
+    #[cfg(feature = "std")]
+    panic: core::cell::Cell<Option<alloc::boxed::Box<dyn core::any::Any + Send + 'static>>>,
 }
 
-/// Progress hook that checks the Stop trait.
+#[cfg(feature = "std")]
+impl<S: Stop> StopContext<'_, S> {
+    fn new(stop: &S) -> StopContext<'_, S> {
+        StopContext {
+            stop,
+            panic: core::cell::Cell::new(None),
+        }
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl<S: Stop> StopContext<'_, S> {
+    fn new(stop: &S) -> StopContext<'_, S> {
+        StopContext { stop }
+    }
+}
+
+/// Progress hook that checks the [`Stop`] trait. Called by libwebp's
+/// C code on every progress tick; returning 0 aborts encoding.
 ///
-/// Returns 1 to continue, 0 to abort.
+/// The user's `Stop::should_stop()` body could panic. Letting the
+/// panic unwind through libwebp's C frames is undefined behavior; we
+/// catch it, signal abort, and re-raise after the encode returns.
 extern "C" fn progress_hook<S: Stop>(
     _percent: core::ffi::c_int,
     picture: *const libwebp_sys::WebPPicture,
 ) -> core::ffi::c_int {
     // SAFETY: user_data is set to a valid StopContext pointer before encoding
     let ctx = unsafe { &*((*picture).user_data as *const StopContext<S>) };
-    if ctx.stop.should_stop() {
-        0 // abort
-    } else {
-        1 // continue
+    #[cfg(feature = "std")]
+    {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ctx.stop.should_stop())) {
+            Ok(true) => 0,  // user requested stop
+            Ok(false) => 1, // continue
+            Err(payload) => {
+                ctx.panic.set(Some(payload));
+                0 // abort; we'll re-raise in the caller
+            }
+        }
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        // Without std there's no `catch_unwind`. no_std builds typically
+        // configure `panic = "abort"` so the panic terminates the
+        // process before reaching C; if a user enables unwinding
+        // panics on no_std they accept the FFI risk themselves.
+        if ctx.stop.should_stop() { 0 } else { 1 }
     }
 }
+
+/// Re-raise any panic captured by the progress hook. Called after
+/// `WebPEncode` returns control to Rust, so the panic propagates from
+/// a Rust frame rather than through libwebp's C frames.
+#[cfg(feature = "std")]
+fn resume_progress_panic<S: Stop>(ctx: &StopContext<S>) {
+    if let Some(payload) = ctx.panic.take() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+#[cfg(not(feature = "std"))]
+fn resume_progress_panic<S: Stop>(_ctx: &StopContext<S>) {}
 
 /// Internal: Encode with full config and return stats (called by EncoderConfig).
 pub(crate) fn encode_with_config_stats(
@@ -177,11 +230,18 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
     picture.inner_mut().custom_ptr = writer.as_mut_ptr() as *mut _;
 
     // Setup progress hook for cancellation
-    let ctx = StopContext { stop };
+    let ctx = StopContext::new(stop);
     picture.inner_mut().progress_hook = Some(progress_hook::<S>);
     picture.inner_mut().user_data = &ctx as *const _ as *mut _;
 
     let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
+
+    // Re-raise any panic the user's Stop::should_stop body produced
+    // before we dispatch on the encode result. This must happen after
+    // libwebp has returned control (so the panic propagates from a
+    // Rust frame) but before any further work depending on the encode
+    // outcome.
+    resume_progress_panic(&ctx);
 
     let result = if ok == 0 {
         let error_code = picture.inner_mut().error_code as i32;
@@ -904,11 +964,15 @@ impl<'a> Encoder<'a> {
         picture.inner_mut().custom_ptr = writer.as_mut_ptr() as *mut _;
 
         // Setup progress hook for cancellation
-        let ctx = StopContext { stop: &stop };
+        let ctx = StopContext::new(&stop);
         picture.inner_mut().progress_hook = Some(progress_hook::<S>);
         picture.inner_mut().user_data = &ctx as *const _ as *mut _;
 
         let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
+
+        // Re-raise any panic from the user's Stop::should_stop body.
+        // See encode_with_config_stoppable for the rationale.
+        resume_progress_panic(&ctx);
 
         if ok == 0 {
             let error_code = picture.inner_mut().error_code as i32;
@@ -988,11 +1052,14 @@ impl<'a> Encoder<'a> {
         picture.inner_mut().custom_ptr = writer.as_mut_ptr() as *mut _;
 
         // Setup progress hook for cancellation
-        let ctx = StopContext { stop: &stop };
+        let ctx = StopContext::new(&stop);
         picture.inner_mut().progress_hook = Some(progress_hook::<S>);
         picture.inner_mut().user_data = &ctx as *const _ as *mut _;
 
         let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
+
+        // Re-raise any panic from the user's Stop::should_stop body.
+        resume_progress_panic(&ctx);
 
         if ok == 0 {
             let error_code = picture.inner_mut().error_code as i32;

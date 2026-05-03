@@ -1,0 +1,29 @@
+[package]
+name = "zencodec-swap-demo"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# A consumer crate demonstrating that `webpx::zencodec` and
+# `zenwebp::zencodec` are drop-in interchangeable through the
+# `zencodec` trait surface. Pick one with a Cargo feature:
+#
+#   cargo run -p zencodec-swap-demo --no-default-features --features use-webpx
+#   cargo run -p zencodec-swap-demo --no-default-features --features use-zenwebp
+#
+# Source code is identical for both backends; only the `use` import is
+# cfg-gated.
+[features]
+default = ["use-webpx"]
+use-webpx = ["dep:webpx"]
+use-zenwebp = ["dep:zenwebp"]
+
+[dependencies]
+webpx = { path = "../..", features = ["zencodec"], optional = true }
+zenwebp = { version = "0.4", features = ["zencodec"], optional = true }
+zencodec = "0.1.13"
+zenpixels = { version = "0.2.10", default-features = false }
+
+# Lock both backends to the same zencodec/zenpixels minor lines so trait
+# impls land on a single semver-compat resolution. Both crates pin
+# zencodec=0.1.13 and zenpixels=0.2.10 explicitly.

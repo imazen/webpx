@@ -2,6 +2,118 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-03
+
+### Security
+
+- **`progress_hook` (encode.rs) and `write_callback` (streaming.rs)
+  now wrap the user-supplied callback in `catch_unwind`.** Both are
+  invoked by libwebp from C frames; a panic from the user's
+  `Stop::should_stop()` impl or `StreamingEncoder::*_with_callback`
+  body would have unwound through libwebp's C stack — undefined
+  behavior. The capture now stashes the panic payload in the encode
+  context and re-raises it from a Rust frame after `WebPEncode`
+  returns control. `#[cfg(feature = "std")]`; `no_std` builds
+  typically configure `panic = "abort"` and don't reach the unwinding
+  path.
+- **`AnimationDecoder::next_frame` now guards against a null `buf`
+  pointer** before constructing a Rust slice. libwebp's contract is
+  that `WebPAnimDecoderGetNext` returns a non-null pointer on
+  success; the guard turns a potential UB into a clean
+  `DecodingError::BitstreamError` if libwebp ever violates the
+  contract.
+- **`decode.rs::decode_into` now uses `output.len().saturating_mul(bpp)`**
+  for the buffer-size computation. On 32-bit `usize` (i686 in CI),
+  the unchecked multiplication could wrap to 0 for caller-owned
+  typed-pixel slices large enough that `len × bpp` exceeds
+  `u32::MAX`; the wrapped size was passed to libwebp as the buffer
+  byte count, mismatching the actual extent.
+- **`config.rs::EncoderConfig::to_libwebp` now passes
+  `WEBP_ENCODER_ABI_VERSION`** to `WebPConfigInitInternal` instead of
+  the decoder constant. Both equal `528` in libwebp-sys 0.14.2 so
+  the bug is harmless today; the fix prevents silent breakage if
+  libwebp ever bumps the constants asymmetrically.
+- **The `WebPConfig::new_with_preset()` helper from libwebp-sys uses
+  `MaybeUninit::uninit()` internally**, the same latent-UB pattern
+  fixed in earlier sweeps and PR #8 for the other three bindgen
+  helpers. `EncoderConfig::to_libwebp` now goes through explicit
+  `MaybeUninit::zeroed()` + `WebPConfigInitInternal`. This was the
+  fourth and final bindgen `*::new()` helper webpx still routed
+  through; an `unsafe`-block sweep confirms zero remaining sites.
+
+### Added
+
+- **`zencodec` Cargo feature with full trait integration.** webpx now
+  exposes `pub mod zencodec` with the same wrapper-type names and
+  method signatures as `zenwebp::zencodec`, so source code that
+  consumes the trait surface compiles unchanged when swapping crates.
+  All four executor traits are wired:
+  - `zencodec::encode::Encoder` on `WebpEncoder` — RGBA / BGRA / RGB
+    input, ICC / EXIF / XMP metadata, generic-quality and
+    generic-effort calibration, `Limits` propagation.
+  - `zencodec::encode::AnimationFrameEncoder` on
+    `WebpAnimationFrameEncoder` — push / finalize lifecycle, with
+    canvas-dimension validation across frames.
+  - `zencodec::decode::Decode` + `push_decoder` on `WebpDecoder` —
+    one-shot and sink-based single-image decoding.
+  - `zencodec::decode::AnimationFrameDecoder` on
+    `WebpAnimationFrameDecoder` — frame-by-frame and sink-based
+    rendering, with `frame_count` / `loop_count` accessors.
+  - `zencodec::decode::StreamingDecode` on `WebpStreamingDecoder` —
+    buffered shape (single-batch); a row-batch path against
+    libwebp's incremental decoder is a future iteration.
+- **`From<webpx::Limits> for zencodec::ResourceLimits`** and the
+  reverse impl. Field-for-field mirror minus `max_metadata_bytes`
+  (no zencodec counterpart, drops on round-trip).
+- **`examples-crates/zencodec-swap-demo/`** — workspace-member crate
+  demonstrating the cfg-gated swap pattern with `--features
+  use-webpx` ↔ `use-zenwebp`. The demo's `main.rs` body is
+  identical between backends; only the `use` import is cfg-gated.
+  Both feature combos compile, run, and produce valid WebP via the
+  same `zencodec` trait calls.
+- **`pub mod zencodec`** re-export with `WebpAnimationFrameDecoder,
+  WebpAnimationFrameEncoder, WebpDecodeJob, WebpDecoder,
+  WebpDecoderConfig, WebpEncodeJob, WebpEncoder, WebpEncoderConfig,
+  WebpStreamingDecoder` — names match `zenwebp::zencodec` exactly.
+
+### Changed (internal — no public API change)
+
+- **`WebpAnimationFrameEncoder` validates canvas dimensions across
+  frames.** The first `push_frame` captures the canvas size; later
+  frames with mismatched dimensions are rejected with
+  `Error::InvalidInput` instead of being silently passed to
+  libwebp's fixed-canvas animation encoder.
+- **Saturating multiplications added to `width × bytes_per_pixel`
+  sites** in `codec.rs:947`, `codec.rs:1021`, `animation.rs:551`.
+  Within libwebp's 16383-cap dimensions these can't overflow today,
+  but the change matches the rest of the codebase's discipline and
+  prevents bitrot if libwebp ever raises its dimension cap.
+
+### Merged (PR #8 from Shnatsel)
+
+- **`AnimationEncoder::add_frame_internal`** — RAII `Picture::new()`
+  + `picture.as_mut_ptr()` instead of the bindgen-generated
+  `WebPPicture::new()` helper.
+- **`Decoder::decode_advanced`** — explicit `MaybeUninit::zeroed()` +
+  `WebPInitDecoderConfig` instead of `WebPDecoderConfig::new()`. This
+  closes the third of four bindgen `*::new()` helpers using
+  `MaybeUninit::uninit` internally.
+- **`StreamingEncoder` callback + RGB paths** — `Picture::new()` +
+  `MemWriter::new()` RAII; defensive null/zero-size guard on
+  `slice::from_raw_parts(data, data_size)` in the writer callback.
+
+### Testing
+
+- 18 soundness regression tests (was 17). New
+  `progress_hook_panic_is_caught_and_replayed` exercises the
+  panic-through-C fix.
+- 7 zencodec integration tests covering encoder roundtrip, lossless
+  preservation, animation roundtrip, streaming decode, limits
+  propagation, capabilities table, and `Limits` ↔ `ResourceLimits`
+  round-trip.
+- 12-agent parallel soundness audit run during this release;
+  findings drove the Security entries above.
+
 ## [0.3.2] - 2026-05-02
 
 ### Added

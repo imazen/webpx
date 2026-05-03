@@ -471,10 +471,15 @@ impl StreamingEncoder {
             return Err(at!(Error::OutOfMemory));
         }
 
-        // Use a custom writer that calls our callback
+        // Use a custom writer that calls our callback. Captures any
+        // panic from the user-supplied callback so the panic doesn't
+        // unwind through libwebp's C frames (UB) — re-raised after
+        // `WebPEncode` returns.
         struct CallbackContext<'a, F: FnMut(&[u8]) -> Result<()>> {
             callback: &'a mut F,
             error: Option<whereat::At<Error>>,
+            #[cfg(feature = "std")]
+            panic: core::cell::Cell<Option<alloc::boxed::Box<dyn core::any::Any + Send + 'static>>>,
         }
 
         extern "C" fn write_callback<F: FnMut(&[u8]) -> Result<()>>(
@@ -487,17 +492,40 @@ impl StreamingEncoder {
             // libwebp normally provides a non-null pointer for non-empty
             // chunks. Guard the empty/null case anyway so we never build a
             // Rust slice from a null raw pointer.
-            let slice = if data.is_null() || data_size == 0 {
+            let slice: &[u8] = if data.is_null() || data_size == 0 {
                 &[]
             } else {
                 unsafe { core::slice::from_raw_parts(data, data_size) }
             };
 
-            match (ctx.callback)(slice) {
-                Ok(()) => 1,
-                Err(e) => {
-                    ctx.error = Some(e);
-                    0
+            #[cfg(feature = "std")]
+            {
+                // SAFETY: `&mut F` here is type-erased into a raw pointer
+                // through `picture.custom_ptr`. We re-acquire it as
+                // `&mut F` above; re-borrowing inside the closure is
+                // sound because we don't reuse `ctx.callback` outside
+                // the closure body.
+                let cb = &mut ctx.callback;
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (cb)(slice))) {
+                    Ok(Ok(())) => 1,
+                    Ok(Err(e)) => {
+                        ctx.error = Some(e);
+                        0
+                    }
+                    Err(payload) => {
+                        ctx.panic.set(Some(payload));
+                        0
+                    }
+                }
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                match (ctx.callback)(slice) {
+                    Ok(()) => 1,
+                    Err(e) => {
+                        ctx.error = Some(e);
+                        0
+                    }
                 }
             }
         }
@@ -505,12 +533,23 @@ impl StreamingEncoder {
         let mut ctx = CallbackContext {
             callback: &mut callback,
             error: None,
+            #[cfg(feature = "std")]
+            panic: core::cell::Cell::new(None),
         };
 
         picture.inner_mut().writer = Some(write_callback::<F>);
         picture.inner_mut().custom_ptr = &mut ctx as *mut _ as *mut _;
 
         let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
+
+        // Re-raise any panic captured from the user's callback before
+        // we dispatch on the encode result. The catch_unwind guard
+        // inside `write_callback` ensures the panic doesn't cross the
+        // libwebp C frame; we propagate it here from a Rust frame.
+        #[cfg(feature = "std")]
+        if let Some(payload) = ctx.panic.take() {
+            std::panic::resume_unwind(payload);
+        }
 
         if let Some(e) = ctx.error {
             return Err(e);

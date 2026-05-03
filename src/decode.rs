@@ -302,7 +302,12 @@ pub fn decode_into<P: DecodePixel>(
             stride_bytes
         ))));
     }
-    let output_bytes = output.len() * bpp;
+    // saturating_mul: on 32-bit `usize` (i686 in CI), `output.len() * bpp`
+    // can wrap to 0 when `output.len() >= u32::MAX / bpp` — caller-owned
+    // typed-pixel slices can legitimately be that large, and the wrapped
+    // value would be passed to libwebp as the buffer size, mismatching
+    // the actual byte count and inviting OOB writes.
+    let output_bytes = output.len().saturating_mul(bpp);
 
     // SAFETY: We've validated the buffer size and stride above
     let ok = unsafe {

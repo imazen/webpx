@@ -923,9 +923,38 @@ impl EncoderConfig {
 
     /// Convert to libwebp WebPConfig.
     pub(crate) fn to_libwebp(&self) -> Result<libwebp_sys::WebPConfig> {
-        let mut config =
-            libwebp_sys::WebPConfig::new_with_preset(self.preset.to_libwebp(), self.quality)
-                .map_err(|_| at!(Error::InvalidConfig("failed to initialize config".into())))?;
+        // `libwebp_sys::WebPConfig::new_with_preset()` internally does
+        // `MaybeUninit::uninit()` + `WebPConfigInitInternal` + `assume_init`.
+        // The bindgen-generated struct exposes libwebp's reserved `pad`
+        // arrays as ordinary Rust fields, so `assume_init` is UB if libwebp
+        // leaves any of them untouched. Same pattern as the
+        // `WebPDecoderConfig::new()` and `WebPPicture::new()` sites fixed
+        // in webpx#8 and 0.2.1 — start from zeroed memory, then let
+        // libwebp populate the documented fields.
+        let mut config = core::mem::MaybeUninit::<libwebp_sys::WebPConfig>::zeroed();
+        // `WebPConfigInitInternal` is the encoder-side initializer and
+        // takes `WEBP_ENCODER_ABI_VERSION`. (Both encoder and decoder
+        // ABI constants happen to be `528` in libwebp-sys 0.14.2, so
+        // passing the wrong one is harmless today — but the contract
+        // is encoder-side, and using the right constant prevents
+        // silent breakage if libwebp ever bumps the two asymmetrically.)
+        let ok = unsafe {
+            libwebp_sys::WebPConfigInitInternal(
+                config.as_mut_ptr(),
+                self.preset.to_libwebp(),
+                self.quality,
+                libwebp_sys::WEBP_ENCODER_ABI_VERSION as i32,
+            )
+        };
+        if ok == 0 {
+            return Err(at!(Error::InvalidConfig(
+                "failed to initialize config".into(),
+            )));
+        }
+        // SAFETY: WebPConfigInitInternal returned non-zero, so libwebp has
+        // populated every documented field. The reserved `pad` arrays
+        // (which libwebp leaves alone) are zero from the `zeroed()` init.
+        let mut config = unsafe { config.assume_init() };
 
         config.lossless = self.lossless as i32;
         config.method = self.method as i32;

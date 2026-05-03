@@ -267,9 +267,9 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
     fn animation_frame_encoder(self) -> Result<WebpAnimationFrameEncoder, At<Error>> {
         #[cfg(not(feature = "animation"))]
         {
-            return Err(at!(Error::InvalidConfig(
+            Err(at!(Error::InvalidConfig(
                 "webpx built without `animation` feature".into(),
-            )));
+            )))
         }
         #[cfg(feature = "animation")]
         {
@@ -286,6 +286,7 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
                 xmp: self.xmp,
                 limits: Limits::from(self.limits),
                 last_timestamp_ms: 0,
+                canvas_dims: None,
             })
         }
     }
@@ -458,7 +459,20 @@ pub struct WebpAnimationFrameEncoder {
     /// API takes per-frame timestamps; we track them ourselves so the
     /// trait's `duration_ms` parameter maps cleanly.
     last_timestamp_ms: u32,
+    /// Canvas dimensions captured from the first frame (lazy init).
+    /// Subsequent frames must match these — libwebp's animation
+    /// encoder is fixed-canvas, so a mismatch silently corrupts output
+    /// or panics inside libwebp. Reject up front instead.
+    canvas_dims: Option<(u32, u32)>,
 }
+
+// `inner: Option<crate::AnimationEncoder>` carries `crate::AnimationEncoder`
+// which has its own `Drop` impl that calls `WebPAnimEncoderDelete`. So
+// when `WebpAnimationFrameEncoder` is dropped without `finish()` being
+// called (panic, premature drop, error before finish), the inner
+// encoder's Drop fires automatically and frees libwebp's resources.
+// No explicit `impl Drop` for `WebpAnimationFrameEncoder` is required —
+// the field-level Drop already does the right thing.
 
 #[cfg(feature = "animation")]
 impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
@@ -483,18 +497,28 @@ impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
             .map_err(|e| at!(Error::LimitExceeded(e)))?;
 
         // Construct the underlying AnimationEncoder lazily on the
-        // first frame so we know the canvas size.
-        if self.inner.is_none() {
-            let mut enc = crate::AnimationEncoder::new(w, h)?;
-            // Carry over the encoder-config knobs the AnimationEncoder
-            // exposes setters for (quality / lossless). Other knobs on
-            // EncoderConfig are not plumbed through libwebp's anim
-            // encoder API.
-            enc.set_quality(self.config.get_quality());
-            if self.config.is_lossless() {
-                enc.set_lossless(true);
+        // first frame so we know the canvas size. Subsequent frames
+        // must match — libwebp's animation encoder is fixed-canvas.
+        match self.canvas_dims {
+            None => {
+                let mut enc = crate::AnimationEncoder::new(w, h)?;
+                enc.set_quality(self.config.get_quality());
+                if self.config.is_lossless() {
+                    enc.set_lossless(true);
+                }
+                self.inner = Some(enc);
+                self.canvas_dims = Some((w, h));
             }
-            self.inner = Some(enc);
+            Some((cw, ch)) if cw != w || ch != h => {
+                return Err(at!(Error::InvalidInput(format!(
+                    "animation frame dimensions {}x{} do not match canvas {}x{} \
+                     (set on first frame)",
+                    w, h, cw, ch
+                ))));
+            }
+            Some(_) => {
+                // Dimensions match; nothing to do.
+            }
         }
 
         let enc = self.inner.as_mut().expect("just initialized");
@@ -510,7 +534,7 @@ impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
             ColorMode::Rgb | ColorMode::Bgr => 3,
             _ => unreachable!(),
         };
-        let row_bytes = w as usize * bpp;
+        let row_bytes = (w as usize).saturating_mul(bpp);
         let stride_bytes_usize = pixels.stride();
         let contiguous: Cow<'_, [u8]> = if stride_bytes_usize == row_bytes {
             buf
@@ -763,7 +787,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
             .map_err(|e| at!(Error::InvalidInput(format!("sink provide: {e}"))))?;
         let src_bytes = src.as_strided_bytes();
         let bpp = chosen.bytes_per_pixel();
-        let row_bytes = w as usize * bpp;
+        let row_bytes = (w as usize).saturating_mul(bpp);
         let src_stride = src.stride();
         for y in 0..h as usize {
             let src_row = &src_bytes[y * src_stride..y * src_stride + row_bytes];
@@ -782,9 +806,9 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
     ) -> Result<WebpStreamingDecoder, At<Error>> {
         #[cfg(not(feature = "streaming"))]
         {
-            return Err(at!(Error::InvalidConfig(
+            Err(at!(Error::InvalidConfig(
                 "webpx built without `streaming` feature".into(),
-            )));
+            )))
         }
         #[cfg(feature = "streaming")]
         {
@@ -824,9 +848,9 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
     ) -> Result<WebpAnimationFrameDecoder, At<Error>> {
         #[cfg(not(feature = "animation"))]
         {
-            return Err(at!(Error::InvalidConfig(
+            Err(at!(Error::InvalidConfig(
                 "webpx built without `animation` feature".into(),
-            )));
+            )))
         }
         #[cfg(feature = "animation")]
         {
@@ -944,7 +968,7 @@ impl zencodec::decode::StreamingDecode for WebpStreamingDecoder {
         }
         self.emitted = true;
         let (bytes, w, h) = self.decoded.as_ref().unwrap();
-        let stride_bytes = *w as usize * self.descriptor.bytes_per_pixel();
+        let stride_bytes = (*w as usize).saturating_mul(self.descriptor.bytes_per_pixel());
         let slice = PixelSlice::new(bytes, *w, *h, stride_bytes, self.descriptor)
             .map_err(|e| at!(Error::InvalidInput(format!("{e:?}"))))?;
         Ok(Some((0, slice)))
@@ -1018,7 +1042,8 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
         self.last_pixels = frame.data;
         self.last_width = frame.width;
         self.last_height = frame.height;
-        let stride_bytes = self.last_width as usize * self.descriptor.bytes_per_pixel();
+        let stride_bytes =
+            (self.last_width as usize).saturating_mul(self.descriptor.bytes_per_pixel());
         let slice = PixelSlice::new(
             &self.last_pixels,
             self.last_width,
@@ -1056,7 +1081,7 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
             .provide_next_buffer(0, h, w, descriptor)
             .map_err(|e| at!(Error::InvalidInput(format!("sink provide: {e}"))))?;
         let bpp = descriptor.bytes_per_pixel();
-        let row_bytes = w as usize * bpp;
+        let row_bytes = (w as usize).saturating_mul(bpp);
         let src_bytes = pixels.as_strided_bytes();
         let src_stride = pixels.stride();
         for y in 0..h as usize {
