@@ -3,6 +3,8 @@
 #[cfg(feature = "encode")]
 use crate::config::{EncoderConfig, Preset};
 use crate::error::{Error, Result};
+#[cfg(feature = "encode")]
+use crate::ffi::picture::Picture;
 use crate::types::ColorMode;
 #[cfg(feature = "encode")]
 use crate::types::{EncodePixel, PixelLayout};
@@ -526,41 +528,46 @@ impl AnimationEncoder {
 
         let webp_config = self.config.to_libwebp()?;
 
-        let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
-
-        picture.width = self.width as i32;
-        picture.height = self.height as i32;
-        picture.use_argb = 1;
+        // Use webpx's zeroed RAII wrapper, not
+        // `libwebp_sys::WebPPicture::new()`: the generated helper starts from
+        // uninitialized memory, but bindgen exposes libwebp's reserved fields
+        // as normal Rust fields. If libwebp leaves any of those fields
+        // untouched, `assume_init` would construct an invalid Rust value.
+        let mut picture = Picture::new()?;
+        picture.inner_mut().width = self.width as i32;
+        picture.inner_mut().height = self.height as i32;
+        picture.inner_mut().use_argb = 1;
 
         let stride = (self.width as usize * bpp) as i32;
         let import_ok = unsafe {
             match layout {
                 PixelLayout::Rgba => {
-                    libwebp_sys::WebPPictureImportRGBA(&mut picture, data.as_ptr(), stride)
+                    libwebp_sys::WebPPictureImportRGBA(picture.as_mut_ptr(), data.as_ptr(), stride)
                 }
                 PixelLayout::Rgb => {
-                    libwebp_sys::WebPPictureImportRGB(&mut picture, data.as_ptr(), stride)
+                    libwebp_sys::WebPPictureImportRGB(picture.as_mut_ptr(), data.as_ptr(), stride)
                 }
                 PixelLayout::Bgra => {
-                    libwebp_sys::WebPPictureImportBGRA(&mut picture, data.as_ptr(), stride)
+                    libwebp_sys::WebPPictureImportBGRA(picture.as_mut_ptr(), data.as_ptr(), stride)
                 }
                 PixelLayout::Bgr => {
-                    libwebp_sys::WebPPictureImportBGR(&mut picture, data.as_ptr(), stride)
+                    libwebp_sys::WebPPictureImportBGR(picture.as_mut_ptr(), data.as_ptr(), stride)
                 }
             }
         };
 
         if import_ok == 0 {
-            unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
             return Err(at!(Error::OutOfMemory));
         }
 
         let ok = unsafe {
-            libwebp_sys::WebPAnimEncoderAdd(self.encoder, &mut picture, timestamp_ms, &webp_config)
+            libwebp_sys::WebPAnimEncoderAdd(
+                self.encoder,
+                picture.as_mut_ptr(),
+                timestamp_ms,
+                &webp_config,
+            )
         };
-
-        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
 
         if ok == 0 {
             let error_msg = unsafe {

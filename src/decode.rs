@@ -880,8 +880,19 @@ impl<'a> Decoder<'a> {
             return Err(at!(Error::LimitExceeded(e)));
         }
 
-        let mut dec_config = libwebp_sys::WebPDecoderConfig::new()
-            .map_err(|_| at!(Error::InvalidConfig("failed to init decoder config".into())))?;
+        // `libwebp_sys::WebPDecoderConfig::new()` starts from
+        // `MaybeUninit::uninit()`. The generated binding exposes libwebp's
+        // reserved `pad` arrays as ordinary Rust fields, so assume_init would
+        // be UB if libwebp left any of them untouched. Start from zeroed memory
+        // and then let libwebp populate the documented fields.
+        let mut dec_config = core::mem::MaybeUninit::<libwebp_sys::WebPDecoderConfig>::zeroed();
+        let ok = unsafe { libwebp_sys::WebPInitDecoderConfig(dec_config.as_mut_ptr()) };
+        if !ok {
+            return Err(at!(Error::InvalidConfig(
+                "failed to init decoder config".into(),
+            )));
+        }
+        let mut dec_config = unsafe { dec_config.assume_init() };
 
         // Get features
         let status = unsafe {
