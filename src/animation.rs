@@ -528,6 +528,11 @@ impl AnimationEncoder {
 
         let webp_config = self.config.to_libwebp()?;
 
+        // Use webpx's zeroed RAII wrapper, not
+        // `libwebp_sys::WebPPicture::new()`: the generated helper starts from
+        // uninitialized memory, but bindgen exposes libwebp's reserved fields
+        // as normal Rust fields. If libwebp leaves any of those fields
+        // untouched, `assume_init` would construct an invalid Rust value.
         let mut picture = Picture::new()?;
         picture.inner_mut().width = self.width as i32;
         picture.inner_mut().height = self.height as i32;

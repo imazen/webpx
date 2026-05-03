@@ -449,6 +449,11 @@ impl StreamingEncoder {
 
         let webp_config = self.config.to_libwebp()?;
 
+        // Use webpx's zeroed RAII wrapper, not
+        // `libwebp_sys::WebPPicture::new()`: the generated helper starts from
+        // uninitialized memory, but bindgen exposes libwebp's reserved fields
+        // as normal Rust fields. If libwebp leaves any of those fields
+        // untouched, `assume_init` would construct an invalid Rust value.
         let mut picture = Picture::new()?;
         picture.inner_mut().width = self.width as i32;
         picture.inner_mut().height = self.height as i32;
@@ -479,6 +484,9 @@ impl StreamingEncoder {
         ) -> i32 {
             let ctx = unsafe { &mut *((*picture).custom_ptr as *mut CallbackContext<F>) };
 
+            // libwebp normally provides a non-null pointer for non-empty
+            // chunks. Guard the empty/null case anyway so we never build a
+            // Rust slice from a null raw pointer.
             let slice = if data.is_null() || data_size == 0 {
                 &[]
             } else {
@@ -530,6 +538,9 @@ impl StreamingEncoder {
 
         let webp_config = self.config.to_libwebp()?;
 
+        // Same initializedness invariant as the RGBA callback path above:
+        // avoid the generated `WebPPicture::new()` helper and keep all
+        // libwebp-reserved fields zeroed before C initialization.
         let mut picture = Picture::new()?;
         picture.inner_mut().width = self.width as i32;
         picture.inner_mut().height = self.height as i32;
@@ -547,8 +558,11 @@ impl StreamingEncoder {
             return Err(at!(Error::OutOfMemory));
         }
 
-        // Use memory writer and send all at once for simplicity
-        // (libwebp doesn't truly stream the output)
+        // Use the zeroed RAII writer wrapper for the same reason as
+        // `Picture`: the generated C initializer may leave reserved fields
+        // alone, and Drop must always clear libwebp's allocation on errors.
+        // We send the encoded bytes all at once because libwebp doesn't truly
+        // stream encoder output.
         let mut writer = MemWriter::new();
 
         picture.inner_mut().writer = Some(libwebp_sys::WebPMemoryWrite);
