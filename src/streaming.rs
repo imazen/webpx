@@ -1,6 +1,10 @@
 //! Streaming/incremental WebP decode and encode.
 
 use crate::error::{DecodingError, Error, Result};
+#[cfg(feature = "encode")]
+use crate::ffi::mem_writer::MemWriter;
+#[cfg(feature = "encode")]
+use crate::ffi::picture::Picture;
 use crate::types::ColorMode;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -445,19 +449,20 @@ impl StreamingEncoder {
 
         let webp_config = self.config.to_libwebp()?;
 
-        let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
-
-        picture.width = self.width as i32;
-        picture.height = self.height as i32;
-        picture.use_argb = 1;
+        let mut picture = Picture::new()?;
+        picture.inner_mut().width = self.width as i32;
+        picture.inner_mut().height = self.height as i32;
+        picture.inner_mut().use_argb = 1;
 
         let import_ok = unsafe {
-            libwebp_sys::WebPPictureImportRGBA(&mut picture, data.as_ptr(), (self.width * 4) as i32)
+            libwebp_sys::WebPPictureImportRGBA(
+                picture.as_mut_ptr(),
+                data.as_ptr(),
+                (self.width * 4) as i32,
+            )
         };
 
         if import_ok == 0 {
-            unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
             return Err(at!(Error::OutOfMemory));
         }
 
@@ -474,7 +479,11 @@ impl StreamingEncoder {
         ) -> i32 {
             let ctx = unsafe { &mut *((*picture).custom_ptr as *mut CallbackContext<F>) };
 
-            let slice = unsafe { core::slice::from_raw_parts(data, data_size) };
+            let slice = if data.is_null() || data_size == 0 {
+                &[]
+            } else {
+                unsafe { core::slice::from_raw_parts(data, data_size) }
+            };
 
             match (ctx.callback)(slice) {
                 Ok(()) => 1,
@@ -490,21 +499,18 @@ impl StreamingEncoder {
             error: None,
         };
 
-        picture.writer = Some(write_callback::<F>);
-        picture.custom_ptr = &mut ctx as *mut _ as *mut _;
+        picture.inner_mut().writer = Some(write_callback::<F>);
+        picture.inner_mut().custom_ptr = &mut ctx as *mut _ as *mut _;
 
-        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
-
-        unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
+        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
 
         if let Some(e) = ctx.error {
             return Err(e);
         }
 
         if ok == 0 {
-            return Err(at!(Error::EncodeFailed(crate::error::EncodingError::from(
-                picture.error_code as i32,
-            ))));
+            let error = crate::error::EncodingError::from(picture.inner_mut().error_code as i32);
+            return Err(at!(Error::EncodeFailed(error)));
         }
 
         Ok(())
@@ -524,53 +530,39 @@ impl StreamingEncoder {
 
         let webp_config = self.config.to_libwebp()?;
 
-        let mut picture = libwebp_sys::WebPPicture::new()
-            .map_err(|_| at!(Error::InvalidConfig("failed to init picture".into())))?;
-
-        picture.width = self.width as i32;
-        picture.height = self.height as i32;
-        picture.use_argb = 1;
+        let mut picture = Picture::new()?;
+        picture.inner_mut().width = self.width as i32;
+        picture.inner_mut().height = self.height as i32;
+        picture.inner_mut().use_argb = 1;
 
         let import_ok = unsafe {
-            libwebp_sys::WebPPictureImportRGB(&mut picture, data.as_ptr(), (self.width * 3) as i32)
+            libwebp_sys::WebPPictureImportRGB(
+                picture.as_mut_ptr(),
+                data.as_ptr(),
+                (self.width * 3) as i32,
+            )
         };
 
         if import_ok == 0 {
-            unsafe { libwebp_sys::WebPPictureFree(&mut picture) };
             return Err(at!(Error::OutOfMemory));
         }
 
         // Use memory writer and send all at once for simplicity
         // (libwebp doesn't truly stream the output)
-        let mut writer = core::mem::MaybeUninit::<libwebp_sys::WebPMemoryWriter>::zeroed();
-        unsafe { libwebp_sys::WebPMemoryWriterInit(writer.as_mut_ptr()) };
-        let mut writer = unsafe { writer.assume_init() };
+        let mut writer = MemWriter::new();
 
-        picture.writer = Some(libwebp_sys::WebPMemoryWrite);
-        picture.custom_ptr = &mut writer as *mut _ as *mut _;
+        picture.inner_mut().writer = Some(libwebp_sys::WebPMemoryWrite);
+        picture.inner_mut().custom_ptr = writer.as_mut_ptr() as *mut _;
 
-        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, &mut picture) };
+        let ok = unsafe { libwebp_sys::WebPEncode(&webp_config, picture.as_mut_ptr()) };
 
         if ok == 0 {
-            let error = crate::error::EncodingError::from(picture.error_code as i32);
-            unsafe {
-                libwebp_sys::WebPPictureFree(&mut picture);
-                libwebp_sys::WebPMemoryWriterClear(&mut writer);
-            }
+            let error = crate::error::EncodingError::from(picture.inner_mut().error_code as i32);
             return Err(at!(Error::EncodeFailed(error)));
         }
 
-        let result = unsafe {
-            let slice = core::slice::from_raw_parts(writer.mem, writer.size);
-            callback(slice)
-        };
-
-        unsafe {
-            libwebp_sys::WebPPictureFree(&mut picture);
-            libwebp_sys::WebPMemoryWriterClear(&mut writer);
-        }
-
-        result
+        let encoded = writer.to_vec();
+        callback(&encoded)
     }
 }
 
