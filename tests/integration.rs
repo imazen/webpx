@@ -1162,6 +1162,24 @@ mod icc_tests {
         profile
     }
 
+    fn assert_embedded_metadata(webp: &[u8], icc: &[u8], exif: &[u8], xmp: &[u8]) {
+        assert_eq!(
+            get_icc_profile(webp).expect("get ICC failed").as_deref(),
+            Some(icc),
+            "ICC profile should be embedded"
+        );
+        assert_eq!(
+            get_exif(webp).expect("get EXIF failed").as_deref(),
+            Some(exif),
+            "EXIF data should be embedded"
+        );
+        assert_eq!(
+            get_xmp(webp).expect("get XMP failed").as_deref(),
+            Some(xmp),
+            "XMP data should be embedded"
+        );
+    }
+
     #[test]
     fn test_icc_embed_extract() {
         let width = 32;
@@ -1246,6 +1264,83 @@ mod icc_tests {
         let (_, w, h) = decode_rgba(&webp_no_icc).expect("decode failed");
         assert_eq!(w, width);
         assert_eq!(h, height);
+    }
+
+    #[test]
+    fn test_encoder_config_metadata_reaches_encoder_backed_paths() {
+        let width = 8;
+        let height = 8;
+        let icc = create_minimal_icc_profile();
+        let exif = b"Exif\0\0MM\0*config metadata".to_vec();
+        let xmp = b"<?xpacket begin=''?><x:xmpmeta>config metadata</x:xmpmeta>".to_vec();
+        let config = EncoderConfig::new()
+            .quality(85.0)
+            .icc_profile(icc.clone())
+            .exif(exif.clone())
+            .xmp(xmp.clone());
+
+        let bgra: Vec<u8> = (0..(width * height))
+            .flat_map(|_| [30u8, 20, 10, 255])
+            .collect();
+        let webp = config
+            .encode_bgra(&bgra, width, height, Unstoppable)
+            .expect("encode BGRA with config metadata");
+        assert_embedded_metadata(&webp, &icc, &exif, &xmp);
+
+        let bgr: Vec<u8> = (0..(width * height)).flat_map(|_| [30u8, 20, 10]).collect();
+        let webp = config
+            .encode_bgr(&bgr, width, height, Unstoppable)
+            .expect("encode BGR with config metadata");
+        assert_embedded_metadata(&webp, &icc, &exif, &xmp);
+
+        let pixels = vec![rgb::RGBA8::new(10, 20, 30, 255); (width * height) as usize];
+        let img = imgref::Img::new(pixels.as_slice(), width as usize, height as usize);
+        let webp = config
+            .encode_img(img, Unstoppable)
+            .expect("encode imgref image with config metadata");
+        assert_embedded_metadata(&webp, &icc, &exif, &xmp);
+
+        let mut output = Vec::new();
+        Encoder::new_bgra(&bgra, width, height)
+            .config(config.clone())
+            .encode_into(Unstoppable, &mut output)
+            .expect("encode into Vec with config metadata");
+        assert_embedded_metadata(&output, &icc, &exif, &xmp);
+
+        #[cfg(feature = "std")]
+        {
+            let rgba = generate_rgba(width, height, 10, 20, 30, 255);
+            let mut output = Vec::new();
+            Encoder::new_rgba(&rgba, width, height)
+                .config(config.clone())
+                .encode_to_writer(Unstoppable, &mut output)
+                .expect("encode to writer with config metadata");
+            assert_embedded_metadata(&output, &icc, &exif, &xmp);
+        }
+    }
+
+    #[test]
+    fn test_encode_owned_rejects_encoder_config_metadata() {
+        let width = 8;
+        let height = 8;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let config = EncoderConfig::new().icc_profile(create_minimal_icc_profile());
+
+        let err = match Encoder::new_rgba(&data, width, height)
+            .config(config)
+            .encode_owned(Unstoppable)
+        {
+            Ok(_) => panic!("encode_owned should reject metadata from EncoderConfig"),
+            Err(err) => err,
+        };
+
+        match err.error() {
+            Error::InvalidConfig(message) => assert!(
+                message.contains("metadata embedding"),
+                "unexpected error message: {message}"
+            ),
+            other => panic!("expected InvalidConfig, got {other:?}"),
+        }
     }
 }
 

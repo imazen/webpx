@@ -97,6 +97,43 @@ fn resume_progress_panic<S: Stop>(ctx: &StopContext<S>) {
 #[cfg(not(feature = "std"))]
 fn resume_progress_panic<S: Stop>(_ctx: &StopContext<S>) {}
 
+#[cfg(feature = "icc")]
+fn has_config_metadata(config: &EncoderConfig) -> bool {
+    config.icc_profile.is_some() || config.exif_data.is_some() || config.xmp_data.is_some()
+}
+
+#[cfg(feature = "icc")]
+fn has_encoder_metadata(config: &EncoderConfig, icc_profile: Option<&[u8]>) -> bool {
+    icc_profile.is_some() || has_config_metadata(config)
+}
+
+#[cfg(feature = "icc")]
+fn embed_config_metadata(mut webp_data: Vec<u8>, config: &EncoderConfig) -> Result<Vec<u8>> {
+    if let Some(ref icc) = config.icc_profile {
+        webp_data = crate::mux::embed_icc(&webp_data, icc)?;
+    }
+    if let Some(ref exif) = config.exif_data {
+        webp_data = crate::mux::embed_exif(&webp_data, exif)?;
+    }
+    if let Some(ref xmp) = config.xmp_data {
+        webp_data = crate::mux::embed_xmp(&webp_data, xmp)?;
+    }
+    Ok(webp_data)
+}
+
+#[cfg(feature = "icc")]
+fn embed_encoder_metadata(
+    webp_data: Vec<u8>,
+    config: &EncoderConfig,
+    icc_profile: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+    let mut webp_data = embed_config_metadata(webp_data, config)?;
+    if let Some(icc) = icc_profile {
+        webp_data = crate::mux::embed_icc(&webp_data, icc)?;
+    }
+    Ok(webp_data)
+}
+
 /// Internal: Encode with full config and return stats (called by EncoderConfig).
 pub(crate) fn encode_with_config_stats(
     data: &[u8],
@@ -164,15 +201,7 @@ pub(crate) fn encode_with_config_stats(
     // Embed metadata if present
     #[cfg(feature = "icc")]
     if let Ok((mut webp_data, stats)) = result {
-        if let Some(ref icc) = config.icc_profile {
-            webp_data = crate::mux::embed_icc(&webp_data, icc)?;
-        }
-        if let Some(ref exif) = config.exif_data {
-            webp_data = crate::mux::embed_exif(&webp_data, exif)?;
-        }
-        if let Some(ref xmp) = config.xmp_data {
-            webp_data = crate::mux::embed_xmp(&webp_data, xmp)?;
-        }
+        webp_data = embed_config_metadata(webp_data, config)?;
         return Ok((webp_data, stats));
     }
 
@@ -263,15 +292,7 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
     // Embed metadata if present
     #[cfg(feature = "icc")]
     if let Ok(mut webp_data) = result {
-        if let Some(ref icc) = config.icc_profile {
-            webp_data = crate::mux::embed_icc(&webp_data, icc)?;
-        }
-        if let Some(ref exif) = config.exif_data {
-            webp_data = crate::mux::embed_exif(&webp_data, exif)?;
-        }
-        if let Some(ref xmp) = config.xmp_data {
-            webp_data = crate::mux::embed_xmp(&webp_data, xmp)?;
-        }
+        webp_data = embed_config_metadata(webp_data, config)?;
         return Ok(webp_data);
     }
 
@@ -987,13 +1008,11 @@ impl<'a> Encoder<'a> {
                 Err(at!(Error::EncodeFailed(EncodingError::from(error_code))))
             }
         } else {
-            let webp_data = writer.to_vec();
-
+            let mut webp_data = writer.to_vec();
             #[cfg(feature = "icc")]
-            if let Some(icc) = self.icc_profile {
-                return crate::mux::embed_icc(&webp_data, icc);
+            {
+                webp_data = embed_encoder_metadata(webp_data, &self.config, self.icc_profile)?;
             }
-
             Ok(webp_data)
         }
     }
@@ -1072,14 +1091,13 @@ impl<'a> Encoder<'a> {
             return Err(at!(Error::EncodeFailed(EncodingError::from(error_code))));
         }
 
-        // Note: ICC profile embedding is not supported with encode_owned()
-        // because it requires reallocating the buffer. Use encode() instead.
+        // Metadata embedding uses the muxer to assemble a new buffer, so it
+        // cannot preserve encode_owned()'s libwebp-owned zero-copy return.
         #[cfg(feature = "icc")]
-        if self.icc_profile.is_some() {
+        if has_encoder_metadata(&self.config, self.icc_profile) {
             // writer drops here (frees libwebp memory via Clear)
             return Err(at!(Error::InvalidConfig(
-                "ICC profile embedding not supported with encode_owned(), use encode() instead"
-                    .into()
+                "metadata embedding not supported with encode_owned(), use encode() instead".into()
             )));
         }
 
@@ -1110,6 +1128,13 @@ impl<'a> Encoder<'a> {
     /// # Ok::<(), webpx::At<webpx::Error>>(())
     /// ```
     pub fn encode_into<S: Stop>(self, stop: S, output: &mut Vec<u8>) -> Result<()> {
+        #[cfg(feature = "icc")]
+        if has_encoder_metadata(&self.config, self.icc_profile) {
+            let data = self.encode(stop)?;
+            output.extend_from_slice(&data);
+            return Ok(());
+        }
+
         let data = self.encode_owned(stop)?;
         output.extend_from_slice(&data);
         Ok(())
@@ -1144,6 +1169,15 @@ impl<'a> Encoder<'a> {
         stop: S,
         mut writer: W,
     ) -> Result<()> {
+        #[cfg(feature = "icc")]
+        if has_encoder_metadata(&self.config, self.icc_profile) {
+            let data = self.encode(stop)?;
+            writer
+                .write_all(&data)
+                .map_err(|e| at!(Error::IoError(e.to_string())))?;
+            return Ok(());
+        }
+
         let data = self.encode_owned(stop)?;
         writer
             .write_all(&data)
