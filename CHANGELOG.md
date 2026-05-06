@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-05
+
+### Security
+
+- **`StreamingDecoder::update` no longer holds a dangling pointer to
+  the caller's buffer.** Earlier versions (≤ 0.3.3) called
+  `libwebp_sys::WebPIUpdate`, which is documented by libwebp as "data
+  buffer is not copied to the internal memory" — libwebp stores the
+  raw `data.as_ptr()` and re-reads it on subsequent calls. Because
+  the `update(&mut self, data: &[u8])` signature did not tie `data`'s
+  lifetime to the decoder, a caller could drop the buffer between
+  calls; the next `update` / `finish` / `get_partial` would
+  dereference the dangling pointer. **Use-after-free reachable from
+  safe Rust without an `unsafe` block.**
+
+  Fix: route `update` through `append` (which copies internally via
+  `WebPIAppend`). Functional behavior for the documented single-call
+  use is unchanged; the cost is one `memcpy` of the input. The
+  function signature is unchanged so no downstream code needs to
+  update.
+
+### Testing
+
+- 19 soundness regression tests (was 18). New
+  `streaming_decoder_update_does_not_dangle_input_buffer` exercises
+  the canonical UAF shape (drop the input buffer between `update`
+  and `finish`). Under ASan the prior code would trip a
+  heap-buffer-overflow report; under the fix it must succeed
+  because the data was copied during `update`.
+
 ## [0.3.3] - 2026-05-03
 
 ### Security

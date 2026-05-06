@@ -242,9 +242,31 @@ impl<'a> StreamingDecoder<'a> {
     ///
     /// Unlike `append`, this expects the data to be the complete input or
     /// a complete prefix of it (not just a new chunk).
+    ///
+    /// # Implementation note
+    ///
+    /// Earlier webpx versions (≤ 0.3.3) called libwebp's `WebPIUpdate`
+    /// here. That function keeps a raw pointer to the input buffer and
+    /// re-reads it on subsequent calls — but our `&[u8]` parameter
+    /// doesn't outlive the call, so a follow-up `update` / `finish` /
+    /// `get_partial` would read freed memory (use-after-free).
+    ///
+    /// The borrow checker did not catch this because the input
+    /// lifetime is not tied to the decoder. Reachable from safe Rust
+    /// without an `unsafe` block. Routed to [`Self::append`] (which
+    /// makes libwebp copy the data) to close the UAF.
+    ///
+    /// Note that `Update` is documented by libwebp as "data buffer is
+    /// not copied to the internal memory" — webpx never re-exposes
+    /// that contract through a sound lifetime, so functional behavior
+    /// when called with the complete input in a single call is
+    /// unchanged.
     pub fn update(&mut self, data: &[u8]) -> Result<DecodeStatus> {
-        let status = unsafe { libwebp_sys::WebPIUpdate(self.decoder, data.as_ptr(), data.len()) };
-        self.process_status(status)
+        // Append (which copies) instead of Update (which retains the
+        // raw pointer). The semantic difference is a memcpy — for
+        // single-call uses (the only sound use of `update`) the cost
+        // is irrelevant.
+        self.append(data)
     }
 
     /// Get the current image dimensions (available after some data is decoded).

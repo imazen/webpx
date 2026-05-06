@@ -550,6 +550,55 @@ fn decoder_max_pixels_rejects_oversize_canvas() {
     }
 }
 
+// Earlier webpx (≤ 0.3.3) routed `StreamingDecoder::update` through
+// `libwebp_sys::WebPIUpdate`, which retains a raw pointer to the
+// input buffer and re-reads it on subsequent calls. The
+// `update(&mut self, data: &[u8])` signature did not tie `data`'s
+// lifetime to the decoder, so a caller could legitimately drop the
+// buffer between calls — the next `update` / `finish` / `get_partial`
+// would dereference the dangling pointer (use-after-free reachable
+// from safe Rust).
+//
+// 0.3.4 routes `update` to `append` (which copies internally), so
+// the buffer's lifetime no longer matters across calls. This test
+// exercises the canonical UAF shape: drop the input buffer between
+// `update` and `finish`. Under the old impl this would trip ASan as
+// a heap-buffer-overflow read; under the fixed impl it must succeed
+// because the data was copied during `update`.
+#[cfg(all(feature = "streaming", feature = "decode"))]
+#[test]
+fn streaming_decoder_update_does_not_dangle_input_buffer() {
+    let width = 32;
+    let height = 32;
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for _ in 0..(width * height) {
+        rgba.extend_from_slice(&[100, 150, 200, 255]);
+    }
+    let webp = Encoder::new_rgba(&rgba, width, height)
+        .lossless(true)
+        .encode(Unstoppable)
+        .expect("encode");
+
+    let mut decoder = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
+    {
+        // Pass a copy of the webp bytes from a buffer that drops at
+        // end-of-block. With the old `WebPIUpdate` routing, libwebp
+        // would stash the pointer; once the block exits and `webp_copy`
+        // is freed, any subsequent decoder call dangles.
+        let webp_copy = webp.clone();
+        let _ = decoder.update(&webp_copy);
+        // `webp_copy` drops here.
+    }
+
+    // After the buffer drops, ask the decoder to produce its result.
+    // With the fix, the decoded bytes are still in libwebp's owned
+    // copy — works fine. Without the fix, this would re-read freed
+    // memory.
+    let (decoded, w, h) = decoder.finish().expect("finish");
+    assert_eq!((w, h), (width, height));
+    assert_eq!(decoded, rgba);
+}
+
 // `progress_hook` is invoked from libwebp's C frames during encoding;
 // if a user-supplied `Stop::should_stop` panics, the panic must not
 // unwind through C (UB). 0.3.3 wraps the user callback in
