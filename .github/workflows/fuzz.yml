@@ -37,7 +37,12 @@ jobs:
           key: fuzz-build
           workspaces: fuzz
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        # Don't use --locked: cargo-fuzz's lockfile pins rustix 0.36.5,
+        # which fails to compile against current nightly toolchains
+        # ("cannot find attribute `rustc_layout_scalar_valid_range_end`"
+        # in the linux_raw backend). Letting cargo resolve transitives
+        # picks a working rustix.
+        run: cargo install cargo-fuzz
       - name: Build all fuzz targets
         run: cd fuzz && cargo +nightly fuzz build
 
@@ -71,7 +76,12 @@ jobs:
           key: fuzz-${{ matrix.target }}
           workspaces: fuzz
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        # Don't use --locked: cargo-fuzz's lockfile pins rustix 0.36.5,
+        # which fails to compile against current nightly toolchains
+        # ("cannot find attribute `rustc_layout_scalar_valid_range_end`"
+        # in the linux_raw backend). Letting cargo resolve transitives
+        # picks a working rustix.
+        run: cargo install cargo-fuzz
       - name: Determine duration
         id: duration
         run: |
