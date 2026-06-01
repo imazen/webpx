@@ -12,6 +12,15 @@ description = "Complete WebP encoding/decoding with ICC profiles, streaming, and
 repository = "https://github.com/imazen/webpx"
 keywords = ["webp", "image", "codec", "icc", "animation"]
 categories = ["multimedia::images", "multimedia::encoding"]
+exclude = [
+    ".github/",
+    ".gitignore",
+    "CLAUDE.md",
+    "justfile",
+    "docs/",
+    "tests/",
+    "benches/",
+]
 
 [features]
 default = ["decode", "encode", "std"]

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Excluded `.github/`, `.gitignore`, `CLAUDE.md`, `justfile`, `docs/`, `tests/`, and `benches/` from the published crate tarball; `src/`, `examples/`, `README`, `CHANGELOG`, and `LICENSE` files still ship.
+
 ## [0.3.4] - 2026-05-05
 
 ### Security
