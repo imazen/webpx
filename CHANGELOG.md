@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Versioned public-API surface snapshot at `docs/public-api/webpx.txt`,
+  regenerated on every `cargo test` run via `tests/public_api_doc.rs`
+  (`ZEN_API_DOC=check` verifies in CI, `=off` skips); `justfile` recipes
+  `api-doc` / `api-doc-check`
+
 ### Changed — BREAKING (0.4.0)
 
 - **Every decode-side entry point now applies `Limits::default()`

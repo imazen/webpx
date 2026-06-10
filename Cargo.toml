@@ -59,6 +59,8 @@ image = "0.25"
 # structured fuzz seeds (fuzz/regression/limits_boundaries-*) with the
 # exact `Arbitrary` layout the fuzz targets used to produce them.
 arbitrary = { version = "1.4.2", features = ["derive"] }
+# tests/public_api_doc.rs parses `cargo metadata` for the feature list.
+serde_json = "1.0.150"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 criterion = { version = "0.8", features = ["rayon"] }

@@ -8,9 +8,18 @@ test:
 clippy:
     cargo clippy --all-targets --all-features -- -D warnings
 
-# Format code
+# Format code + regenerate the public-API surface snapshot (docs/public-api/)
 fmt:
     cargo fmt
+    cargo test -p webpx --test public_api_doc
+
+# Regenerate the public-API surface snapshot only
+api-doc:
+    cargo test -p webpx --test public_api_doc
+
+# Verify the committed snapshot is current (what CI runs)
+api-doc-check:
+    ZEN_API_DOC=check cargo test -p webpx --test public_api_doc
 
 # Check formatting
 fmt-check:
