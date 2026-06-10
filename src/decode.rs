@@ -240,9 +240,8 @@ pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
 /// decode multiple images into the same Vec.
 ///
 /// Applies webpx's default resource limits ([`crate::Limits::default`]).
-/// To decode trusted input without caps, use [`Decoder`] with
-/// [`Limits::none()`](crate::Limits::none) and extend your Vec from the
-/// returned pixels.
+/// For a custom policy — or none, for trusted input — use
+/// [`Decoder::decode_append`] with [`DecoderConfig::limits`].
 ///
 /// # Arguments
 /// * `data` - WebP encoded data
@@ -263,6 +262,13 @@ pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
 /// ```
 pub fn decode_append<P: DecodePixel>(data: &[u8], output: &mut Vec<P>) -> Result<(u32, u32)> {
     default_limits_gate(data)?;
+    decode_append_unlimited(data, output)
+}
+
+pub(crate) fn decode_append_unlimited<P: DecodePixel>(
+    data: &[u8],
+    output: &mut Vec<P>,
+) -> Result<(u32, u32)> {
     let (ptr, width, height) = P::decode_new(data)
         .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
@@ -335,15 +341,22 @@ pub fn decode_to_img<P: DecodePixel>(data: &[u8]) -> Result<ImgVec<P>> {
 /// ```
 ///
 /// Applies webpx's default resource limits ([`crate::Limits::default`]).
-/// To decode trusted input without caps, use
-/// [`Decoder::decode_rgba_into`] (byte-oriented; `rgb::ComponentBytes`
-/// bridges typed slices) with [`Limits::none()`](crate::Limits::none).
+/// For a custom policy — or none, for trusted input — use
+/// [`Decoder::decode_into`] with [`DecoderConfig::limits`].
 pub fn decode_into<P: DecodePixel>(
     data: &[u8],
     output: &mut [P],
     stride_pixels: u32,
 ) -> Result<(u32, u32)> {
     default_limits_gate(data)?;
+    decode_into_unlimited(data, output, stride_pixels)
+}
+
+pub(crate) fn decode_into_unlimited<P: DecodePixel>(
+    data: &[u8],
+    output: &mut [P],
+    stride_pixels: u32,
+) -> Result<(u32, u32)> {
     let info = ImageInfo::from_webp(data)?;
     let width = info.width;
     let height = info.height;
@@ -986,6 +999,62 @@ impl<'a> Decoder<'a> {
     pub fn decode_bgr_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
         self.check_simple_path_config("decode_bgr_into", "decode_bgr()")?;
         decode_bgr_into_unlimited(self.data, output, stride_bytes)
+    }
+
+    /// Decode directly into a typed pixel slice.
+    ///
+    /// Typed builder counterpart of the free [`crate::decode_into`]
+    /// function: same buffer/stride contract (`stride_pixels` ≥ width,
+    /// `output` ≥ `stride_pixels × height`), but enforcing this decoder's
+    /// configured [`Limits`](crate::Limits) instead of the defaults —
+    /// including [`Limits::none()`](crate::Limits::none) for trusted
+    /// input.
+    ///
+    /// # Note
+    /// Like the `_into` methods, advanced options (cropping, scaling,
+    /// `flip`, `bypass_filtering`, `no_fancy_upsampling`,
+    /// `alpha_dithering`) are rejected with
+    /// [`Error::InvalidConfig`]; use [`Self::decode_rgba`] for those.
+    /// `use_threads` is ignored.
+    pub fn decode_into<P: DecodePixel>(
+        self,
+        output: &mut [P],
+        stride_pixels: u32,
+    ) -> Result<(u32, u32)> {
+        self.check_simple_path_config("decode_into", "decode_rgba()")?;
+        decode_into_unlimited(self.data, output, stride_pixels)
+    }
+
+    /// Decode, appending typed pixels to an existing `Vec`.
+    ///
+    /// Typed builder counterpart of the free [`crate::decode_append`]
+    /// function, enforcing this decoder's configured
+    /// [`Limits`](crate::Limits) instead of the defaults — including
+    /// [`Limits::none()`](crate::Limits::none) for trusted input.
+    ///
+    /// # Note
+    /// Like the `_into` methods, advanced options (cropping, scaling,
+    /// `flip`, `bypass_filtering`, `no_fancy_upsampling`,
+    /// `alpha_dithering`) are rejected with
+    /// [`Error::InvalidConfig`]; use [`Self::decode_rgba`] for those.
+    /// `use_threads` is ignored.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use rgb::RGBA8;
+    /// use webpx::{Decoder, DecoderConfig, Limits};
+    ///
+    /// let webp_data: &[u8] = &[0u8; 100]; // placeholder
+    /// let mut pixels: Vec<RGBA8> = Vec::new();
+    /// let (w, h) = Decoder::new(webp_data)?
+    ///     .config(DecoderConfig::new().limits(Limits::none()))
+    ///     .decode_append(&mut pixels)?;
+    /// # Ok::<(), webpx::At<webpx::Error>>(())
+    /// ```
+    pub fn decode_append<P: DecodePixel>(self, output: &mut Vec<P>) -> Result<(u32, u32)> {
+        self.check_simple_path_config("decode_append", "decode_rgba()")?;
+        decode_append_unlimited(self.data, output)
     }
 
     /// Decode to YUV planes.

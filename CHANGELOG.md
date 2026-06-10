@@ -31,6 +31,12 @@
 
 - `StreamingDecoder::limits(Limits)` — replace the streaming decoder's
   resource policy (default: `Limits::default()`).
+- `Decoder::decode_append::<P>` and `Decoder::decode_into::<P>` —
+  typed builder counterparts of the free `decode_append` /
+  `decode_into` functions, so every free-function capability has a
+  custom-limits equivalent (including `Limits::none()`) with no
+  workaround copies. Like the byte-level `_into` builder methods, they
+  reject crop/scale/flip/filter options the simple API cannot honor.
 - `[package.metadata.docs.rs] all-features = true` so docs.rs resolves
   feature-gated items referenced by the enforcement-matrix docs.
 

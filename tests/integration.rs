@@ -1919,6 +1919,103 @@ mod decoder_tests {
     }
 
     #[test]
+    fn test_decoder_decode_append_and_into_respect_configured_limits() {
+        use rgb::RGBA8;
+        use webpx::{DecoderConfig, Limits};
+
+        let width = 100;
+        let height = 100;
+        let data = generate_rgba(width, height, 10, 20, 30, 255);
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
+
+        // Tighter-than-image custom limits reject.
+        let tight = DecoderConfig::new().limits(Limits::none().with_max_pixels(50 * 50));
+        let mut pixels: Vec<RGBA8> = Vec::new();
+        assert_limit_exceeded(
+            Decoder::new(&webp)
+                .expect("decoder")
+                .config(tight.clone())
+                .decode_append(&mut pixels),
+            "Decoder::decode_append",
+        );
+        let mut buf = vec![RGBA8::default(); (width * height) as usize];
+        assert_limit_exceeded(
+            Decoder::new(&webp)
+                .expect("decoder")
+                .config(tight)
+                .decode_into(&mut buf, width),
+            "Decoder::decode_into",
+        );
+
+        // Custom limits that fit pass, and the pixels are identical to
+        // the free functions' output.
+        let fit = DecoderConfig::new().limits(Limits::none().with_max_pixels(100 * 100));
+        let mut pixels: Vec<RGBA8> = Vec::new();
+        let (w, h) = Decoder::new(&webp)
+            .expect("decoder")
+            .config(fit.clone())
+            .decode_append(&mut pixels)
+            .expect("decode_append at exact budget");
+        assert_eq!((w, h), (width, height));
+        let mut free_pixels: Vec<RGBA8> = Vec::new();
+        webpx::decode_append::<RGBA8>(&webp, &mut free_pixels).expect("free decode_append");
+        assert_eq!(pixels, free_pixels);
+
+        let (w, h) = Decoder::new(&webp)
+            .expect("decoder")
+            .config(fit)
+            .decode_into(&mut buf, width)
+            .expect("decode_into at exact budget");
+        assert_eq!((w, h), (width, height));
+        assert_eq!(buf, free_pixels);
+
+        // decode_append appends — prior contents stay put.
+        let sentinel = RGBA8::new(1, 2, 3, 4);
+        let mut appended = vec![sentinel];
+        Decoder::new(&webp)
+            .expect("decoder")
+            .config(DecoderConfig::new().limits(Limits::none()))
+            .decode_append(&mut appended)
+            .expect("append after sentinel");
+        assert_eq!(appended[0], sentinel);
+        assert_eq!(appended.len(), 1 + (width * height) as usize);
+        assert_eq!(&appended[1..], &free_pixels[..]);
+    }
+
+    #[test]
+    fn test_decoder_decode_append_and_into_reject_advanced_options() {
+        use rgb::RGBA8;
+        use webpx::Error;
+
+        let width = 32;
+        let height = 32;
+        let data = generate_rgba(width, height, 10, 20, 30, 255);
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
+
+        let mut pixels: Vec<RGBA8> = Vec::new();
+        let err = Decoder::new(&webp)
+            .expect("decoder")
+            .scale(16, 16)
+            .decode_append(&mut pixels)
+            .expect_err("decode_append must reject scale configs");
+        match err.error() {
+            Error::InvalidConfig(_) => {}
+            other => panic!("expected InvalidConfig, got {other:?}"),
+        }
+
+        let mut buf = vec![RGBA8::default(); (width * height) as usize];
+        let err = Decoder::new(&webp)
+            .expect("decoder")
+            .crop(0, 0, 16, 16)
+            .decode_into(&mut buf, width)
+            .expect_err("decode_into must reject crop configs");
+        match err.error() {
+            Error::InvalidConfig(_) => {}
+            other => panic!("expected InvalidConfig, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_decode_into_rejects_output_affecting_options() {
         use webpx::{DecoderConfig, Error};
 

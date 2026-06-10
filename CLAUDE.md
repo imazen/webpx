@@ -108,7 +108,7 @@ These are the patterns that have bitten webpx; treat any new FFI call site as su
 
 300+ tests:
 - 28 unit tests in src/
-- 197 integration tests in tests/integration.rs
+- 199 integration tests in tests/integration.rs
 - 19 soundness regression tests in tests/soundness.rs (each maps to a fixed bug)
 - 7 zencodec integration tests
 - 35 doc tests
