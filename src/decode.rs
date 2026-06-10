@@ -21,9 +21,30 @@ use rgb::alt::{BGR8, BGRA8};
 use rgb::{RGB8, RGBA8};
 use whereat::*;
 
+/// Gate applied by every free (simple-API) decode function: webpx's
+/// production-default [`crate::Limits`] — 64 MP per frame, 16383×16383,
+/// 64 MiB input. The builder API is the escape hatch for trusted input:
+/// `Decoder::new(data)?.config(DecoderConfig::new().limits(Limits::none()))`
+/// decodes without webpx-side caps. Internal callers that have already
+/// applied their own configured limits use the `*_unlimited` siblings.
+pub(crate) fn default_limits_gate(data: &[u8]) -> Result<()> {
+    let limits = crate::Limits::default();
+    if let Err(e) = limits.check_input_size(data.len() as u64) {
+        return Err(at!(Error::LimitExceeded(e)));
+    }
+    let info = ImageInfo::from_webp(data)?;
+    limits
+        .check_still_image(info.width, info.height)
+        .map_err(|e| at!(Error::LimitExceeded(e)))
+}
+
 /// Decode WebP data to RGBA pixels.
 ///
 /// Returns the decoded pixels and dimensions.
+///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
 ///
 /// # Example
 ///
@@ -33,6 +54,11 @@ use whereat::*;
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn decode_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    default_limits_gate(data)?;
+    decode_rgba_unlimited(data)
+}
+
+pub(crate) fn decode_rgba_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -59,7 +85,16 @@ pub fn decode_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 /// Decode WebP data to RGB pixels (no alpha).
 ///
 /// Returns the decoded pixels and dimensions.
+///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
 pub fn decode_rgb(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    default_limits_gate(data)?;
+    decode_rgb_unlimited(data)
+}
+
+pub(crate) fn decode_rgb_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -87,7 +122,16 @@ pub fn decode_rgb(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 ///
 /// BGRA is the native format on Windows and some GPU APIs.
 /// Returns the decoded pixels and dimensions.
+///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
 pub fn decode_bgra(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    default_limits_gate(data)?;
+    decode_bgra_unlimited(data)
+}
+
+pub(crate) fn decode_bgra_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -115,7 +159,16 @@ pub fn decode_bgra(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 ///
 /// BGR is common in OpenCV and some image libraries.
 /// Returns the decoded pixels and dimensions.
+///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
 pub fn decode_bgr(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    default_limits_gate(data)?;
+    decode_bgr_unlimited(data)
+}
+
+pub(crate) fn decode_bgr_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -155,6 +208,7 @@ pub fn decode_bgr(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
+    default_limits_gate(data)?;
     let (ptr, width, height) = P::decode_new(data)
         .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
@@ -199,6 +253,7 @@ pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn decode_append<P: DecodePixel>(data: &[u8], output: &mut Vec<P>) -> Result<(u32, u32)> {
+    default_limits_gate(data)?;
     let (ptr, width, height) = P::decode_new(data)
         .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
@@ -270,6 +325,7 @@ pub fn decode_into<P: DecodePixel>(
     output: &mut [P],
     stride_pixels: u32,
 ) -> Result<(u32, u32)> {
+    default_limits_gate(data)?;
     let info = ImageInfo::from_webp(data)?;
     let width = info.width;
     let height = info.height;
@@ -349,6 +405,15 @@ pub fn decode_into<P: DecodePixel>(
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn decode_rgba_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+    default_limits_gate(data)?;
+    decode_rgba_into_unlimited(data, output, stride_bytes)
+}
+
+pub(crate) fn decode_rgba_into_unlimited(
+    data: &[u8],
+    output: &mut [u8],
+    stride_bytes: u32,
+) -> Result<(u32, u32)> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -406,6 +471,15 @@ pub fn decode_rgba_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Re
 /// # Returns
 /// Width and height of the decoded image.
 pub fn decode_bgra_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+    default_limits_gate(data)?;
+    decode_bgra_into_unlimited(data, output, stride_bytes)
+}
+
+pub(crate) fn decode_bgra_into_unlimited(
+    data: &[u8],
+    output: &mut [u8],
+    stride_bytes: u32,
+) -> Result<(u32, u32)> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -461,6 +535,15 @@ pub fn decode_bgra_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Re
 /// # Returns
 /// Width and height of the decoded image.
 pub fn decode_rgb_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+    default_limits_gate(data)?;
+    decode_rgb_into_unlimited(data, output, stride_bytes)
+}
+
+pub(crate) fn decode_rgb_into_unlimited(
+    data: &[u8],
+    output: &mut [u8],
+    stride_bytes: u32,
+) -> Result<(u32, u32)> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -518,6 +601,15 @@ pub fn decode_rgb_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Res
 /// # Returns
 /// Width and height of the decoded image.
 pub fn decode_bgr_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+    default_limits_gate(data)?;
+    decode_bgr_into_unlimited(data, output, stride_bytes)
+}
+
+pub(crate) fn decode_bgr_into_unlimited(
+    data: &[u8],
+    output: &mut [u8],
+    stride_bytes: u32,
+) -> Result<(u32, u32)> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -567,6 +659,11 @@ pub fn decode_bgr_into(data: &[u8], output: &mut [u8], stride_bytes: u32) -> Res
 ///
 /// Returns YUV420 planar data.
 pub fn decode_yuv(data: &[u8]) -> Result<YuvPlanes> {
+    default_limits_gate(data)?;
+    decode_yuv_unlimited(data)
+}
+
+pub(crate) fn decode_yuv_unlimited(data: &[u8]) -> Result<YuvPlanes> {
     let mut width: i32 = 0;
     let mut height: i32 = 0;
     let mut u_ptr: *mut u8 = core::ptr::null_mut();
@@ -719,7 +816,11 @@ impl<'a> Decoder<'a> {
         if self.config.needs_advanced_api() {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGBA)
         } else {
-            decode_rgba(self.data)
+            // Reaching the simple path means `needs_advanced_api()` is
+            // false, which requires `limits.has_any()` to be false — the
+            // caller explicitly configured `Limits::none()`. Honor that
+            // opt-out by skipping the free functions' default gate.
+            decode_rgba_unlimited(self.data)
         }
     }
 
@@ -728,7 +829,7 @@ impl<'a> Decoder<'a> {
         if self.config.needs_advanced_api() {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGB)
         } else {
-            decode_rgb(self.data)
+            decode_rgb_unlimited(self.data)
         }
     }
 
@@ -776,7 +877,7 @@ impl<'a> Decoder<'a> {
         if self.config.needs_advanced_api() {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGRA)
         } else {
-            decode_bgra(self.data)
+            decode_bgra_unlimited(self.data)
         }
     }
 
@@ -785,7 +886,7 @@ impl<'a> Decoder<'a> {
         if self.config.needs_advanced_api() {
             self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGR)
         } else {
-            decode_bgr(self.data)
+            decode_bgr_unlimited(self.data)
         }
     }
 
@@ -838,8 +939,11 @@ impl<'a> Decoder<'a> {
     /// `use_threads` is ignored (the simple API is single-threaded).
     /// Configured [`Limits`](crate::Limits) are enforced.
     pub fn decode_rgba_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
+        // The gate enforces this decoder's *configured* limits; the
+        // _unlimited call skips the free functions' default gate so an
+        // explicit `Limits::none()` opt-out is honored.
         self.check_simple_path_config("decode_rgba_into", "decode_rgba()")?;
-        decode_rgba_into(self.data, output, stride_bytes)
+        decode_rgba_into_unlimited(self.data, output, stride_bytes)
     }
 
     /// Decode RGB into a pre-allocated buffer (zero-copy).
@@ -847,7 +951,7 @@ impl<'a> Decoder<'a> {
     /// See [`Self::decode_rgba_into`] for details.
     pub fn decode_rgb_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
         self.check_simple_path_config("decode_rgb_into", "decode_rgb()")?;
-        decode_rgb_into(self.data, output, stride_bytes)
+        decode_rgb_into_unlimited(self.data, output, stride_bytes)
     }
 
     /// Decode BGRA into a pre-allocated buffer (zero-copy).
@@ -855,7 +959,7 @@ impl<'a> Decoder<'a> {
     /// See [`Self::decode_rgba_into`] for details.
     pub fn decode_bgra_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
         self.check_simple_path_config("decode_bgra_into", "decode_bgra()")?;
-        decode_bgra_into(self.data, output, stride_bytes)
+        decode_bgra_into_unlimited(self.data, output, stride_bytes)
     }
 
     /// Decode BGR into a pre-allocated buffer (zero-copy).
@@ -863,7 +967,7 @@ impl<'a> Decoder<'a> {
     /// See [`Self::decode_rgba_into`] for details.
     pub fn decode_bgr_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
         self.check_simple_path_config("decode_bgr_into", "decode_bgr()")?;
-        decode_bgr_into(self.data, output, stride_bytes)
+        decode_bgr_into_unlimited(self.data, output, stride_bytes)
     }
 
     /// Decode to YUV planes.
@@ -879,8 +983,9 @@ impl<'a> Decoder<'a> {
     pub fn decode_yuv(self) -> Result<YuvPlanes> {
         self.check_simple_path_config("decode_yuv", "decode_rgba()")?;
         // The simple API is used because advanced YUV decoding requires
-        // more complex buffer management.
-        decode_yuv(self.data)
+        // more complex buffer management. _unlimited: this decoder's
+        // configured limits were just enforced above.
+        decode_yuv_unlimited(self.data)
     }
 
     /// Advanced decode with cropping/scaling support.

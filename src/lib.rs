@@ -69,11 +69,16 @@
 //!
 //! [`Limits::default()`] applies opinionated production caps (64 MP per
 //! frame, 256 MP cumulative, 16383×16383, 64 MiB input, 4096 frames,
-//! 5 min animation, 4 MiB metadata, 256 MiB output), so the default
-//! `DecoderConfig` and `AnimationDecoder` paths are already bounded.
-//! Override individual fields via the `with_*` builders on top of
-//! `Limits::default()`, or use [`Limits::none()`] to opt out entirely
-//! (only when the input source is fully trusted).
+//! 5 min animation, 4 MiB metadata, 256 MiB output), and every
+//! decode-side entry point enforces them unless you opt out — the free
+//! functions (`decode_rgba`, `decode_yuv`, `get_icc_profile`, ...), the
+//! `Decoder` builder, the `AnimationDecoder`, and the
+//! `StreamingDecoder` alike. Override individual fields via the
+//! `with_*` builders on top of `Limits::default()`, or pass
+//! [`Limits::none()`] through the configurable paths
+//! (`DecoderConfig::limits`, `AnimationDecoder::with_options_limits`,
+//! `get_*_with_limits`, `StreamingDecoder::limits`) to opt out
+//! entirely (only when the input source is fully trusted).
 //!
 //! ```rust,no_run
 //! use webpx::{Decoder, DecoderConfig, Limits};

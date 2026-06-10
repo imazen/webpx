@@ -62,6 +62,17 @@ pub struct StreamingDecoder<'a> {
     width: i32,
     height: i32,
     last_y: i32,
+    /// Resource policy applied to `append`/`update`. Defaults to
+    /// [`crate::Limits::default`]; replace via [`Self::limits`].
+    limits: crate::Limits,
+    /// Cumulative bytes fed in, checked against `max_input_bytes`.
+    appended_bytes: u64,
+    /// Set once the declared canvas dimensions have been validated.
+    dims_checked: bool,
+    /// Stream prefix kept until the header parses (freed afterwards).
+    /// Canvas dimensions live in the first ~30 bytes for every WebP
+    /// layout, so this stays tiny; 4 KiB is a defensive ceiling.
+    header_stash: Vec<u8>,
     // Ties the decoder's lifetime to the caller-supplied output buffer
     // when `with_buffer` is used. For `new()` the lifetime is `'static`
     // because libwebp owns the buffer.
@@ -71,6 +82,29 @@ pub struct StreamingDecoder<'a> {
 // SAFETY: The WebPIDecoder is internally thread-safe for single-threaded access
 #[cfg(feature = "decode")]
 unsafe impl Send for StreamingDecoder<'_> {}
+
+/// Extract the declared canvas dimensions from a stream prefix, if the
+/// header has arrived.
+///
+/// VP8X is handled with a direct fixed-offset parse: the spec requires
+/// VP8X to be the first chunk after the RIFF header, and the canvas size
+/// sits in its last six bytes — so 30 bytes of prefix always suffice,
+/// even when the actual image chunk is megabytes downstream behind
+/// metadata chunks (`WebPGetFeatures` reports "not enough data" for such
+/// prefixes). Everything else (VP8-first, VP8L-first, headerless raw
+/// streams) resolves via [`crate::ImageInfo::from_webp`] within the
+/// first ~30 bytes as well.
+#[cfg(feature = "decode")]
+fn probe_canvas_dims(prefix: &[u8]) -> Option<(u32, u32)> {
+    if prefix.len() >= 30 && &prefix[0..4] == b"RIFF" && &prefix[8..16] == b"WEBPVP8X" {
+        let w = 1 + u32::from_le_bytes([prefix[24], prefix[25], prefix[26], 0]);
+        let h = 1 + u32::from_le_bytes([prefix[27], prefix[28], prefix[29], 0]);
+        return Some((w, h));
+    }
+    crate::ImageInfo::from_webp(prefix)
+        .ok()
+        .map(|info| (info.width, info.height))
+}
 
 #[cfg(feature = "decode")]
 impl StreamingDecoder<'static> {
@@ -119,6 +153,10 @@ impl StreamingDecoder<'static> {
             width: 0,
             height: 0,
             last_y: 0,
+            limits: crate::Limits::default(),
+            appended_bytes: 0,
+            dims_checked: false,
+            header_stash: Vec::new(),
             _marker: PhantomData,
         })
     }
@@ -182,17 +220,77 @@ impl<'a> StreamingDecoder<'a> {
             width: 0,
             height: 0,
             last_y: 0,
+            limits: crate::Limits::default(),
+            appended_bytes: 0,
+            dims_checked: false,
+            header_stash: Vec::new(),
             _marker: PhantomData,
         })
+    }
+
+    /// Replace the resource-limit policy.
+    ///
+    /// Defaults to [`crate::Limits::default`] — production caps suited
+    /// to untrusted input. Pass [`crate::Limits::none`] for trusted
+    /// streams. Applies to subsequent [`Self::append`] / [`Self::update`]
+    /// calls: `max_input_bytes` is checked against the cumulative bytes
+    /// fed in, and the dimension/pixel caps are checked once, when the
+    /// bitstream header first parses (before libwebp allocates the
+    /// canvas). Frame-count and animation-duration budgets do not apply
+    /// here — the incremental decoder handles still images only; use
+    /// [`crate::AnimationDecoder`] for animations.
+    #[must_use]
+    pub fn limits(mut self, limits: crate::Limits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// Append data to the decoder and continue decoding.
     ///
     /// Returns the decode status indicating whether more data is needed
     /// or decoding is complete.
+    ///
+    /// Enforces the decoder's [`crate::Limits`] (default:
+    /// [`crate::Limits::default`]; see [`Self::limits`]).
     pub fn append(&mut self, data: &[u8]) -> Result<DecodeStatus> {
+        self.check_append_limits(data)?;
         let status = unsafe { libwebp_sys::WebPIAppend(self.decoder, data.as_ptr(), data.len()) };
         self.process_status(status)
+    }
+
+    /// Limits gate run before every chunk is handed to libwebp.
+    ///
+    /// Dimension caps must fire *before* `WebPIAppend` completes the
+    /// header parse, because that is the moment libwebp allocates the
+    /// whole-canvas output buffer (for the `new()` constructor). The
+    /// stash mirrors the stream prefix so the declared dimensions can be
+    /// validated first: for VP8X files the canvas size sits at fixed
+    /// offsets in the first 30 bytes (the image chunk itself may be
+    /// megabytes away, behind ICCP/EXIF chunks, so `WebPGetFeatures`
+    /// alone would report "not enough data" right up until the same call
+    /// that allocates); for VP8/VP8L-first layouts `ImageInfo::from_webp`
+    /// resolves within the first ~30 bytes too.
+    fn check_append_limits(&mut self, data: &[u8]) -> Result<()> {
+        self.appended_bytes = self.appended_bytes.saturating_add(data.len() as u64);
+        if let Err(e) = self.limits.check_input_size(self.appended_bytes) {
+            return Err(at!(Error::LimitExceeded(e)));
+        }
+        if self.dims_checked || !self.limits.has_any() {
+            return Ok(());
+        }
+        const STASH_CAP: usize = 4096;
+        if self.header_stash.len() < STASH_CAP {
+            let take = data.len().min(STASH_CAP - self.header_stash.len());
+            self.header_stash.extend_from_slice(&data[..take]);
+        }
+        if let Some((width, height)) = probe_canvas_dims(&self.header_stash) {
+            if let Err(e) = self.limits.check_still_image(width, height) {
+                return Err(at!(Error::LimitExceeded(e)));
+            }
+            self.dims_checked = true;
+            self.header_stash = Vec::new();
+        }
+        Ok(())
     }
 
     /// Process the VP8 status code and update internal state.

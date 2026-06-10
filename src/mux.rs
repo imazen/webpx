@@ -7,8 +7,10 @@ use whereat::*;
 
 /// Extract ICC profile from WebP data.
 ///
-/// Returns `None` if no ICC profile is present. Subject to the internal
-/// 256 MiB hard cap; for a tighter cap, use [`get_icc_profile_with_limits`].
+/// Returns `None` if no ICC profile is present. Applies webpx's default
+/// resource limits ([`crate::Limits::default`]: 64 MiB input, 4 MiB
+/// metadata chunk). For a different cap — or none, via
+/// [`crate::Limits::none`] — use [`get_icc_profile_with_limits`].
 ///
 /// # Example
 ///
@@ -20,23 +22,25 @@ use whereat::*;
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
 pub fn get_icc_profile(webp_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    get_chunk(webp_data, b"ICCP", &crate::Limits::none())
+    get_chunk(webp_data, b"ICCP", &crate::Limits::default())
 }
 
 /// Extract EXIF metadata from WebP data.
 ///
-/// Returns `None` if no EXIF data is present. Subject to the internal
-/// 256 MiB hard cap; for a tighter cap, use [`get_exif_with_limits`].
+/// Returns `None` if no EXIF data is present. Applies webpx's default
+/// resource limits ([`crate::Limits::default`]); for a different cap —
+/// or none, via [`crate::Limits::none`] — use [`get_exif_with_limits`].
 pub fn get_exif(webp_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    get_chunk(webp_data, b"EXIF", &crate::Limits::none())
+    get_chunk(webp_data, b"EXIF", &crate::Limits::default())
 }
 
 /// Extract XMP metadata from WebP data.
 ///
-/// Returns `None` if no XMP data is present. Subject to the internal
-/// 256 MiB hard cap; for a tighter cap, use [`get_xmp_with_limits`].
+/// Returns `None` if no XMP data is present. Applies webpx's default
+/// resource limits ([`crate::Limits::default`]); for a different cap —
+/// or none, via [`crate::Limits::none`] — use [`get_xmp_with_limits`].
 pub fn get_xmp(webp_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    get_chunk(webp_data, b"XMP ", &crate::Limits::none())
+    get_chunk(webp_data, b"XMP ", &crate::Limits::default())
 }
 
 /// Extract ICC profile, rejecting chunks larger than `limits.max_metadata_bytes`.

@@ -10,10 +10,18 @@
 //! typical web / image-server use (64 MP per frame, 256 MP cumulative,
 //! 16383×16383, 64 MiB input, 4096 frames, 5 min animation, 4 MiB
 //! metadata, 256 MiB output). [`Limits::none()`] returns the unbounded
-//! config — use that only when you fully trust the input source. Both
-//! `DecoderConfig::default()` and `AnimationDecoder::with_options(...)`
-//! flow through the default caps; explicit `_with_limits` paths let
-//! callers override.
+//! config — use that only when you fully trust the input source.
+//!
+//! **Every decode-side entry point applies the default caps unless you
+//! opt out.** The free functions (`decode_rgba`, `decode_yuv`,
+//! `decode_*_into`, `get_icc_profile`, ...), `DecoderConfig::default()`,
+//! `AnimationDecoder::new` / `with_options`, and `StreamingDecoder`
+//! all flow through [`Limits::default()`]. To lift or change the caps,
+//! use the configurable path and pass your own policy:
+//! `DecoderConfig::new().limits(...)`, `AnimationDecoder::
+//! with_options_limits(...)`, `get_*_with_limits(...)`, or
+//! `StreamingDecoder::new(...).limits(...)` — with [`Limits::none()`]
+//! for fully-trusted input.
 //!
 //! Use the `check_*` methods for parse-time rejection (fastest — reject
 //! before any pixel work):
@@ -49,15 +57,20 @@
 /// for shape compatibility but webpx does not auto-check it on this path
 /// — call the corresponding `check_*` method yourself.
 ///
-/// | Field | `DecoderConfig::limits` | `AnimationDecoder::with_options_limits` | `mux::*_with_limits` | Encoder paths |
-/// |---|---|---|---|---|
-/// | `max_input_bytes` | Auto (pre-features) | Auto (pre-decoder) | Auto (pre-demux) | n/a |
-/// | `max_width` / `max_height` / `max_pixels` | Auto (declared dims, post-scale) | Auto (canvas dims) | n/a | Manual via [`check_dimensions`](Self::check_dimensions) |
-/// | `max_total_pixels` | Auto (still = w × h × 1) | Auto (w × h × frame_count) | n/a | n/a |
-/// | `max_frames` | n/a | Auto (declared frame_count) | n/a | n/a |
-/// | `max_animation_ms` | n/a | Auto in [`AnimationDecoder::decode_all`](crate::AnimationDecoder::decode_all) (cumulative timestamp) | n/a | Manual via [`check_animation_ms`](Self::check_animation_ms) |
-/// | `max_metadata_bytes` | n/a | n/a | Auto (chunk size) | n/a |
-/// | `max_output_bytes` | n/a | n/a | n/a | Manual via [`check_output_size`](Self::check_output_size) on the encoded `Vec` |
+/// The free convenience functions (`decode_rgba`, `decode_yuv`,
+/// `decode_*_into`, `get_icc_profile`, ...) enforce the
+/// `DecoderConfig::limits` / `mux::*_with_limits` columns with
+/// [`Limits::default()`] as the policy.
+///
+/// | Field | `DecoderConfig::limits` | `AnimationDecoder::with_options_limits` | `mux::*_with_limits` | [`StreamingDecoder`](crate::StreamingDecoder) | Encoder paths |
+/// |---|---|---|---|---|---|
+/// | `max_input_bytes` | Auto (pre-features) | Auto (pre-decoder) | Auto (pre-demux) | Auto (cumulative across `append`/`update`) | n/a |
+/// | `max_width` / `max_height` / `max_pixels` | Auto (declared dims, post-scale) | Auto (canvas dims) | n/a | Auto (declared dims, pre-allocation) | Manual via [`check_dimensions`](Self::check_dimensions) |
+/// | `max_total_pixels` | Auto (still = w × h × 1) | Auto (w × h × frame_count) | n/a | Auto (still = w × h × 1) | n/a |
+/// | `max_frames` | n/a | Auto (declared frame_count) | n/a | n/a (stills only) | n/a |
+/// | `max_animation_ms` | n/a | Auto in [`AnimationDecoder::decode_all`](crate::AnimationDecoder::decode_all) (cumulative timestamp) | n/a | n/a (stills only) | Manual via [`check_animation_ms`](Self::check_animation_ms) |
+/// | `max_metadata_bytes` | n/a | n/a | Auto (chunk size) | n/a | n/a |
+/// | `max_output_bytes` | n/a | n/a | n/a | n/a | Manual via [`check_output_size`](Self::check_output_size) on the encoded `Vec` |
 ///
 /// "Manual" fields are not lying about being available — they're real
 /// caps you can apply with one line of caller code, just not yet wired

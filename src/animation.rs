@@ -81,6 +81,10 @@ unsafe impl Send for AnimationDecoder {}
 
 impl AnimationDecoder {
     /// Create a new animation decoder.
+    ///
+    /// Applies webpx's default resource limits ([`crate::Limits::default`]).
+    /// To decode trusted input without caps, use
+    /// [`Self::with_options_limits`] with [`crate::Limits::none`].
     pub fn new(data: &[u8]) -> Result<Self> {
         Self::with_options(data, ColorMode::Rgba, true)
     }
@@ -92,7 +96,10 @@ impl AnimationDecoder {
 
     /// Create a new animation decoder with options.
     ///
-    /// Equivalent to [`Self::with_options_limits`] with [`crate::Limits::none`].
+    /// Equivalent to [`Self::with_options_limits`] with
+    /// [`crate::Limits::default`] — production caps suited to untrusted
+    /// input. To decode trusted input without caps, call
+    /// [`Self::with_options_limits`] with [`crate::Limits::none`].
     ///
     /// # Arguments
     ///
@@ -100,7 +107,7 @@ impl AnimationDecoder {
     /// * `color_mode` - Output color format
     /// * `use_threads` - Enable multi-threaded decoding
     pub fn with_options(data: &[u8], color_mode: ColorMode, use_threads: bool) -> Result<Self> {
-        Self::with_options_limits(data, color_mode, use_threads, &crate::Limits::none())
+        Self::with_options_limits(data, color_mode, use_threads, &crate::Limits::default())
     }
 
     /// Create a new animation decoder with options and a [`crate::Limits`]

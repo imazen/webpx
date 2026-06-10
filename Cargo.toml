@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "webpx"
-version = "0.3.4"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -21,6 +21,12 @@ exclude = [
     "tests/",
     "benches/",
 ]
+
+# The enforcement-matrix docs link feature-gated items (StreamingDecoder,
+# AnimationDecoder); docs.rs must build with every feature so those links
+# resolve, matching CI's `cargo doc --all-features`.
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["decode", "encode", "std"]

@@ -63,6 +63,41 @@ fn encode_bgr(
         .encode(stop)
 }
 
+/// Minimal RIFF/VP8L container whose header *declares* the given
+/// dimensions (payload is truncated garbage — these bytes never get
+/// past header parsing). Lets limit tests exercise huge declared
+/// canvases without allocating huge pixel buffers.
+fn vp8l_declaring_dims(width: u32, height: u32) -> Vec<u8> {
+    assert!((1..=16384).contains(&width) && (1..=16384).contains(&height));
+    let bits: u32 = ((width - 1) & 0x3FFF) | (((height - 1) & 0x3FFF) << 14);
+    let payload = [
+        0x2f,
+        bits as u8,
+        (bits >> 8) as u8,
+        (bits >> 16) as u8,
+        (bits >> 24) as u8,
+        0x00,
+    ];
+    let mut out = Vec::new();
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(4u32 + 8 + payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(b"WEBP");
+    out.extend_from_slice(b"VP8L");
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(&payload);
+    out
+}
+
+fn assert_limit_exceeded<T: core::fmt::Debug>(r: webpx::Result<T>, what: &str) {
+    match r {
+        Err(err) => match err.error() {
+            webpx::Error::LimitExceeded(_) => {}
+            other => panic!("{what}: expected LimitExceeded, got {other:?}"),
+        },
+        Ok(v) => panic!("{what}: expected LimitExceeded, got Ok({v:?})"),
+    }
+}
+
 /// Generate a solid color RGBA image.
 fn generate_rgba(width: u32, height: u32, r: u8, g: u8, b: u8, a: u8) -> Vec<u8> {
     let mut data = Vec::with_capacity((width * height * 4) as usize);
@@ -1743,6 +1778,56 @@ mod decoder_tests {
     }
 
     #[test]
+    fn test_free_decode_fns_apply_default_limits() {
+        use rgb::RGBA8;
+
+        // 16383×16383 = 268 MP declared — over the 64 MP default cap.
+        // The gate must reject from the header alone.
+        let huge = vp8l_declaring_dims(16383, 16383);
+        assert_limit_exceeded(webpx::decode_rgba(&huge), "decode_rgba");
+        assert_limit_exceeded(webpx::decode_rgb(&huge), "decode_rgb");
+        assert_limit_exceeded(webpx::decode_bgra(&huge), "decode_bgra");
+        assert_limit_exceeded(webpx::decode_bgr(&huge), "decode_bgr");
+        assert_limit_exceeded(webpx::decode_yuv(&huge), "decode_yuv");
+        assert_limit_exceeded(webpx::decode::<RGBA8>(&huge), "decode::<RGBA8>");
+        assert_limit_exceeded(webpx::decode_to_img::<RGBA8>(&huge), "decode_to_img");
+        let mut append_buf: Vec<RGBA8> = Vec::new();
+        assert_limit_exceeded(
+            webpx::decode_append::<RGBA8>(&huge, &mut append_buf),
+            "decode_append",
+        );
+        let mut tiny = [0u8; 64];
+        assert_limit_exceeded(
+            webpx::decode_rgba_into(&huge, &mut tiny, 4),
+            "decode_rgba_into",
+        );
+        let mut tiny_px = [RGBA8::default(); 16];
+        assert_limit_exceeded(
+            webpx::decode_into::<RGBA8>(&huge, &mut tiny_px, 4),
+            "decode_into::<RGBA8>",
+        );
+    }
+
+    #[test]
+    fn test_decoder_limits_none_is_the_escape_hatch() {
+        use webpx::{DecoderConfig, Error, Limits};
+
+        // Same over-cap declaration through the builder with an explicit
+        // opt-out: the limits gate must NOT fire. (The decode itself then
+        // fails on the truncated payload — but with a bitstream error,
+        // which is the proof the gate was skipped.)
+        let huge = vp8l_declaring_dims(16383, 16383);
+        let err = Decoder::new(&huge)
+            .expect("header parses")
+            .config(DecoderConfig::new().limits(Limits::none()))
+            .decode_rgba()
+            .expect_err("truncated payload cannot decode");
+        if let Error::LimitExceeded(_) = err.error() {
+            panic!("Limits::none() must disable the default caps")
+        }
+    }
+
+    #[test]
     fn test_decode_yuv_respects_max_pixels() {
         use webpx::{DecoderConfig, Error, Limits};
 
@@ -1764,7 +1849,10 @@ mod decoder_tests {
         }
 
         let cfg = DecoderConfig::new().limits(Limits::none().with_max_pixels(100 * 100));
-        let r = Decoder::new(&webp).expect("decoder").config(cfg).decode_yuv();
+        let r = Decoder::new(&webp)
+            .expect("decoder")
+            .config(cfg)
+            .decode_yuv();
         assert!(r.is_ok(), "decode_yuv should succeed at exact budget");
     }
 
@@ -1882,6 +1970,118 @@ mod decoder_tests {
 mod streaming_advanced_tests {
     use super::*;
     use webpx::{ColorMode, DecodeStatus, StreamingDecoder, StreamingEncoder};
+
+    #[test]
+    fn test_streaming_decoder_applies_default_dimension_limits() {
+        // Declared 16383×16383 = 268 MP — past the 64 MP default cap.
+        // The reject must fire from the header prefix, before libwebp
+        // allocates the canvas.
+        let huge = vp8l_declaring_dims(16383, 16383);
+        let mut dec = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
+        assert_limit_exceeded(dec.append(&huge), "streaming append, whole header");
+
+        // Same header arriving byte-by-byte must also be caught.
+        let mut dec = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
+        let mut rejected = false;
+        for b in huge.iter() {
+            match dec.append(core::slice::from_ref(b)) {
+                Err(err) => {
+                    match err.error() {
+                        webpx::Error::LimitExceeded(_) => {}
+                        other => panic!("expected LimitExceeded, got {other:?}"),
+                    }
+                    rejected = true;
+                    break;
+                }
+                Ok(_) => continue,
+            }
+        }
+        assert!(
+            rejected,
+            "byte-wise stream of over-cap header must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_streaming_decoder_limits_none_escape_hatch() {
+        // With limits disabled, the over-cap declaration must NOT trip a
+        // LimitExceeded — decode proceeds until the truncated payload
+        // fails (or suspends wanting more data), proving the gate is off.
+        let huge = vp8l_declaring_dims(16383, 16383);
+        let mut dec = StreamingDecoder::new(ColorMode::Rgba)
+            .expect("decoder")
+            .limits(webpx::Limits::none());
+        if let Err(err) = dec.append(&huge)
+            && let webpx::Error::LimitExceeded(_) = err.error()
+        {
+            panic!("Limits::none() must disable the default caps");
+        }
+    }
+
+    #[test]
+    fn test_streaming_decoder_max_input_bytes_is_cumulative() {
+        let width = 64;
+        let height = 64;
+        let original = generate_rgba(width, height, 128, 64, 192, 255);
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode");
+
+        // Cap below the stream length: appends must fail once the
+        // cumulative bytes cross it, even chunk-by-chunk.
+        let cap = (webp.len() / 2) as u64;
+        let mut dec = StreamingDecoder::new(ColorMode::Rgba)
+            .expect("decoder")
+            .limits(webpx::Limits::none().with_max_input_bytes(cap));
+        let mut rejected = false;
+        for chunk in webp.chunks(16) {
+            match dec.append(chunk) {
+                Err(err) => {
+                    match err.error() {
+                        webpx::Error::LimitExceeded(_) => {}
+                        other => panic!("expected LimitExceeded, got {other:?}"),
+                    }
+                    rejected = true;
+                    break;
+                }
+                Ok(DecodeStatus::Complete) => break,
+                Ok(_) => continue,
+            }
+        }
+        assert!(
+            rejected,
+            "cumulative max_input_bytes must reject mid-stream"
+        );
+
+        // The full stream passes when the cap accommodates it.
+        let mut dec = StreamingDecoder::new(ColorMode::Rgba)
+            .expect("decoder")
+            .limits(webpx::Limits::none().with_max_input_bytes(webp.len() as u64));
+        let status = dec.append(&webp).expect("append within cap");
+        assert_eq!(status, DecodeStatus::Complete);
+        let (decoded, w, h) = dec.finish().expect("finish");
+        assert_eq!((w, h), (width, height));
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_streaming_decoder_default_limits_pass_normal_images() {
+        // A regular image flows through the default caps untouched —
+        // byte-wise, to stress the header-stash path.
+        let width = 48;
+        let height = 48;
+        let original = generate_rgba(width, height, 10, 200, 30, 255);
+        let webp = encode_lossless(&original, width, height, Unstoppable).expect("encode");
+
+        let mut dec = StreamingDecoder::new(ColorMode::Rgba).expect("decoder");
+        for b in webp.iter() {
+            match dec.append(core::slice::from_ref(b)).expect("append") {
+                DecodeStatus::Complete => break,
+                _ => continue,
+            }
+        }
+        let (decoded, w, h) = dec.finish().expect("finish");
+        assert_eq!((w, h), (width, height));
+        assert_eq!(decoded, original);
+    }
 
     #[test]
     fn test_streaming_decoder_with_buffer() {

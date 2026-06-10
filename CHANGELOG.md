@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Changed — BREAKING (0.4.0)
+
+- **Every decode-side entry point now applies `Limits::default()`
+  unless explicitly opted out.** Previously only the `Decoder` builder
+  (via `DecoderConfig::default()`) and `AnimationDecoder::
+  with_options_limits` enforced caps; the free functions
+  (`decode_rgba`, `decode_yuv`, `decode_*_into`, `decode::<P>`,
+  `decode_append`, `decode_to_img`, `decode_into::<P>`), the metadata
+  getters (`get_icc_profile`, `get_exif`, `get_xmp`),
+  `AnimationDecoder::new` / `with_options`, and `StreamingDecoder`
+  decoded unbounded. Inputs that exceed the default caps (64 MP per
+  frame, 16383×16383, 64 MiB input, 4 MiB metadata chunk, 4096 frames,
+  5 min animation) now return `Error::LimitExceeded` where 0.3.4
+  decoded them. Opt out for trusted input via the configurable paths:
+  `DecoderConfig::new().limits(Limits::none())`,
+  `AnimationDecoder::with_options_limits(..)`, `get_*_with_limits(..)`,
+  or the new `StreamingDecoder::limits(Limits::none())`.
+- `StreamingDecoder` enforces its `Limits` incrementally:
+  `max_input_bytes` against the cumulative bytes fed through
+  `append`/`update`, and the dimension/pixel caps against the declared
+  canvas as soon as the header prefix arrives — before libwebp
+  allocates the output canvas. VP8X canvases are read directly from
+  the first 30 bytes, so files whose image chunk sits megabytes behind
+  ICCP/EXIF metadata are still bounded from the prefix.
+
+### Added
+
+- `StreamingDecoder::limits(Limits)` — replace the streaming decoder's
+  resource policy (default: `Limits::default()`).
+- `[package.metadata.docs.rs] all-features = true` so docs.rs resolves
+  feature-gated items referenced by the enforcement-matrix docs.
+
 ### Fixed
 - **`Decoder::decode_yuv` and `Decoder::decode_*_into` now enforce
   `DecoderConfig::limits`.** These paths use libwebp's simple API and
