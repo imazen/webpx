@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# Superseded runs only waste runner queue — particularly the two macOS
+# jobs per run, which wait on GitHub's scarcest pool. Release gating
+# only ever needs the tip commit's run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
