@@ -197,6 +197,10 @@ pub(crate) fn decode_bgr_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 /// Returns the decoded pixels as the specified pixel type and dimensions.
 /// Supports [`RGBA8`], [`RGB8`], [`BGRA8`], and [`BGR8`].
 ///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
+///
 /// # Example
 ///
 /// ```rust,no_run
@@ -234,6 +238,11 @@ pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
 ///
 /// This is useful when you want to reuse an existing buffer or
 /// decode multiple images into the same Vec.
+///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none) and extend your Vec from the
+/// returned pixels.
 ///
 /// # Arguments
 /// * `data` - WebP encoded data
@@ -281,6 +290,10 @@ pub fn decode_append<P: DecodePixel>(data: &[u8], output: &mut Vec<P>) -> Result
 ///
 /// Returns the decoded image as an [`ImgVec`] with the specified pixel type.
 ///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
+///
 /// # Example
 ///
 /// ```rust,no_run
@@ -320,6 +333,11 @@ pub fn decode_to_img<P: DecodePixel>(data: &[u8]) -> Result<ImgVec<P>> {
 /// let (w, h) = webpx::decode_into::<RGBA8>(&webp_data, &mut buffer, info.width)?;
 /// # Ok::<(), webpx::At<webpx::Error>>(())
 /// ```
+///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use
+/// [`Decoder::decode_rgba_into`] (byte-oriented; `rgb::ComponentBytes`
+/// bridges typed slices) with [`Limits::none()`](crate::Limits::none).
 pub fn decode_into<P: DecodePixel>(
     data: &[u8],
     output: &mut [P],
