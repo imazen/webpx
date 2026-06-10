@@ -1008,11 +1008,9 @@ impl<'a> Encoder<'a> {
                 Err(at!(Error::EncodeFailed(EncodingError::from(error_code))))
             }
         } else {
-            let mut webp_data = writer.to_vec();
+            let webp_data = writer.to_vec();
             #[cfg(feature = "icc")]
-            {
-                webp_data = embed_encoder_metadata(webp_data, &self.config, self.icc_profile)?;
-            }
+            let webp_data = embed_encoder_metadata(webp_data, &self.config, self.icc_profile)?;
             Ok(webp_data)
         }
     }

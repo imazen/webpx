@@ -1743,6 +1743,126 @@ mod decoder_tests {
     }
 
     #[test]
+    fn test_decode_yuv_respects_max_pixels() {
+        use webpx::{DecoderConfig, Error, Limits};
+
+        // decode_yuv bypasses the advanced API; limits must still apply.
+        let width = 100;
+        let height = 100;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
+
+        let cfg = DecoderConfig::new().limits(Limits::none().with_max_pixels(50 * 50));
+        let err = Decoder::new(&webp)
+            .expect("decoder")
+            .config(cfg)
+            .decode_yuv()
+            .expect_err("decode_yuv should be rejected when image exceeds max_pixels");
+        match err.error() {
+            Error::LimitExceeded(_) => {}
+            other => panic!("expected LimitExceeded, got {other:?}"),
+        }
+
+        let cfg = DecoderConfig::new().limits(Limits::none().with_max_pixels(100 * 100));
+        let r = Decoder::new(&webp).expect("decoder").config(cfg).decode_yuv();
+        assert!(r.is_ok(), "decode_yuv should succeed at exact budget");
+    }
+
+    #[test]
+    fn test_decode_yuv_rejects_scale_and_crop_config() {
+        use webpx::Error;
+
+        // Scale/crop cannot be honored by the simple YUV API. Returning
+        // full-size planes while the caller asked for 50×50 would be
+        // silently wrong output; it must error instead.
+        let width = 100;
+        let height = 100;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
+
+        let err = Decoder::new(&webp)
+            .expect("decoder")
+            .scale(50, 50)
+            .decode_yuv()
+            .expect_err("decode_yuv must reject scale configs");
+        match err.error() {
+            Error::InvalidConfig(_) => {}
+            other => panic!("expected InvalidConfig, got {other:?}"),
+        }
+
+        let err = Decoder::new(&webp)
+            .expect("decoder")
+            .crop(0, 0, 50, 50)
+            .decode_yuv()
+            .expect_err("decode_yuv must reject crop configs");
+        match err.error() {
+            Error::InvalidConfig(_) => {}
+            other => panic!("expected InvalidConfig, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_decode_into_respects_max_pixels() {
+        use webpx::{DecoderConfig, Error, Limits};
+
+        let width = 100;
+        let height = 100;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
+
+        let mut output = vec![0u8; (width * height * 4) as usize];
+        let cfg = DecoderConfig::new().limits(Limits::none().with_max_pixels(50 * 50));
+        let err = Decoder::new(&webp)
+            .expect("decoder")
+            .config(cfg)
+            .decode_rgba_into(&mut output, width * 4)
+            .expect_err("decode_rgba_into should be rejected when image exceeds max_pixels");
+        match err.error() {
+            Error::LimitExceeded(_) => {}
+            other => panic!("expected LimitExceeded, got {other:?}"),
+        }
+
+        let cfg = DecoderConfig::new().limits(Limits::none().with_max_pixels(100 * 100));
+        let r = Decoder::new(&webp)
+            .expect("decoder")
+            .config(cfg)
+            .decode_rgba_into(&mut output, width * 4);
+        assert!(r.is_ok(), "decode_rgba_into should succeed at exact budget");
+    }
+
+    #[test]
+    fn test_decode_into_rejects_output_affecting_options() {
+        use webpx::{DecoderConfig, Error};
+
+        // flip (like bypass_filtering / no_fancy_upsampling /
+        // alpha_dithering) changes output pixels and cannot be honored
+        // by the simple-API `_into` path; silently ignoring it would
+        // hand back pixels the caller didn't ask for.
+        let width = 100;
+        let height = 100;
+        let data = generate_rgba(width, height, 100, 150, 200, 255);
+        let webp = encode_rgba(&data, width, height, 85.0, Unstoppable).expect("encode");
+
+        let mut output = vec![0u8; (width * height * 4) as usize];
+        let err = Decoder::new(&webp)
+            .expect("decoder")
+            .config(DecoderConfig::new().flip(true))
+            .decode_rgba_into(&mut output, width * 4)
+            .expect_err("decode_rgba_into must reject flip configs");
+        match err.error() {
+            Error::InvalidConfig(_) => {}
+            other => panic!("expected InvalidConfig, got {other:?}"),
+        }
+
+        // use_threads is a pure perf hint — still allowed.
+        let r = Decoder::new(&webp)
+            .expect("decoder")
+            .config(DecoderConfig::new().use_threads(true))
+            .decode_rgba_into(&mut output, width * 4);
+        assert!(r.is_ok(), "use_threads must remain accepted on _into paths");
+    }
+
+    #[test]
     fn test_decoder_rgb_with_scaling() {
         let width = 100;
         let height = 100;

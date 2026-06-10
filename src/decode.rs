@@ -789,6 +789,41 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// Gate for decode paths that use libwebp's *simple* API
+    /// (`decode_*_into`, `decode_yuv`) and therefore bypass
+    /// `decode_advanced`. Output-affecting advanced options are rejected
+    /// rather than silently ignored (a caller who asked for `flip` must
+    /// not receive unflipped pixels), and the `DecoderConfig::limits`
+    /// contract is enforced here because the budget gates in
+    /// `decode_advanced` never run on these paths. `use_threads` is
+    /// deliberately not rejected — it is a performance hint with no
+    /// effect on output.
+    fn check_simple_path_config(&self, method: &str, alternative: &str) -> Result<()> {
+        if self.config.use_cropping || self.config.use_scaling {
+            return Err(at!(Error::InvalidConfig(alloc::format!(
+                "cropping/scaling not supported with {method}; use {alternative} instead"
+            ))));
+        }
+        if self.config.flip
+            || self.config.bypass_filtering
+            || self.config.no_fancy_upsampling
+            || self.config.alpha_dithering > 0
+        {
+            return Err(at!(Error::InvalidConfig(alloc::format!(
+                "flip/bypass_filtering/no_fancy_upsampling/alpha_dithering not supported with {method}; use {alternative} instead"
+            ))));
+        }
+        if let Err(e) = self
+            .config
+            .get_limits()
+            .check_input_size(self.data.len() as u64)
+        {
+            return Err(at!(Error::LimitExceeded(e)));
+        }
+        self.config
+            .check_still_image(self.info.width, self.info.height)
+    }
+
     /// Decode RGBA into a pre-allocated buffer (zero-copy).
     ///
     /// # Arguments
@@ -796,14 +831,14 @@ impl<'a> Decoder<'a> {
     /// * `stride_bytes` - Row stride in bytes (must be >= width * 4)
     ///
     /// # Note
-    /// Cropping and scaling are not supported with `_into` methods.
-    /// Use `decode_rgba()` for those features.
+    /// Advanced decoder options (cropping, scaling, `flip`,
+    /// `bypass_filtering`, `no_fancy_upsampling`, `alpha_dithering`) are
+    /// not supported with `_into` methods and are rejected with
+    /// [`Error::InvalidConfig`]; use `decode_rgba()` for those features.
+    /// `use_threads` is ignored (the simple API is single-threaded).
+    /// Configured [`Limits`](crate::Limits) are enforced.
     pub fn decode_rgba_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
-        if self.config.use_cropping || self.config.use_scaling {
-            return Err(at!(Error::InvalidConfig(
-                "cropping/scaling not supported with decode_into; use decode_rgba() instead".into()
-            )));
-        }
+        self.check_simple_path_config("decode_rgba_into", "decode_rgba()")?;
         decode_rgba_into(self.data, output, stride_bytes)
     }
 
@@ -811,11 +846,7 @@ impl<'a> Decoder<'a> {
     ///
     /// See [`Self::decode_rgba_into`] for details.
     pub fn decode_rgb_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
-        if self.config.use_cropping || self.config.use_scaling {
-            return Err(at!(Error::InvalidConfig(
-                "cropping/scaling not supported with decode_into; use decode_rgb() instead".into()
-            )));
-        }
+        self.check_simple_path_config("decode_rgb_into", "decode_rgb()")?;
         decode_rgb_into(self.data, output, stride_bytes)
     }
 
@@ -823,11 +854,7 @@ impl<'a> Decoder<'a> {
     ///
     /// See [`Self::decode_rgba_into`] for details.
     pub fn decode_bgra_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
-        if self.config.use_cropping || self.config.use_scaling {
-            return Err(at!(Error::InvalidConfig(
-                "cropping/scaling not supported with decode_into; use decode_bgra() instead".into()
-            )));
-        }
+        self.check_simple_path_config("decode_bgra_into", "decode_bgra()")?;
         decode_bgra_into(self.data, output, stride_bytes)
     }
 
@@ -835,18 +862,24 @@ impl<'a> Decoder<'a> {
     ///
     /// See [`Self::decode_rgba_into`] for details.
     pub fn decode_bgr_into(self, output: &mut [u8], stride_bytes: u32) -> Result<(u32, u32)> {
-        if self.config.use_cropping || self.config.use_scaling {
-            return Err(at!(Error::InvalidConfig(
-                "cropping/scaling not supported with decode_into; use decode_bgr() instead".into()
-            )));
-        }
+        self.check_simple_path_config("decode_bgr_into", "decode_bgr()")?;
         decode_bgr_into(self.data, output, stride_bytes)
     }
 
     /// Decode to YUV planes.
+    ///
+    /// # Note
+    /// Advanced decoder options (cropping, scaling, `flip`,
+    /// `bypass_filtering`, `no_fancy_upsampling`, `alpha_dithering`) are
+    /// not supported with YUV output — libwebp's advanced API manages
+    /// YUV buffers differently — and are rejected with
+    /// [`Error::InvalidConfig`] rather than silently ignored; use
+    /// `decode_rgba()` for those features. `use_threads` is ignored.
+    /// Configured [`Limits`](crate::Limits) are enforced.
     pub fn decode_yuv(self) -> Result<YuvPlanes> {
-        // For YUV, we use the simple API since advanced YUV decoding
-        // requires more complex buffer management
+        self.check_simple_path_config("decode_yuv", "decode_rgba()")?;
+        // The simple API is used because advanced YUV decoding requires
+        // more complex buffer management.
         decode_yuv(self.data)
     }
 
