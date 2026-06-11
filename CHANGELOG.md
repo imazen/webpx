@@ -2,22 +2,17 @@
 
 ## [Unreleased]
 
-### Added
+## [0.4.0] - 2026-06-10
 
-- Versioned public-API surface snapshot at `docs/public-api/webpx.txt`,
-  regenerated on every `cargo test` run via `tests/public_api_doc.rs`
-  (`ZEN_API_DOC=check` verifies in CI, `=off` skips); `justfile` recipes
-  `api-doc` / `api-doc-check`
-
-### Changed — BREAKING (0.4.0)
+### Changed — BREAKING
 
 - **Every decode-side entry point now applies `Limits::default()`
-  unless explicitly opted out.** Previously only the `Decoder` builder
-  (via `DecoderConfig::default()`) and `AnimationDecoder::
-  with_options_limits` enforced caps; the free functions
-  (`decode_rgba`, `decode_yuv`, `decode_*_into`, `decode::<P>`,
-  `decode_append`, `decode_to_img`, `decode_into::<P>`), the metadata
-  getters (`get_icc_profile`, `get_exif`, `get_xmp`),
+  unless explicitly opted out** (90d79b9). Previously only the
+  `Decoder` builder (via `DecoderConfig::default()`) and
+  `AnimationDecoder::with_options_limits` enforced caps; the free
+  functions (`decode_rgba`, `decode_yuv`, `decode_*_into`,
+  `decode::<P>`, `decode_append`, `decode_to_img`, `decode_into::<P>`),
+  the metadata getters (`get_icc_profile`, `get_exif`, `get_xmp`),
   `AnimationDecoder::new` / `with_options`, and `StreamingDecoder`
   decoded unbounded. Inputs that exceed the default caps (64 MP per
   frame, 16383×16383, 64 MiB input, 4 MiB metadata chunk, 4096 frames,
@@ -26,7 +21,7 @@
   `DecoderConfig::new().limits(Limits::none())`,
   `AnimationDecoder::with_options_limits(..)`, `get_*_with_limits(..)`,
   or the new `StreamingDecoder::limits(Limits::none())`.
-- `StreamingDecoder` enforces its `Limits` incrementally:
+- `StreamingDecoder` enforces its `Limits` incrementally (90d79b9):
   `max_input_bytes` against the cumulative bytes fed through
   `append`/`update`, and the dimension/pixel caps against the declared
   canvas as soon as the header prefix arrives — before libwebp
@@ -37,51 +32,70 @@
 ### Added
 
 - `StreamingDecoder::limits(Limits)` — replace the streaming decoder's
-  resource policy (default: `Limits::default()`).
+  resource policy (default: `Limits::default()`) (90d79b9).
 - `Decoder::decode_append::<P>` and `Decoder::decode_into::<P>` —
   typed builder counterparts of the free `decode_append` /
   `decode_into` functions, so every free-function capability has a
   custom-limits equivalent (including `Limits::none()`) with no
   workaround copies. Like the byte-level `_into` builder methods, they
-  reject crop/scale/flip/filter options the simple API cannot honor.
+  reject crop/scale/flip/filter options the simple API cannot honor
+  (ca23ac1).
+- Versioned public-API surface snapshot at `docs/public-api/webpx.txt`,
+  regenerated on every `cargo test` run via `tests/public_api_doc.rs`
+  (`ZEN_API_DOC=check` verifies in CI, `=off` skips); `justfile` recipes
+  `api-doc` / `api-doc-check` (40d142a, 44be45a)
 - `[package.metadata.docs.rs] all-features = true` so docs.rs resolves
-  feature-gated items referenced by the enforcement-matrix docs.
+  feature-gated items referenced by the enforcement-matrix docs
+  (90d79b9).
 
 ### Fixed
 - **`Decoder::decode_yuv` and `Decoder::decode_*_into` now enforce
-  `DecoderConfig::limits`.** These paths use libwebp's simple API and
-  bypassed `decode_advanced`, where the budget gates live — so a config
-  carrying `max_pixels` / `max_total_pixels` / `max_input_bytes` decoded
-  unbounded. The enforcement-matrix docs promised "Auto" for all
-  `DecoderConfig::limits` decode paths; now they deliver it.
+  `DecoderConfig::limits`** (407daa4). These paths use libwebp's simple
+  API and bypassed `decode_advanced`, where the budget gates live — so
+  a config carrying `max_pixels` / `max_total_pixels` /
+  `max_input_bytes` decoded unbounded. The enforcement-matrix docs
+  promised "Auto" for all `DecoderConfig::limits` decode paths; now
+  they deliver it.
 - **`Decoder::decode_yuv` rejects crop/scale configs instead of
-  silently ignoring them.** Previously `.scale(50, 50).decode_yuv()`
-  returned full-size planes. The `_into` methods already rejected
-  crop/scale; YUV now matches. All simple-API paths (`decode_yuv`,
-  `decode_*_into`) also reject the output-affecting advanced options
-  `flip`, `bypass_filtering`, `no_fancy_upsampling`, and
-  `alpha_dithering` rather than silently producing pixels the caller
-  didn't ask for. `use_threads` remains accepted (perf hint only).
+  silently ignoring them** (407daa4). Previously
+  `.scale(50, 50).decode_yuv()` returned full-size planes. The `_into`
+  methods already rejected crop/scale; YUV now matches. All simple-API
+  paths (`decode_yuv`, `decode_*_into`) also reject the
+  output-affecting advanced options `flip`, `bypass_filtering`,
+  `no_fancy_upsampling`, and `alpha_dithering` rather than silently
+  producing pixels the caller didn't ask for. `use_threads` remains
+  accepted (perf hint only).
 
 ### Testing
-- `fuzz_regression` harness gained a `run_limits_boundaries` runner:
-  `limits_boundaries-*` seeds are `Arbitrary`-encoded structs, and the
-  harness previously never exercised them — they passed without testing
-  anything. Seeds now decode with the fuzz target's exact layout and
-  drive the static, YUV, animation, and mux limit paths, with
-  success-implies-budget asserts (`arbitrary` added as a dev-dependency).
-- `limits_boundaries` fuzz target now intersects arbitrary limits with a
-  16 MiPx allocation budget for end-to-end decodes (raw boundary values
-  still cover the pure `check_*` math). Audit of five weekly OOM seeds
-  (`9947b87f07e9`, `36a0851d8893`, `7b78d8c0a5f5`, `8ead9eb0c7cd`,
-  `8e6fbe148cef`) showed every one carried absent-or-astronomical limits
-  (≥ 4.9e18) — the "OOMs" were allocations the configured limits
-  legitimately permitted, not enforcement bypasses. With the budget,
-  any future OOM from this target is a real bug. The target also
-  covers `decode_yuv` now.
+- `fuzz_regression` harness gained a `run_limits_boundaries` runner
+  (407daa4): `limits_boundaries-*` seeds are `Arbitrary`-encoded
+  structs, and the harness previously never exercised them — they
+  passed without testing anything. Seeds now decode with the fuzz
+  target's exact layout and drive the static, YUV, animation, and mux
+  limit paths, with success-implies-budget asserts (`arbitrary` added
+  as a dev-dependency).
+- `limits_boundaries` fuzz target now intersects arbitrary limits with
+  a 16 MiPx allocation budget for end-to-end decodes (407daa4; raw
+  boundary values still cover the pure `check_*` math). Audit of five
+  weekly OOM seeds (`9947b87f07e9`, `36a0851d8893`, `7b78d8c0a5f5`,
+  `8ead9eb0c7cd`, `8e6fbe148cef`) showed every one carried
+  absent-or-astronomical limits (≥ 4.9e18) — the "OOMs" were
+  allocations the configured limits legitimately permitted, not
+  enforcement bypasses. With the budget, any future OOM from this
+  target is a real bug. The target also covers `decode_yuv` now.
+- Weekly fuzz regression seeds from PRs #10–13 merged into
+  `fuzz/regression/` (8 seeds total).
+- 199 integration tests (was 187), 36 doctests; new coverage for
+  default-limit rejection on every free function, builder escape
+  hatches, streaming dimension/input caps, and the typed builder
+  methods.
+
+### CI
+- Superseded CI runs now auto-cancel via a workflow concurrency group;
+  stacked pushes were starving the scarce macOS runner pool (4d24f8a).
 
 ### Changed
-- Excluded `.github/`, `.gitignore`, `CLAUDE.md`, `justfile`, `docs/`, `tests/`, and `benches/` from the published crate tarball; `src/`, `examples/`, `README`, `CHANGELOG`, and `LICENSE` files still ship.
+- Excluded `.github/`, `.gitignore`, `CLAUDE.md`, `justfile`, `docs/`, `tests/`, and `benches/` from the published crate tarball; `src/`, `examples/`, `README`, `CHANGELOG`, and `LICENSE` files still ship (863d00b).
 
 ## [0.3.4] - 2026-05-05
 
