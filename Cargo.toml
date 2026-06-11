@@ -1,6 +1,10 @@
 [workspace]
 members = [".", "examples-crates/zencodec-swap-demo"]
 resolver = "2"
+# `apidoc/` is the CI-free public-API snapshot runner: excluded so plain
+# `cargo test` and CI never compile it or run rustdoc. Regenerate via
+# `just api-doc` (cargo test --manifest-path apidoc/Cargo.toml).
+exclude = ["apidoc"]
 
 [package]
 name = "webpx"
@@ -59,8 +63,6 @@ image = "0.25"
 # structured fuzz seeds (fuzz/regression/limits_boundaries-*) with the
 # exact `Arbitrary` layout the fuzz targets used to produce them.
 arbitrary = { version = "1.4.2", features = ["derive"] }
-# tests/public_api_doc.rs parses `cargo metadata` for the feature list.
-serde_json = "1.0.150"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 criterion = { version = "0.8", features = ["rayon"] }

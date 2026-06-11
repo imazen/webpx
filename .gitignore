@@ -1,5 +1,10 @@
 /target
 Cargo.lock
+# The apidoc runner's lockfile IS committed (negation must follow the
+# Cargo.lock ignore above — last match wins); /target is anchored so the
+# runner's build dir needs its own entry.
+!apidoc/Cargo.lock
+apidoc/target/
 mem_data/
 .workongoing
 fuzz/target

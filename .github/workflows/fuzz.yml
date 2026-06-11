@@ -22,10 +22,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # This workflow runs `cargo test --test fuzz_regression`; the public-API
-  # snapshot regen (tests/public_api_doc.rs) is the clippy job's business
-  # over in ci.yml, so keep it off here.
-  ZEN_API_DOC: off
 
 jobs:
   # Build every fuzz target. Cheap, runs on every push — keeps targets

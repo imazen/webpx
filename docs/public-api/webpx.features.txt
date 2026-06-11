@@ -1,0 +1,192 @@
+# webpx public API — additions from non-default features
+# features: animation,decode,encode,icc,std,streaming,zencodec
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 1
+#   pub types (struct/enum/trait/alias)        26
+#   free functions                             12
+#   inherent methods                           64
+#   struct fields                              19
+#   enum variants                               5
+#   trait roster entries (type × trait)        30
+#   auto-trait-complete types                   7
+#   auto-trait exceptions                      13
+#
+# per-module pub lines:
+#   (root)                           73
+#   compat                           35
+#   zencodec                         19
+
+## items (125 lines)
+
+pub enum compat::webp_animation::prelude::EncodingType
+pub compat::webp_animation::prelude::EncodingType::Lossless
+pub compat::webp_animation::prelude::EncodingType::Lossy(compat::webp_animation::LossyEncodingConfig)
+pub fn compat::webp_animation::Decoder<'a>::decode(&self) -> core::result::Result<alloc::vec::Vec<compat::webp_animation::Frame>, compat::webp_animation::Error>
+pub fn compat::webp_animation::Decoder<'a>::new(&'a [u8]) -> core::result::Result<Self, compat::webp_animation::Error>
+pub fn compat::webp_animation::Decoder<'a>::new_with_options(&'a [u8], compat::webp_animation::DecoderOptions) -> core::result::Result<Self, compat::webp_animation::Error>
+pub struct compat::webp_animation::prelude::DecoderOptions
+pub compat::webp_animation::prelude::DecoderOptions::color_mode: compat::webp_animation::ColorMode
+pub compat::webp_animation::prelude::DecoderOptions::use_threads: bool
+pub fn compat::webp_animation::Encoder::add_frame(&mut self, &[u8], i32) -> core::result::Result<(), compat::webp_animation::Error>
+pub fn compat::webp_animation::Encoder::finalize(self, i32) -> core::result::Result<compat::webp_animation::WebPData, compat::webp_animation::Error>
+pub fn compat::webp_animation::Encoder::new((u32, u32)) -> core::result::Result<Self, compat::webp_animation::Error>
+pub fn compat::webp_animation::Encoder::new_with_options((u32, u32), compat::webp_animation::EncoderOptions) -> core::result::Result<Self, compat::webp_animation::Error>
+pub struct compat::webp_animation::prelude::EncoderOptions
+pub compat::webp_animation::prelude::EncoderOptions::encoding_config: core::option::Option<compat::webp_animation::EncodingConfig>
+pub compat::webp_animation::prelude::EncoderOptions::kmax: i32
+pub compat::webp_animation::prelude::EncoderOptions::kmin: i32
+pub struct compat::webp_animation::prelude::EncodingConfig
+pub compat::webp_animation::prelude::EncodingConfig::encoding_type: compat::webp_animation::EncodingType
+pub compat::webp_animation::prelude::EncodingConfig::quality: f32
+pub struct compat::webp_animation::prelude::LossyEncodingConfig
+pub compat::webp_animation::prelude::LossyEncodingConfig::alpha_compression: bool
+pub compat::webp_animation::prelude::LossyEncodingConfig::segments: i32
+pub struct compat::webp_animation::Decoder<'a> [also: compat::webp_animation::prelude]
+pub fn compat::webp_animation::Decoder<'a>::decode(&self) -> core::result::Result<alloc::vec::Vec<compat::webp_animation::Frame>, compat::webp_animation::Error>
+pub fn compat::webp_animation::Decoder<'a>::new(&'a [u8]) -> core::result::Result<Self, compat::webp_animation::Error>
+pub fn compat::webp_animation::Decoder<'a>::new_with_options(&'a [u8], compat::webp_animation::DecoderOptions) -> core::result::Result<Self, compat::webp_animation::Error>
+pub struct compat::webp_animation::DecoderIterator
+pub struct compat::webp_animation::Encoder [also: compat::webp_animation::prelude]
+pub fn compat::webp_animation::Encoder::add_frame(&mut self, &[u8], i32) -> core::result::Result<(), compat::webp_animation::Error>
+pub fn compat::webp_animation::Encoder::finalize(self, i32) -> core::result::Result<compat::webp_animation::WebPData, compat::webp_animation::Error>
+pub fn compat::webp_animation::Encoder::new((u32, u32)) -> core::result::Result<Self, compat::webp_animation::Error>
+pub fn compat::webp_animation::Encoder::new_with_options((u32, u32), compat::webp_animation::EncoderOptions) -> core::result::Result<Self, compat::webp_animation::Error>
+pub mod zencodec
+pub struct zencodec::WebpAnimationFrameDecoder
+pub struct zencodec::WebpAnimationFrameEncoder
+pub struct zencodec::WebpDecodeJob
+pub struct zencodec::WebpDecoder<'a>
+pub struct zencodec::WebpDecoderConfig
+pub fn zencodec::WebpDecoderConfig::from_native(DecoderConfig) -> Self
+pub fn zencodec::WebpDecoderConfig::new() -> Self
+pub struct zencodec::WebpEncodeJob
+pub struct zencodec::WebpEncoder
+pub struct zencodec::WebpEncoderConfig
+pub fn zencodec::WebpEncoderConfig::from_native(EncoderConfig) -> Self
+pub fn zencodec::WebpEncoderConfig::inner(&self) -> &EncoderConfig
+pub fn zencodec::WebpEncoderConfig::lossless() -> Self
+pub fn zencodec::WebpEncoderConfig::lossy() -> Self
+pub fn zencodec::WebpEncoderConfig::with_alpha_quality_value(self, u8) -> Self
+pub fn zencodec::WebpEncoderConfig::with_method(self, u8) -> Self
+pub fn zencodec::WebpEncoderConfig::with_preset_value(self, Preset) -> Self
+pub fn zencodec::WebpEncoderConfig::with_quality(self, f32) -> Self
+pub struct zencodec::WebpStreamingDecoder
+#[non_exhaustive] pub enum DecodeStatus
+pub DecodeStatus::Complete
+pub DecodeStatus::NeedMoreData
+pub DecodeStatus::Partial(u32)
+pub struct AnimationDecoder
+pub fn AnimationDecoder::decode_all(&mut self) -> error::Result<alloc::vec::Vec<Frame>>
+pub fn AnimationDecoder::get_limits(&self) -> &Limits
+pub fn AnimationDecoder::has_more_frames(&self) -> bool
+pub fn AnimationDecoder::info(&self) -> &AnimationInfo
+pub fn AnimationDecoder::new(&[u8]) -> error::Result<Self>
+pub fn AnimationDecoder::next_frame(&mut self) -> error::Result<core::option::Option<Frame>>
+pub fn AnimationDecoder::reset(&mut self)
+pub fn AnimationDecoder::with_options(&[u8], ColorMode, bool) -> error::Result<Self>
+pub fn AnimationDecoder::with_options_limits(&[u8], ColorMode, bool, &Limits) -> error::Result<Self>
+pub struct AnimationEncoder
+pub fn AnimationEncoder::add_frame<P: EncodePixel>(&mut self, &[P], i32) -> error::Result<()>
+pub fn AnimationEncoder::add_frame_bgr(&mut self, &[u8], i32) -> error::Result<()>
+pub fn AnimationEncoder::add_frame_bgra(&mut self, &[u8], i32) -> error::Result<()>
+pub fn AnimationEncoder::add_frame_rgb(&mut self, &[u8], i32) -> error::Result<()>
+pub fn AnimationEncoder::add_frame_rgba(&mut self, &[u8], i32) -> error::Result<()>
+pub fn AnimationEncoder::finish(self, i32) -> error::Result<alloc::vec::Vec<u8>>
+pub fn AnimationEncoder::new(u32, u32) -> error::Result<Self>
+pub fn AnimationEncoder::set_icc_profile(&mut self, alloc::vec::Vec<u8>)
+pub fn AnimationEncoder::set_lossless(&mut self, bool)
+pub fn AnimationEncoder::set_preset(&mut self, Preset)
+pub fn AnimationEncoder::set_quality(&mut self, f32)
+pub fn AnimationEncoder::with_options(u32, u32, bool, u32) -> error::Result<Self>
+#[non_exhaustive] pub struct AnimationInfo
+pub AnimationInfo::bgcolor: u32
+pub AnimationInfo::frame_count: u32
+pub AnimationInfo::height: u32
+pub AnimationInfo::loop_count: u32
+pub AnimationInfo::width: u32
+pub fn Encoder<'a>::icc_profile(self, &'a [u8]) -> Self
+pub fn EncoderConfig::exif(self, impl core::convert::Into<alloc::vec::Vec<u8>>) -> Self
+pub fn EncoderConfig::icc_profile(self, impl core::convert::Into<alloc::vec::Vec<u8>>) -> Self
+pub fn EncoderConfig::xmp(self, impl core::convert::Into<alloc::vec::Vec<u8>>) -> Self
+#[non_exhaustive] pub struct Frame
+pub Frame::data: alloc::vec::Vec<u8>
+pub Frame::duration_ms: u32
+pub Frame::height: u32
+pub Frame::timestamp_ms: i32
+pub Frame::width: u32
+pub struct StreamingDecoder<'a>
+pub fn StreamingDecoder<'static>::new(ColorMode) -> error::Result<Self>
+pub fn StreamingDecoder<'a>::append(&mut self, &[u8]) -> error::Result<DecodeStatus>
+pub fn StreamingDecoder<'a>::decoded_rows(&self) -> u32
+pub fn StreamingDecoder<'a>::dimensions(&self) -> core::option::Option<(u32, u32)>
+pub fn StreamingDecoder<'a>::finish(self) -> error::Result<(alloc::vec::Vec<u8>, u32, u32)>
+pub fn StreamingDecoder<'a>::get_partial(&self) -> core::option::Option<(&[u8], u32, u32)>
+pub fn StreamingDecoder<'a>::limits(self, Limits) -> Self
+pub fn StreamingDecoder<'a>::update(&mut self, &[u8]) -> error::Result<DecodeStatus>
+pub fn StreamingDecoder<'a>::with_buffer(&'a mut [u8], usize, ColorMode) -> error::Result<Self>
+pub struct StreamingEncoder
+pub fn StreamingEncoder::encode_rgb_with_callback<F>(&self, &[u8], F) -> error::Result<()> where F: core::ops::function::FnMut(&[u8]) -> error::Result<()>
+pub fn StreamingEncoder::encode_rgba_with_callback<F>(&self, &[u8], F) -> error::Result<()> where F: core::ops::function::FnMut(&[u8]) -> error::Result<()>
+pub fn StreamingEncoder::new(u32, u32) -> error::Result<Self>
+pub fn StreamingEncoder::set_lossless(&mut self, bool)
+pub fn StreamingEncoder::set_preset(&mut self, Preset)
+pub fn StreamingEncoder::set_quality(&mut self, f32)
+pub fn embed_exif(&[u8], &[u8]) -> error::Result<alloc::vec::Vec<u8>>
+pub fn embed_icc(&[u8], &[u8]) -> error::Result<alloc::vec::Vec<u8>>
+pub fn embed_xmp(&[u8], &[u8]) -> error::Result<alloc::vec::Vec<u8>>
+pub fn get_exif(&[u8]) -> error::Result<core::option::Option<alloc::vec::Vec<u8>>>
+pub fn get_exif_with_limits(&[u8], &Limits) -> error::Result<core::option::Option<alloc::vec::Vec<u8>>>
+pub fn get_icc_profile(&[u8]) -> error::Result<core::option::Option<alloc::vec::Vec<u8>>>
+pub fn get_icc_profile_with_limits(&[u8], &Limits) -> error::Result<core::option::Option<alloc::vec::Vec<u8>>>
+pub fn get_xmp(&[u8]) -> error::Result<core::option::Option<alloc::vec::Vec<u8>>>
+pub fn get_xmp_with_limits(&[u8], &Limits) -> error::Result<core::option::Option<alloc::vec::Vec<u8>>>
+pub fn remove_exif(&[u8]) -> error::Result<alloc::vec::Vec<u8>>
+pub fn remove_icc(&[u8]) -> error::Result<alloc::vec::Vec<u8>>
+pub fn remove_xmp(&[u8]) -> error::Result<alloc::vec::Vec<u8>>
+
+## trait impls (19 types)
+
+AnimationDecoder: Drop
+AnimationEncoder: Drop
+AnimationInfo: Clone, Debug
+DecodeStatus: Clone, Copy, Debug, Eq, PartialEq
+Frame: Clone, Debug
+Limits: From<zencodec::limits::ResourceLimits>
+StreamingDecoder<'_>: Drop
+compat::webp_animation::Decoder<'a>: IntoIterator
+compat::webp_animation::DecoderIterator: Iterator
+zencodec::WebpAnimationFrameDecoder: zencodec::traits::decoder::AnimationFrameDecoder
+zencodec::WebpAnimationFrameEncoder: zencodec::traits::encoder::AnimationFrameEncoder
+zencodec::WebpDecodeJob: zencodec::traits::decoding::DecodeJob<'a>
+zencodec::WebpDecoder<'_>: zencodec::traits::decoder::Decode
+zencodec::WebpDecoderConfig: Clone, Debug, Default, zencodec::traits::decoding::DecoderConfig
+zencodec::WebpEncodeJob: zencodec::traits::encoding::EncodeJob
+zencodec::WebpEncoder: zencodec::traits::encoder::Encoder
+zencodec::WebpEncoderConfig: Clone, Debug, zencodec::traits::encoding::EncoderConfig
+zencodec::WebpStreamingDecoder: zencodec::traits::decoder::StreamingDecode
+zencodec::limits::ResourceLimits: From<Limits>
+
+## auto traits
+
+7 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+AnimationDecoder: !Sync
+AnimationEncoder: !Sync
+StreamingDecoder<'_>: !Freeze !RefUnwindSafe !Sync !Unpin !UnwindSafe
+StreamingDecoder<'a>: !Send !Sync !UnwindSafe
+compat::webp_animation::DecoderIterator: !Sync
+compat::webp_animation::Encoder: !Sync
+zencodec::WebpAnimationFrameDecoder: !RefUnwindSafe !Sync !UnwindSafe
+zencodec::WebpAnimationFrameEncoder: !RefUnwindSafe !Sync !UnwindSafe
+zencodec::WebpDecodeJob: !RefUnwindSafe !UnwindSafe
+zencodec::WebpDecoder<'a>: !RefUnwindSafe !UnwindSafe
+zencodec::WebpEncodeJob: !RefUnwindSafe !UnwindSafe
+zencodec::WebpEncoder: !RefUnwindSafe !UnwindSafe
+zencodec::WebpStreamingDecoder: !RefUnwindSafe !UnwindSafe

@@ -1,0 +1,67 @@
+# webpx public API — doc(hidden) items and excluded-feature surface
+# excluded features: (none)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   free functions                              4
+#   inherent methods                           23
+#   trait roster entries (type × trait)        15
+#
+# per-module pub lines:
+#   (root)                           21
+#   compat                            2
+#   error                             4
+
+## items (27 lines)
+
+pub fn AlphaFilter::assert_fields_are_eq(&self)
+pub fn AnimationEncoder::add_frame<P: types::EncodePixel>(&mut self, &[P], i32) -> error::Result<()>
+pub fn BitstreamFormat::assert_fields_are_eq(&self)
+pub fn ColorMode::assert_fields_are_eq(&self)
+pub fn DecodeStatus::assert_fields_are_eq(&self)
+pub fn Decoder<'a>::decode_append<P: types::DecodePixel>(self, &mut alloc::vec::Vec<P>) -> error::Result<(u32, u32)>
+pub fn Decoder<'a>::decode_into<P: types::DecodePixel>(self, &mut [P], u32) -> error::Result<(u32, u32)>
+pub fn Encoder<'a>::from_img<P: types::EncodePixel>(imgref::ImgRef<'a, P>) -> Self
+pub fn Encoder<'a>::from_pixels<P: types::EncodePixel>(&'a [P], u32, u32) -> Self
+pub fn Encoder<'a>::from_pixels_stride<P: types::EncodePixel>(&'a [P], u32, u32, u32) -> Self
+pub fn EncoderConfig::encode<P: types::EncodePixel>(&self, &[P], u32, u32, impl enough::Stop) -> error::Result<alloc::vec::Vec<u8>>
+pub fn EncoderConfig::encode_img<P: types::EncodePixel>(&self, imgref::ImgRef<'_, P>, impl enough::Stop) -> error::Result<alloc::vec::Vec<u8>>
+pub fn ImageHint::assert_fields_are_eq(&self)
+pub fn ImageInfo::assert_fields_are_eq(&self)
+pub fn LimitExceeded::assert_fields_are_eq(&self)
+pub fn Limits::assert_fields_are_eq(&self)
+pub fn Preset::assert_fields_are_eq(&self)
+pub fn compat::webp::PixelLayout::assert_fields_are_eq(&self)
+pub fn compat::webp_animation::ColorMode::assert_fields_are_eq(&self)
+pub fn decode<P: types::DecodePixel>(&[u8]) -> error::Result<(alloc::vec::Vec<P>, u32, u32)>
+pub fn decode_append<P: types::DecodePixel>(&[u8], &mut alloc::vec::Vec<P>) -> error::Result<(u32, u32)>
+pub fn decode_into<P: types::DecodePixel>(&[u8], &mut [P], u32) -> error::Result<(u32, u32)>
+pub fn decode_to_img<P: types::DecodePixel>(&[u8]) -> error::Result<imgref::ImgVec<P>>
+pub fn error::DecodingError::assert_fields_are_eq(&self)
+pub fn error::EncodingError::assert_fields_are_eq(&self)
+pub fn error::Error::assert_fields_are_eq(&self)
+pub fn error::MuxError::assert_fields_are_eq(&self)
+
+## trait impls (15 types)
+
+AlphaFilter: TrivialClone
+BitstreamFormat: TrivialClone
+ColorMode: TrivialClone
+DecodeStatus: TrivialClone
+ImageHint: TrivialClone
+Limits: TrivialClone
+Preset: TrivialClone
+YuvPlanesRef<'a>: TrivialClone
+compat::webp::PixelLayout: TrivialClone
+compat::webp_animation::ColorMode: TrivialClone
+error::DecodingError: TrivialClone
+error::EncodingError: TrivialClone
+error::MuxError: TrivialClone
+heuristics::DecodeEstimate: TrivialClone
+heuristics::EncodeEstimate: TrivialClone
