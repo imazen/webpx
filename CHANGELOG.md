@@ -4,6 +4,18 @@
 
 ### Added
 
+- `examples/heaptrack_decode.rs`: a reusable heaptrack/valgrind harness that
+  decodes a WebP from bytes via `webpx::decode_rgba(..)` in a loop, for profiling
+  heap-allocation behaviour. Defaults to the committed `tests/fixtures/lossy_rgb.webp`
+  (100×100 lossy VP8) decoded 8×; a path + iteration count can be passed. Driven by
+  `just heaptrack-decode`. Complements the existing `alloc_profile` example (which
+  single-shots a mix of encode+decode methods) by isolating the decode-from-bytes
+  path in a loop so a per-decode leak shows as growth. Profiled result is **healthy**:
+  ~5 allocations per decode and the allocation count is **size-invariant** (56 total
+  allocs for 100×100 vs 57 for 1024×1024 — libwebp allocates a handful of large
+  O(image) buffers in `WebPAllocateDecBuffer` / `VP8InitFrame`, not per-macroblock),
+  peak heap 156.7 KiB for the 100×100 fixture (O(image)), and the leaked count is
+  pinned at 1 process static across 2/8/16 iterations (no per-decode leak, no churn).
 - `docs(readme)`: rewrote the README — decode/encode quick-start, server-safety section (`Limits` + cooperative cancellation), key-types and features tables, factual on-its-own-terms framing, `?style=flat-square` badges, and `readme = "README.md"` in `Cargo.toml`. Fixed stale install versions (now `0.4.0`) and MSRV (`1.89`).
 
 ## [0.4.0] - 2026-06-10

@@ -55,6 +55,15 @@ mem-profile:
 mem-profile-print:
     heaptrack_print heaptrack.alloc_profile.*.zst | head -150
 
+# Profile the decode-from-bytes path specifically (decode a committed fixture in a
+# loop). Complements `mem-profile` (which single-shots encode+decode methods).
+# Defaults to tests/fixtures/lossy_rgb.webp decoded 8x; pass a path + iters to override.
+# Inspect with: heaptrack_print /tmp/webpx-ht.zst
+heaptrack-decode *ARGS:
+    cargo build --release --example heaptrack_decode --features decode
+    rm -f /tmp/webpx-ht.zst
+    heaptrack --output /tmp/webpx-ht ./target/release/examples/heaptrack_decode {{ARGS}}
+
 # Quick memory profiler (without heaptrack, just RSS tracking)
 mem-profile-quick:
     cargo run --release --all-features --example alloc_profile
