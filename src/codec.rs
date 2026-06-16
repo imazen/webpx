@@ -25,7 +25,7 @@ use alloc::format;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use whereat::{At, at};
+use whereat::{At, ResultAtExt, at};
 use zencodec::decode::{DecodeOutput, DecodeRowSink, OutputInfo};
 use zencodec::encode::EncodeOutput;
 use zencodec::{
@@ -921,7 +921,7 @@ impl zencodec::decode::Decode for WebpDecoder<'_> {
         };
 
         let buf = PixelBuffer::from_vec(bytes, w, h, descriptor)
-            .map_err(|e| at!(Error::InvalidInput(format!("{e:?}"))))?;
+            .map_err_at(|inner| Error::InvalidInput(format!("{inner:?}")))?;
         let info = ImageInfo::new(w, h, ImageFormat::WebP).with_alpha(descriptor.has_alpha());
         Ok(DecodeOutput::new(buf, info))
     }
@@ -970,7 +970,7 @@ impl zencodec::decode::StreamingDecode for WebpStreamingDecoder {
         let (bytes, w, h) = self.decoded.as_ref().unwrap();
         let stride_bytes = (*w as usize).saturating_mul(self.descriptor.bytes_per_pixel());
         let slice = PixelSlice::new(bytes, *w, *h, stride_bytes, self.descriptor)
-            .map_err(|e| at!(Error::InvalidInput(format!("{e:?}"))))?;
+            .map_err_at(|inner| Error::InvalidInput(format!("{inner:?}")))?;
         Ok(Some((0, slice)))
     }
 
@@ -1051,7 +1051,7 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
             stride_bytes,
             self.descriptor,
         )
-        .map_err(|e| at!(Error::InvalidInput(format!("{e:?}"))))?;
+        .map_err_at(|inner| Error::InvalidInput(format!("{inner:?}")))?;
         Ok(Some(zencodec::decode::AnimationFrame::new(
             slice,
             frame.duration_ms,
