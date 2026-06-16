@@ -418,6 +418,10 @@ pub(crate) fn decode_into_unlimited<P: DecodePixel>(
 /// This function decodes directly into the provided buffer, avoiding
 /// allocation and copy overhead.
 ///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
+///
 /// # Arguments
 /// * `data` - WebP encoded data
 /// * `output` - Pre-allocated output buffer (must be at least stride * height bytes)
@@ -494,6 +498,10 @@ pub(crate) fn decode_rgba_into_unlimited(
 ///
 /// BGRA is the native format on Windows and some GPU APIs.
 ///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
+///
 /// # Arguments
 /// * `data` - WebP encoded data
 /// * `output` - Pre-allocated output buffer (must be at least stride * height bytes)
@@ -557,6 +565,10 @@ pub(crate) fn decode_bgra_into_unlimited(
 }
 
 /// Decode WebP data directly into a pre-allocated RGB buffer (zero-copy).
+///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
 ///
 /// # Arguments
 /// * `data` - WebP encoded data
@@ -624,6 +636,10 @@ pub(crate) fn decode_rgb_into_unlimited(
 ///
 /// BGR is common in OpenCV and some image libraries.
 ///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
+///
 /// # Arguments
 /// * `data` - WebP encoded data
 /// * `output` - Pre-allocated output buffer (must be at least stride * height bytes)
@@ -689,6 +705,10 @@ pub(crate) fn decode_bgr_into_unlimited(
 /// Decode WebP data to YUV planes.
 ///
 /// Returns YUV420 planar data.
+///
+/// Applies webpx's default resource limits ([`crate::Limits::default`]).
+/// To decode trusted input without caps, use [`Decoder`] with
+/// [`Limits::none()`](crate::Limits::none).
 pub fn decode_yuv(data: &[u8]) -> Result<YuvPlanes> {
     default_limits_gate(data)?;
     decode_yuv_unlimited(data)
