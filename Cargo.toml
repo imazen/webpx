@@ -117,3 +117,8 @@ required-features = ["encode", "decode", "streaming", "animation", "icc"]
 [[example]]
 name = "zencodec_swap"
 required-features = ["zencodec"]
+
+# Heaptrack allocation-profiling harness for the decode-from-bytes path.
+[[example]]
+name = "heaptrack_decode"
+required-features = ["decode"]
