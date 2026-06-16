@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `docs(readme)`: rewrote the README — decode/encode quick-start, server-safety section (`Limits` + cooperative cancellation), key-types and features tables, factual on-its-own-terms framing, `?style=flat-square` badges, and `readme = "README.md"` in `Cargo.toml`. Fixed stale install versions (now `0.4.0`) and MSRV (`1.89`).
+
 ## [0.4.0] - 2026-06-10
 
 ### Changed — BREAKING
