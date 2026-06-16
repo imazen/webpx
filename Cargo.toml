@@ -12,6 +12,7 @@ version = "0.4.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
+readme = "README.md"
 description = "Complete WebP encoding/decoding with ICC profiles, streaming, and animation support"
 repository = "https://github.com/imazen/webpx"
 keywords = ["webp", "image", "codec", "icc", "animation"]
