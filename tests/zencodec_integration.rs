@@ -28,6 +28,42 @@ fn rgba_test_image(width: u32, height: u32) -> Vec<u8> {
 }
 
 #[test]
+fn fidelity_targets_roundtrip() {
+    use zencodec::encode::Fidelity;
+
+    // Lossless wins, even from a lossy-configured start.
+    let ll = WebpEncoderConfig::lossy().with_fidelity(Fidelity::Lossless);
+    assert_eq!(ll.resolved_target_fidelity(), Some(Fidelity::Lossless));
+    assert_eq!(
+        <WebpEncoderConfig as zencodec::encode::EncoderConfig>::is_lossless(&ll),
+        Some(true)
+    );
+
+    // Lossy quality even from a lossless start (the with_lossless(false) switch).
+    let cq = WebpEncoderConfig::lossless().with_fidelity(Fidelity::codec_quality(70.0));
+    assert_eq!(
+        cq.resolved_target_fidelity(),
+        Some(Fidelity::codec_quality(70.0))
+    );
+    assert_eq!(
+        <WebpEncoderConfig as zencodec::encode::EncoderConfig>::is_lossless(&cq),
+        Some(false)
+    );
+
+    // SSIM2 + butteraugli map onto the quality dial, reported as codec_quality.
+    let s2 = WebpEncoderConfig::lossy().with_fidelity(Fidelity::ssim2(90.0));
+    assert_eq!(
+        s2.resolved_target_fidelity(),
+        Some(Fidelity::codec_quality(90.0))
+    );
+    let bt = WebpEncoderConfig::lossy().with_fidelity(Fidelity::butteraugli(2.0));
+    assert_eq!(
+        bt.resolved_target_fidelity(),
+        Some(Fidelity::codec_quality(76.0))
+    );
+}
+
+#[test]
 fn encoder_roundtrip_via_zencodec_traits() {
     let pixels = rgba_test_image(32, 24);
 

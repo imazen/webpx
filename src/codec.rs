@@ -198,6 +198,46 @@ impl zencodec::encode::EncoderConfig for WebpEncoderConfig {
         Some(self.lossless_flag)
     }
 
+    /// Honor a [`Fidelity`](zencodec::encode::Fidelity) target as natively as
+    /// WebP allows.
+    ///
+    /// - `Lossless` → VP8L lossless.
+    /// - `Lossy(CodecSpecificQuality(q))` → the VP8 quality dial.
+    /// - `Lossy(ApproxSsim2(s))` → mapped onto the quality dial (no native
+    ///   SSIM2 loop; reported as `codec_quality`).
+    /// - `Lossy(ApproxButteraugli(d))` → coarse-mapped onto the quality dial.
+    ///
+    /// The lossy arms switch to VP8 first (`with_lossless(false)`) so the
+    /// request is honored and `resolved_target_fidelity` reports it correctly
+    /// even from a lossless-configured start.
+    fn with_fidelity(self, fidelity: zencodec::encode::Fidelity) -> Self {
+        use zencodec::encode::{Fidelity, LossyTarget};
+        match fidelity {
+            Fidelity::Lossless => self.with_lossless(true),
+            Fidelity::Lossy(LossyTarget::CodecSpecificQuality(q)) => {
+                self.with_lossless(false).with_generic_quality(q)
+            }
+            Fidelity::Lossy(LossyTarget::ApproxSsim2(s)) => {
+                self.with_lossless(false).with_generic_quality(s)
+            }
+            Fidelity::Lossy(LossyTarget::ApproxButteraugli(d)) => {
+                let q = (100.0 - 12.0 * d).clamp(0.0, 100.0);
+                self.with_lossless(false).with_generic_quality(q)
+            }
+            // `Fidelity` / `LossyTarget` are `#[non_exhaustive]`.
+            _ => self.with_lossless(false),
+        }
+    }
+
+    fn resolved_target_fidelity(&self) -> Option<zencodec::encode::Fidelity> {
+        use zencodec::encode::Fidelity;
+        if self.is_lossless() == Some(true) {
+            Some(Fidelity::Lossless)
+        } else {
+            self.generic_quality().map(Fidelity::codec_quality)
+        }
+    }
+
     fn with_alpha_quality(mut self, quality: f32) -> Self {
         let aq = quality.clamp(0.0, 100.0);
         self.alpha_quality_override = Some(aq);

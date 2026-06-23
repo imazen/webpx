@@ -54,7 +54,7 @@ whereat = "0.1.4"
 # Pinned to the same versions zenwebp uses so trait impls land on the
 # same `zencodec` semver line; users who swap crates don't have to
 # upgrade their `zencodec` consumer.
-zencodec = { version = "0.1.13", optional = true, default-features = false }
+zencodec = { version = "0.1.25", optional = true, default-features = false }
 zenpixels = { version = "0.2.10", optional = true, default-features = false }
 
 [dev-dependencies]

@@ -4,6 +4,12 @@
 
 ### Added
 
+- `zencodec` integration upgraded to **0.1.25** (from 0.1.13) and now implements
+  native `Fidelity`: `WebpEncoderConfig::{with_fidelity, resolved_target_fidelity}`
+  honor `Lossless` (VP8L), a codec-specific quality dial (VP8), and map
+  SSIM2 / butteraugli targets onto the quality dial — mirroring `zenwebp`. The
+  newer 0.1.25 trait methods (resource estimation, color-emit / metadata policy)
+  use the trait defaults. (`tests/zencodec_integration.rs::fidelity_targets_roundtrip`)
 - `examples/heaptrack_decode.rs`: a reusable heaptrack/valgrind harness that
   decodes a WebP from bytes via `webpx::decode_rgba(..)` in a loop, for profiling
   heap-allocation behaviour. Defaults to the committed `tests/fixtures/lossy_rgb.webp`
