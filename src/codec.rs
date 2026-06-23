@@ -235,7 +235,7 @@ impl zencodec::encode::EncoderConfig for WebpEncoderConfig {
     /// feeds the table value to libwebp's `quality` un-remapped — the same
     /// operating point the sweep measured (libwebp tracks the zenwebp encoder
     /// the table was swept on to ~0.3 % bytes at matched quality). See
-    /// `zenmetrics/benchmarks/codec_metric_to_q_2026-06-23.md`.
+    /// `zenwebp/benchmarks/codec_metric_to_q_2026-06-23.md`.
     ///
     /// The lossy arms switch to VP8 first (`with_lossless(false)`) so the
     /// request is honored and `resolved_target_fidelity` reports it correctly
