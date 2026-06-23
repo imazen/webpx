@@ -50,16 +50,40 @@ fn fidelity_targets_roundtrip() {
         Some(false)
     );
 
-    // SSIM2 + butteraugli map onto the quality dial, reported as codec_quality.
-    let s2 = WebpEncoderConfig::lossy().with_fidelity(Fidelity::ssim2(90.0));
+    // SSIM2 + butteraugli map through the measured inverse tables (omni fleet
+    // sweep 2026-06-23), reported as codec_quality. Check the clamped extremes
+    // (robust, no interpolation) and the mapping direction.
+    use zencodec::encode::LossyTarget;
+    let q_of = |c: &WebpEncoderConfig| match c.resolved_target_fidelity() {
+        Some(Fidelity::Lossy(LossyTarget::CodecSpecificQuality(q))) => q,
+        other => panic!("expected codec_quality, got {other:?}"),
+    };
+    // Excellent target → top of the dial; poor target → bottom.
     assert_eq!(
-        s2.resolved_target_fidelity(),
-        Some(Fidelity::codec_quality(90.0))
+        q_of(&WebpEncoderConfig::lossy().with_fidelity(Fidelity::ssim2(95.0))),
+        95.0
     );
-    let bt = WebpEncoderConfig::lossy().with_fidelity(Fidelity::butteraugli(2.0));
     assert_eq!(
-        bt.resolved_target_fidelity(),
-        Some(Fidelity::codec_quality(76.0))
+        q_of(&WebpEncoderConfig::lossy().with_fidelity(Fidelity::ssim2(50.0))),
+        5.0
+    );
+    assert_eq!(
+        q_of(&WebpEncoderConfig::lossy().with_fidelity(Fidelity::butteraugli(1.0))),
+        95.0
+    );
+    assert_eq!(
+        q_of(&WebpEncoderConfig::lossy().with_fidelity(Fidelity::butteraugli(10.0))),
+        5.0
+    );
+    // Monotone interior: higher SSIM2 → higher quality; larger butteraugli
+    // distance (worse) → lower quality.
+    assert!(
+        q_of(&WebpEncoderConfig::lossy().with_fidelity(Fidelity::ssim2(70.0)))
+            < q_of(&WebpEncoderConfig::lossy().with_fidelity(Fidelity::ssim2(85.0)))
+    );
+    assert!(
+        q_of(&WebpEncoderConfig::lossy().with_fidelity(Fidelity::butteraugli(5.0)))
+            < q_of(&WebpEncoderConfig::lossy().with_fidelity(Fidelity::butteraugli(3.0)))
     );
 }
 

@@ -145,6 +145,25 @@ fn calibrated_webp_quality(generic_q: f32) -> f32 {
     generic_q.clamp(0.0, 100.0)
 }
 
+/// Piecewise-linear lookup with clamping at the table bounds; `table` is sorted
+/// ascending by metric. Shared by the Fidelity metric-target arms.
+fn interp_quality(table: &[(f32, f32)], x: f32) -> f32 {
+    if x <= table[0].0 {
+        return table[0].1;
+    }
+    let last = table[table.len() - 1];
+    if x >= last.0 {
+        return last.1;
+    }
+    for w in table.windows(2) {
+        if x <= w[1].0 {
+            let t = (x - w[0].0) / (w[1].0 - w[0].0);
+            return w[0].1 + t * (w[1].1 - w[0].1);
+        }
+    }
+    last.1
+}
+
 fn effort_to_method(effort: i32) -> u8 {
     let e = effort.clamp(0, 10) as u32;
     ((e * 6) / 10).min(6) as u8
@@ -203,25 +222,76 @@ impl zencodec::encode::EncoderConfig for WebpEncoderConfig {
     ///
     /// - `Lossless` → VP8L lossless.
     /// - `Lossy(CodecSpecificQuality(q))` → the VP8 quality dial.
-    /// - `Lossy(ApproxSsim2(s))` → mapped onto the quality dial (no native
-    ///   SSIM2 loop; reported as `codec_quality`).
-    /// - `Lossy(ApproxButteraugli(d))` → coarse-mapped onto the quality dial.
+    /// - `Lossy(ApproxSsim2(s))` → the WebP quality that *measured* SSIM2 `s`
+    ///   (no native SSIM2 loop; reported as `codec_quality`).
+    /// - `Lossy(ApproxButteraugli(d))` → the WebP quality that measured
+    ///   butteraugli max-norm `d`.
+    ///
+    /// The two metric arms interpolate a measured inverse table (median over
+    /// 600 images × 3 knobs × 15 q from the cvvdp-v15rc / multi-codec omni
+    /// fleet sweep, 2026-06-23) instead of the old linear `100 − 12·d` guess.
+    /// The sweep drove the **native** VP8 quality dial, and `webpx`'s
+    /// [`calibrated_webp_quality`] is the identity, so `with_generic_quality`
+    /// feeds the table value to libwebp's `quality` un-remapped — the same
+    /// operating point the sweep measured (libwebp tracks the zenwebp encoder
+    /// the table was swept on to ~0.3 % bytes at matched quality). See
+    /// `zenmetrics/benchmarks/codec_metric_to_q_2026-06-23.md`.
     ///
     /// The lossy arms switch to VP8 first (`with_lossless(false)`) so the
     /// request is honored and `resolved_target_fidelity` reports it correctly
     /// even from a lossless-configured start.
     fn with_fidelity(self, fidelity: zencodec::encode::Fidelity) -> Self {
         use zencodec::encode::{Fidelity, LossyTarget};
+
+        // Measured metric → VP8-quality inverse tables, sorted ascending by the
+        // metric (provenance above). `BUTTER_MAX_TO_Q`: butteraugli max-norm
+        // (lower better, quality descends); `SSIM2_TO_Q`: SSIM2 (higher better,
+        // quality ascends).
+        const BUTTER_MAX_TO_Q: &[(f32, f32)] = &[
+            (2.41, 95.0),
+            (2.57, 90.0),
+            (2.86, 85.0),
+            (2.93, 80.0),
+            (3.39, 75.0),
+            (3.51, 65.0),
+            (3.72, 60.0),
+            (3.80, 55.0),
+            (4.00, 45.0),
+            (4.90, 35.0),
+            (5.57, 25.0),
+            (6.55, 15.0),
+            (7.47, 10.0),
+            (9.07, 5.0),
+        ];
+        const SSIM2_TO_Q: &[(f32, f32)] = &[
+            (53.1, 5.0),
+            (58.3, 10.0),
+            (62.6, 15.0),
+            (69.0, 25.0),
+            (71.1, 30.0),
+            (73.2, 35.0),
+            (76.6, 45.0),
+            (78.8, 55.0),
+            (79.7, 60.0),
+            (80.5, 65.0),
+            (82.1, 75.0),
+            (84.0, 80.0),
+            (85.3, 85.0),
+            (86.8, 90.0),
+            (87.8, 95.0),
+        ];
+
         match fidelity {
             Fidelity::Lossless => self.with_lossless(true),
             Fidelity::Lossy(LossyTarget::CodecSpecificQuality(q)) => {
                 self.with_lossless(false).with_generic_quality(q)
             }
             Fidelity::Lossy(LossyTarget::ApproxSsim2(s)) => {
-                self.with_lossless(false).with_generic_quality(s)
+                let q = interp_quality(SSIM2_TO_Q, s).clamp(0.0, 100.0);
+                self.with_lossless(false).with_generic_quality(q)
             }
             Fidelity::Lossy(LossyTarget::ApproxButteraugli(d)) => {
-                let q = (100.0 - 12.0 * d).clamp(0.0, 100.0);
+                let q = interp_quality(BUTTER_MAX_TO_Q, d).clamp(0.0, 100.0);
                 self.with_lossless(false).with_generic_quality(q)
             }
             // `Fidelity` / `LossyTarget` are `#[non_exhaustive]`.
