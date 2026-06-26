@@ -2,13 +2,15 @@
 
 Ergonomic Rust bindings to Google's [libwebp](https://chromium.googlesource.com/webm/libwebp), covering lossy and lossless encode/decode, animation, ICC/EXIF/XMP metadata, streaming, and `no_std`.
 
-`webpx` wraps the upstream libwebp C library (via [`libwebp-sys`](https://crates.io/crates/libwebp-sys)) behind a typed, builder-style API. It adds a resource-`Limits` policy and cooperative cancellation so the codec is safe to run against untrusted uploads, and it ships compatibility shims for drop-in migration from the `webp` and `webp-animation` crates. Reach for `webpx` when your application already links libwebp through another path (existing C/C++ code, a system package), when you need libwebp's hand-tuned DSP code paths, or when you've benchmarked your content and confirmed libwebp wins.
+`webpx` wraps the upstream libwebp C library (via [`libwebp-sys`](https://crates.io/crates/libwebp-sys)) behind a typed, builder-style API. It adds a resource-`Limits` policy so the decoder is safe to run against untrusted uploads, plus cooperative cancellation for interrupting long-running encodes, and it ships compatibility shims for drop-in migration from the `webp` and `webp-animation` crates. Reach for `webpx` when your application already links libwebp through another path (existing C/C++ code, a system package), when you need libwebp's hand-tuned DSP code paths, or when you've benchmarked your content and confirmed libwebp wins.
 
 > Pure-Rust alternative: [`zenwebp`](https://github.com/imazen/zenwebp) is a `#![forbid(unsafe_code)]` reimplementation with native `wasm32-unknown-unknown` support. Its `zencodec` trait surface mirrors `webpx`'s, so the same caller code works against either crate — see the `zencodec` feature below.
 
 ## Background
 
-`webpx` began as an LLM-authored parity oracle for building [`zenwebp`](https://github.com/imazen/zenwebp): a faithful wrapper over the reference libwebp C library, used to verify that zenwebp — a pure-Rust, `#![forbid(unsafe_code)]` reimplementation — matches libwebp across the entire encode/decode surface. That shared lineage is why the two crates expose the same `zencodec` trait surface, and why new projects should prefer zenwebp: it's the pure-Rust path; `webpx` is the libwebp-backed reference it was validated against. `webpx` remains published and maintained for callers who specifically need libwebp.
+`webpx` started as a test harness for [`zenwebp`](https://github.com/imazen/zenwebp). zenwebp is a pure-Rust, `#![forbid(unsafe_code)]` reimplementation of libwebp; `webpx` is a thin wrapper over the reference libwebp C library, built to check zenwebp's output against libwebp's across the whole encode/decode surface. The two share a `zencodec` trait surface, so the same caller code runs against either — which is what makes that parity check work.
+
+For new projects, prefer zenwebp: it's the pure-Rust path, with no C dependency or FFI. `webpx` stays published and maintained for callers who specifically need libwebp.
 
 ## Install
 
