@@ -231,7 +231,7 @@ impl zencodec::encode::EncoderConfig for WebpEncoderConfig {
     /// 600 images × 3 knobs × 15 q from the cvvdp-v15rc / multi-codec omni
     /// fleet sweep, 2026-06-23) instead of the old linear `100 − 12·d` guess.
     /// The sweep drove the **native** VP8 quality dial, and `webpx`'s
-    /// [`calibrated_webp_quality`] is the identity, so `with_generic_quality`
+    /// `calibrated_webp_quality` is the identity, so `with_generic_quality`
     /// feeds the table value to libwebp's `quality` un-remapped — the same
     /// operating point the sweep measured (libwebp tracks the zenwebp encoder
     /// the table was swept on to ~0.3 % bytes at matched quality). See
