@@ -2,13 +2,13 @@
 
 Ergonomic Rust bindings to Google's [libwebp](https://chromium.googlesource.com/webm/libwebp), covering lossy and lossless encode/decode, animation, ICC/EXIF/XMP metadata, streaming, and `no_std`.
 
-`webpx` wraps the upstream libwebp C library (via [`libwebp-sys`](https://crates.io/crates/libwebp-sys)) behind a typed, builder-style API. It adds a resource-`Limits` policy so the decoder is safe to run against untrusted uploads, plus cooperative cancellation for interrupting long-running encodes, and it ships compatibility shims for drop-in migration from the `webp` and `webp-animation` crates. Reach for `webpx` when your application already links libwebp through another path (existing C/C++ code, a system package), when you need libwebp's hand-tuned DSP code paths, or when you've benchmarked your content and confirmed libwebp wins.
+`webpx` wraps the upstream libwebp C library (via [`libwebp-sys`](https://crates.io/crates/libwebp-sys)) behind a typed, builder-style API. It adds a resource-`Limits` policy to bound what the decoder allocates on untrusted uploads, plus cooperative cancellation for interrupting long-running encodes, and it ships compatibility shims for drop-in migration from the `webp` and `webp-animation` crates. Reach for `webpx` when your application already links libwebp through another path (existing C/C++ code, a system package), when you need libwebp's hand-tuned DSP code paths, or when you've benchmarked your content and confirmed libwebp wins.
 
 > Pure-Rust alternative: [`zenwebp`](https://github.com/imazen/zenwebp) is a `#![forbid(unsafe_code)]` reimplementation with native `wasm32-unknown-unknown` support. Its `zencodec` trait surface mirrors `webpx`'s, so the same caller code works against either crate — see the `zencodec` feature below.
 
 ## Background
 
-`webpx` started as a test harness for [`zenwebp`](https://github.com/imazen/zenwebp). zenwebp is a pure-Rust, `#![forbid(unsafe_code)]` reimplementation of libwebp; `webpx` is a thin wrapper over the reference libwebp C library, built to check zenwebp's output against libwebp's across the whole encode/decode surface. The two share a `zencodec` trait surface, so the same caller code runs against either — which is what makes that parity check work.
+`webpx` started as an LLM-authored test harness for [`zenwebp`](https://github.com/imazen/zenwebp). zenwebp is a pure-Rust, `#![forbid(unsafe_code)]` reimplementation of libwebp; `webpx` is a thin wrapper over the reference libwebp C library, built to check zenwebp's output against libwebp's across the whole encode/decode surface. The two share a `zencodec` trait surface, so the same caller code runs against either — which is what makes that parity check work.
 
 For new projects, prefer zenwebp: it's the pure-Rust path, with no C dependency or FFI. `webpx` stays published and maintained for callers who specifically need libwebp.
 
@@ -65,9 +65,9 @@ let webp = Encoder::new_rgba(&rgba, 2, 2)
 
 `Unstoppable` opts out of cancellation; pass a real `Stop` value to make long encodes interruptible (see [Cooperative cancellation](#cooperative-cancellation)).
 
-## Server safety
+## Resource limits & cancellation
 
-A codec that decodes untrusted uploads needs two things: bounded resource use and the ability to abort. `webpx` provides both.
+Decoding untrusted uploads needs bounded resource use, and `webpx` enforces a `Limits` policy on every decode path so a hostile file can't exhaust memory. That is denial-of-service protection, not a memory-safety guarantee — `webpx` decodes through libwebp's C code over FFI, so that exposure is libwebp's; for a pure-Rust decoder without it, use [`zenwebp`](https://github.com/imazen/zenwebp). The cancellation support below is encode-only.
 
 ### Decoding untrusted input
 
