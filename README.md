@@ -6,6 +6,10 @@ Ergonomic Rust bindings to Google's [libwebp](https://chromium.googlesource.com/
 
 > Pure-Rust alternative: [`zenwebp`](https://github.com/imazen/zenwebp) is a `#![forbid(unsafe_code)]` reimplementation with native `wasm32-unknown-unknown` support. Its `zencodec` trait surface mirrors `webpx`'s, so the same caller code works against either crate — see the `zencodec` feature below.
 
+## Background
+
+`webpx` began as an LLM-authored parity oracle for building [`zenwebp`](https://github.com/imazen/zenwebp): a faithful wrapper over the reference libwebp C library, used to verify that zenwebp — a pure-Rust, `#![forbid(unsafe_code)]` reimplementation — matches libwebp across the entire encode/decode surface. That shared lineage is why the two crates expose the same `zencodec` trait surface, and why new projects should prefer zenwebp: it's the pure-Rust path; `webpx` is the libwebp-backed reference it was validated against. `webpx` remains published and maintained for callers who specifically need libwebp.
+
 ## Install
 
 ```toml

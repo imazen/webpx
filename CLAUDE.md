@@ -4,6 +4,16 @@
 
 WebP encoding/decoding crate using FFI bindings to libwebp via `libwebp-sys`.
 
+**Origin / role:** webpx was LLM-created as a **parity oracle** for developing
+[`zenwebp`](https://github.com/imazen/zenwebp) — a faithful wrapper over the
+reference libwebp C library, used to verify that zenwebp (the pure-Rust
+`#![forbid(unsafe_code)]` port) matches libwebp 100% across the encode/decode
+surface. That is why webpx's `zencodec` trait surface mirrors zenwebp's, and why
+the README, SECURITY.md, and the security advisory steer new projects to
+zenwebp. webpx remains a published, maintained crate (0.4.0) for callers who
+specifically need the libwebp-backed path — it is the reference, not the
+recommended default.
+
 ## Project Status
 
 Initial implementation complete. All core features working:

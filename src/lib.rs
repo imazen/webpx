@@ -32,6 +32,10 @@
 //! package), who specifically need libwebp's MIPS DSP code paths, or
 //! who have benchmarked their content and confirmed libwebp wins.
 //!
+//! webpx began as a parity oracle in zenwebp's development — a faithful
+//! libwebp wrapper used to validate the pure-Rust port — which is why
+//! the two crates share a `zencodec` surface.
+//!
 //! webpx offers:
 //!
 //! - **Static Images**: Encode/decode RGB, RGBA, and YUV formats with lossy or lossless compression
