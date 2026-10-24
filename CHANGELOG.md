@@ -25,6 +25,11 @@
 - zencodec `WebpAnimationFrameDecoder::render_next_frame` numbers frames
   0, 1, 2, … in `AnimationFrame::frame_index`; it passed 0 for every frame.
   (`tests/zencodec_integration.rs::animation_frames_report_index_and_duration`)
+- zencodec `WebpEncodeJob` implements `with_loop_count`. It fell through to
+  the trait's no-op default, so every zencodec-encoded animation stored loop
+  count 0 (forever) whatever the caller asked for. Counts above 65535 (the
+  ANIM chunk's 16-bit field) are rejected by `animation_frame_encoder`.
+  (`tests/zencodec_integration.rs::animation_loop_count_*`)
 
 ### Added
 

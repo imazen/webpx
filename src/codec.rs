@@ -327,6 +327,7 @@ impl zencodec::encode::EncoderConfig for WebpEncoderConfig {
             exif: None,
             xmp: None,
             limits: ResourceLimits::none(),
+            loop_count: None,
         }
     }
 }
@@ -339,6 +340,9 @@ pub struct WebpEncodeJob {
     exif: Option<Arc<[u8]>>,
     xmp: Option<Arc<[u8]>>,
     limits: ResourceLimits,
+    /// Animation loop count from `with_loop_count`; `None` is WebP's
+    /// default of 0 (loop forever).
+    loop_count: Option<u32>,
 }
 
 impl zencodec::encode::EncodeJob for WebpEncodeJob {
@@ -360,6 +364,11 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
 
     fn with_limits(mut self, limits: ResourceLimits) -> Self {
         self.limits = limits;
+        self
+    }
+
+    fn with_loop_count(mut self, count: Option<u32>) -> Self {
+        self.loop_count = count;
         self
     }
 
@@ -387,6 +396,17 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
             // we can't construct the underlying encoder until the first
             // frame arrives — that's the only point we know the
             // canvas dimensions. Defer the AnimationEncoder::new call.
+            //
+            // The ANIM chunk stores the loop count in 16 bits; reject
+            // what it can't hold rather than letting libwebp fail at
+            // assembly after every frame was encoded.
+            let loop_count = self.loop_count.unwrap_or(0);
+            if loop_count > u32::from(u16::MAX) {
+                return Err(at!(Error::InvalidConfig(format!(
+                    "WebP loop count must be at most {}, got {loop_count}",
+                    u16::MAX
+                ))));
+            }
             Ok(WebpAnimationFrameEncoder {
                 inner: None,
                 config: self.config.inner.clone(),
@@ -397,6 +417,7 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
                 limits: Limits::from(self.limits),
                 last_timestamp_ms: 0,
                 canvas_dims: None,
+                loop_count,
             })
         }
     }
@@ -574,6 +595,8 @@ pub struct WebpAnimationFrameEncoder {
     /// encoder is fixed-canvas, so a mismatch silently corrupts output
     /// or panics inside libwebp. Reject up front instead.
     canvas_dims: Option<(u32, u32)>,
+    /// Loop count for the ANIM chunk (0 = forever), validated to fit 16 bits.
+    loop_count: u32,
 }
 
 // `inner: Option<crate::AnimationEncoder>` carries `crate::AnimationEncoder`
@@ -611,7 +634,7 @@ impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
         // must match — libwebp's animation encoder is fixed-canvas.
         match self.canvas_dims {
             None => {
-                let mut enc = crate::AnimationEncoder::new(w, h)?;
+                let mut enc = crate::AnimationEncoder::with_options(w, h, true, self.loop_count)?;
                 enc.set_quality(self.config.get_quality());
                 if self.config.is_lossless() {
                     enc.set_lossless(true);

@@ -385,3 +385,37 @@ fn animation_frames_report_index_and_duration() {
     }
     assert_eq!(seen, [(0, 40), (1, 0), (2, 130)]);
 }
+
+/// `with_loop_count` reaches the ANIM chunk as libwebp reads it; `None` keeps
+/// WebP's default of 0 (loop forever).
+#[cfg(feature = "animation")]
+#[test]
+fn animation_loop_count_reaches_libwebp() {
+    use zencodec::decode::AnimationFrameDecoder;
+
+    for (requested, stored) in [(None, 0), (Some(0), 0), (Some(3), 3), (Some(65535), 65535)] {
+        let webp = three_frame_animation([40, 50, 60], requested);
+        let lib = webpx::AnimationDecoder::new(&webp).expect("libwebp decoder");
+        assert_eq!(lib.info().loop_count, stored, "requested {requested:?}");
+        let dec = WebpDecoderConfig::new()
+            .job()
+            .animation_frame_decoder(
+                std::borrow::Cow::Borrowed(&webp),
+                &[PixelDescriptor::RGBA8_SRGB],
+            )
+            .expect("animation_frame_decoder ctor");
+        assert_eq!(dec.loop_count(), Some(stored), "requested {requested:?}");
+    }
+}
+
+/// A loop count that doesn't fit WebP's 16-bit field is an error, not a
+/// silent clamp or wrap.
+#[cfg(feature = "animation")]
+#[test]
+fn animation_loop_count_out_of_range_is_rejected() {
+    let r = WebpEncoderConfig::lossless()
+        .job()
+        .with_loop_count(Some(65536))
+        .animation_frame_encoder();
+    assert!(r.is_err(), "65536 loops cannot be stored");
+}
