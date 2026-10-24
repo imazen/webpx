@@ -599,6 +599,13 @@ impl AnimationEncoder {
 
     /// Finish encoding and return the WebP data.
     ///
+    /// libwebp merges consecutive identical frames (adding their
+    /// durations), and when only one frame remains it writes a still image
+    /// (`OptimizeSingleFrame`): no ANIM/ANMF chunks, so the duration and
+    /// loop count are not stored. Decoding such a file with
+    /// [`AnimationDecoder`] yields one frame of 0 ms and `loop_count` 1,
+    /// libwebp's values for a still image.
+    ///
     /// # Arguments
     ///
     /// * `end_timestamp_ms` - End timestamp (determines duration of last frame)

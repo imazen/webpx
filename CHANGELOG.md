@@ -38,6 +38,12 @@
   animations disagreed between the two paths.
   (`tests/zencodec_integration.rs::animation_alpha_matches_probe`)
 
+### Documented
+
+- `AnimationEncoder::finish`: libwebp writes a still image (no duration or
+  loop count) when one frame remains after merging identical frames; pinned
+  by `tests/animation_timing.rs::single_frame_animation_encodes_as_still`.
+
 ### Added
 
 - `zencodec` integration upgraded to **0.1.25** (from 0.1.13) and now implements

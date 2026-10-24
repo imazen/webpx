@@ -229,3 +229,30 @@ fn animation_encoder_durations_reach_demux() {
     let dec = AnimationDecoder::new(&data).unwrap();
     assert_eq!(dec.info().loop_count, 2);
 }
+
+/// libwebp's `WebPAnimEncoderAssemble` writes a still image when one frame
+/// remains (a single frame, or identical frames merged); the duration and loop
+/// count are not stored. Pinned so a libwebp change shows up here.
+#[test]
+fn single_frame_animation_encodes_as_still() {
+    let px = frame_pixels(8, 8, 1);
+    for frames in [1, 2] {
+        let mut enc = webpx::AnimationEncoder::with_options(8, 8, false, 3).unwrap();
+        enc.set_lossless(true);
+        for i in 0..frames {
+            enc.add_frame_rgba(&px, i * 100).unwrap();
+        }
+        let data = enc.finish(250).unwrap();
+        assert_eq!(&data[12..16], b"VP8L", "{frames} frame(s)");
+        assert!(!webpx::ImageInfo::from_webp(&data).unwrap().has_animation);
+        let mut dec = AnimationDecoder::new(&data).unwrap();
+        assert_eq!(dec.info().loop_count, 1);
+        let got: Vec<u32> = dec
+            .decode_all()
+            .unwrap()
+            .iter()
+            .map(|f| f.duration_ms)
+            .collect();
+        assert_eq!(got, [0]);
+    }
+}
