@@ -78,6 +78,9 @@ pub struct AnimationDecoder {
     /// End timestamp of the previously returned frame (0 before the first),
     /// so each frame's duration is its end minus the previous end.
     prev_timestamp_ms: i32,
+    /// Sum of the durations returned so far. Unlike libwebp's `int`
+    /// timestamp it cannot wrap, so `max_animation_ms` is checked against it.
+    elapsed_ms: u64,
     _data: Vec<u8>, // Keep data alive
 }
 
@@ -215,6 +218,7 @@ impl AnimationDecoder {
             bpp,
             limits: *limits,
             prev_timestamp_ms: 0,
+            elapsed_ms: 0,
             _data: data_copy,
         })
     }
@@ -259,12 +263,26 @@ impl AnimationDecoder {
             )));
         }
 
-        // Enforce `max_animation_ms` against the cumulative timestamp before
-        // copying the frame. libwebp returns each frame's *end* timestamp, so
-        // this rejects as soon as the running duration exceeds the cap.
+        // libwebp returns each frame's *end* timestamp: the previous end plus
+        // the frame's 24-bit ANMF duration, in a C `int` that wraps after
+        // 2^31 ms. The wrapping u32 difference is therefore exactly the ANMF
+        // duration, across a wrap too. Anything >= 2^24 cannot come from
+        // libwebp's arithmetic; report it rather than invent a duration.
+        let duration_ms = (timestamp as u32).wrapping_sub(self.prev_timestamp_ms as u32);
+        if duration_ms >= 1 << 24 {
+            return Err(at!(Error::DecodeFailed(
+                crate::error::DecodingError::BitstreamError,
+            )));
+        }
+
+        // Enforce `max_animation_ms` against the running total before
+        // copying the frame, so it rejects as soon as the cap is exceeded.
+        let elapsed_ms = self.elapsed_ms + u64::from(duration_ms);
         self.limits
-            .check_animation_ms(timestamp.max(0) as u64)
+            .check_animation_ms(elapsed_ms)
             .map_err(|e| at!(Error::LimitExceeded(e)))?;
+        self.prev_timestamp_ms = timestamp;
+        self.elapsed_ms = elapsed_ms;
 
         // Copy the frame data (buffer is owned by decoder). Buffer size
         // matches the configured color mode (3 bpp for RGB/BGR, 4 bpp
@@ -274,14 +292,6 @@ impl AnimationDecoder {
             .saturating_mul(self.info.height as usize)
             .saturating_mul(self.bpp);
         let data = unsafe { core::slice::from_raw_parts(buf, size).to_vec() };
-
-        // libwebp returns each frame's *end* timestamp, so the difference
-        // from the previous end is the frame's ANMF duration. Saturating
-        // subtraction so a hostile non-monotonic timestamp sequence (e.g.
-        // previous = i32::MAX, current = i32::MIN) cannot wrap and produce a
-        // bogus duration.
-        let duration_ms = timestamp.saturating_sub(self.prev_timestamp_ms).max(0) as u32;
-        self.prev_timestamp_ms = timestamp;
 
         Ok(Some(Frame {
             data,
@@ -298,6 +308,7 @@ impl AnimationDecoder {
             libwebp_sys::WebPAnimDecoderReset(self.decoder);
         }
         self.prev_timestamp_ms = 0;
+        self.elapsed_ms = 0;
     }
 
     /// Decode all frames into a vector.

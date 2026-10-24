@@ -48,10 +48,14 @@ fn mux_animation(w: u32, h: u32, durations: &[u32], loop_count: u16, bgcolor: u3
     anim.extend_from_slice(&loop_count.to_le_bytes());
     put_chunk(&mut body, b"ANIM", &anim);
     for (i, &duration) in durations.iter().enumerate() {
-        let still = webpx::Encoder::new_rgba(&frame_pixels(w, h, i as u8 * 40 + 1), w, h)
-            .lossless(true)
-            .encode(Unstoppable)
-            .expect("encode still frame");
+        let still = webpx::Encoder::new_rgba(
+            &frame_pixels(w, h, (i as u8).wrapping_mul(40).wrapping_add(1)),
+            w,
+            h,
+        )
+        .lossless(true)
+        .encode(Unstoppable)
+        .expect("encode still frame");
         // A simple lossless file is RIFF header + one VP8L chunk.
         assert_eq!(&still[12..16], b"VP8L");
         let mut anmf = Vec::new();
@@ -220,8 +224,11 @@ fn animation_encoder_durations_reach_demux() {
     enc.set_lossless(true);
     let mut t = 0i32;
     for (i, &d) in durations.iter().enumerate() {
-        enc.add_frame_rgba(&frame_pixels(8, 8, i as u8 * 40 + 1), t)
-            .unwrap();
+        enc.add_frame_rgba(
+            &frame_pixels(8, 8, (i as u8).wrapping_mul(40).wrapping_add(1)),
+            t,
+        )
+        .unwrap();
         t += d as i32;
     }
     let data = enc.finish(t).unwrap();
@@ -255,4 +262,30 @@ fn single_frame_animation_encodes_as_still() {
             .collect();
         assert_eq!(got, [0]);
     }
+}
+
+/// libwebp's end timestamp is a C `int`; 129 frames of 2^24 - 1 ms total
+/// 2_164_260_735 ms, past `i32::MAX`. Every frame's duration must still be its
+/// ANMF duration.
+#[test]
+fn durations_survive_timestamp_wrap() {
+    let durations = vec![16_777_215u32; 129];
+    let data = mux_animation(8, 8, &durations, 0, 0xffff_ffff);
+    assert_eq!(demux_durations(&data), durations, "fixture");
+    let frames =
+        AnimationDecoder::with_options_limits(&data, ColorMode::Rgba, false, &Limits::none())
+            .unwrap()
+            .decode_all()
+            .unwrap();
+    let got: Vec<u32> = frames.iter().map(|f| f.duration_ms).collect();
+    let wrong: Vec<(usize, u32, i32)> = got
+        .iter()
+        .enumerate()
+        .filter(|&(_, &d)| d != 16_777_215)
+        .map(|(i, &d)| (i, d, frames[i].timestamp_ms))
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "(frame, duration, timestamp_ms): {wrong:?}"
+    );
 }

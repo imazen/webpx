@@ -24,6 +24,13 @@
   The deprecated `compat::webp_animation::DecoderIterator` maps errors to the
   end of iteration, so it now stops at the cap; `Decoder::decode` returns
   `DecodeFailed`.
+- `AnimationDecoder` durations stay exact once libwebp's `int` end timestamp
+  wraps (total animation past `i32::MAX` ms, ~24.8 days, reachable only with
+  `Limits::none()`): the frame crossing the wrap reported 0 ms from a
+  saturating subtraction. Durations are now the wrapping difference, which is
+  the 24-bit ANMF duration, and `max_animation_ms` is checked against a `u64`
+  running total. `Frame::timestamp_ms` is still libwebp's value.
+  (`tests/animation_timing.rs::durations_survive_timestamp_wrap`)
   (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`)
 - zencodec `WebpAnimationFrameDecoder::render_next_frame` numbers frames
   0, 1, 2, … in `AnimationFrame::frame_index`; it passed 0 for every frame.

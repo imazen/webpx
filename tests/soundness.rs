@@ -470,11 +470,13 @@ fn animation_decoder_max_frames_rejects_huge_declared_frame_count() {
     }
 }
 
-// 0.2.0 made `AnimationDecoder::decode_all` use `saturating_sub` when
-// computing per-frame durations from declared timestamps, so a hostile
-// non-monotonic timestamp (frame 1 at t=100, frame 2 at t=50) cannot
-// wrap into a multi-billion-millisecond duration. This is paired with
-// `max_animation_ms` enforcement against the cumulative timestamp.
+// `max_animation_ms` is enforced against the running total of frame
+// durations. Durations are the wrapping u32 difference of libwebp's end
+// timestamps (each step is a 24-bit ANMF duration, so the difference is
+// exact even when libwebp's `int` timestamp wraps); a difference of 2^24 or
+// more is rejected as a bitstream error instead of becoming a
+// multi-billion-millisecond duration. Wrap case:
+// `tests/animation_timing.rs::durations_survive_timestamp_wrap`.
 //
 // Use distinct frames to keep libwebp from de-duplicating them.
 #[cfg(feature = "animation")]
