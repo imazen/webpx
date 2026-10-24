@@ -842,7 +842,9 @@ impl<'a> Decoder<'a> {
 
         // Convert &[u8] to Vec<RGBA8>
         let rgba_pixels: Vec<RGBA8> = pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| RGBA8::new(c[0], c[1], c[2], c[3]))
             .collect();
 
@@ -855,7 +857,9 @@ impl<'a> Decoder<'a> {
 
         // Convert &[u8] to Vec<RGB8>
         let rgb_pixels: Vec<RGB8> = pixels
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| RGB8::new(c[0], c[1], c[2]))
             .collect();
 
@@ -892,7 +896,9 @@ impl<'a> Decoder<'a> {
 
         // Convert &[u8] to Vec<BGRA8>
         let bgra_pixels: Vec<BGRA8> = pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| BGRA8 {
                 b: c[0],
                 g: c[1],
@@ -912,7 +918,9 @@ impl<'a> Decoder<'a> {
 
         // Convert &[u8] to Vec<BGR8>
         let bgr_pixels: Vec<BGR8> = pixels
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| BGR8 {
                 b: c[0],
                 g: c[1],

@@ -4144,7 +4144,7 @@ mod real_data_tests {
 
         // Verify grayscale property: R ≈ G ≈ B for all pixels
         let mut grayscale_violations = 0;
-        for chunk in pixels.chunks_exact(3) {
+        for chunk in pixels.as_chunks::<3>().0 {
             let r = chunk[0] as i32;
             let g = chunk[1] as i32;
             let b = chunk[2] as i32;
@@ -4184,7 +4184,7 @@ mod real_data_tests {
 
         // Count unique colors (should be exactly 2)
         let mut colors = std::collections::HashSet::new();
-        for chunk in pixels.chunks_exact(4) {
+        for chunk in pixels.as_chunks::<4>().0 {
             colors.insert((chunk[0], chunk[1], chunk[2], chunk[3]));
         }
         assert_eq!(colors.len(), 2, "Expected 2 colors, got {}", colors.len());
@@ -4243,7 +4243,7 @@ mod real_data_tests {
 
         // Count unique colors - should be many
         let mut colors = std::collections::HashSet::new();
-        for chunk in pixels.chunks_exact(4) {
+        for chunk in pixels.as_chunks::<4>().0 {
             colors.insert((chunk[0], chunk[1], chunk[2], chunk[3]));
         }
         assert!(
@@ -4274,7 +4274,7 @@ mod real_data_tests {
         // Verify there are semi-transparent pixels
         let mut has_transparency = false;
         let mut has_opaque = false;
-        for chunk in pixels.chunks_exact(4) {
+        for chunk in pixels.as_chunks::<4>().0 {
             let alpha = chunk[3];
             if alpha < 255 {
                 has_transparency = true;
