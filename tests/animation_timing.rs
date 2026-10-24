@@ -163,3 +163,69 @@ fn next_frame_enforces_max_animation_ms() {
         "{err:?}"
     );
 }
+
+/// `AnimationInfo` reports the ANIM chunk's loop count and background color
+/// verbatim. The chunk stores the color as bytes [B, G, R, A]; libwebp reads
+/// it little-endian, so `bgcolor` is 0xAARRGGBB.
+#[test]
+fn anim_chunk_fields_round_trip() {
+    for (loop_count, bgcolor) in [(0u16, 0xffff_ffffu32), (1, 0x8040_2010), (65535, 0)] {
+        let data = mux_animation(8, 8, &[10, 20], loop_count, bgcolor);
+        let info = AnimationDecoder::new(&data).unwrap().info().clone();
+        assert_eq!(info.loop_count, u32::from(loop_count));
+        assert_eq!(info.bgcolor, bgcolor);
+        assert_eq!(info.frame_count, 2);
+    }
+    // Byte order: [B, G, R, A] = [0x10, 0x20, 0x40, 0x80] is ARGB 0x80402010.
+    let data = mux_animation(8, 8, &[10, 20], 0, 0x8040_2010);
+    let anim = data.windows(4).position(|w| w == b"ANIM").unwrap();
+    assert_eq!(&data[anim + 8..anim + 12], &[0x10, 0x20, 0x40, 0x80]);
+}
+
+/// Embedding ICC/EXIF/XMP re-muxes the file; frame durations, loop count and
+/// background color must survive, and the getters return the bytes verbatim.
+#[cfg(feature = "icc")]
+#[test]
+fn metadata_embedding_preserves_animation() {
+    let durations = [40, 0, 130];
+    let mut data = mux_animation(8, 8, &durations, 7, 0x8040_2010);
+    let icc = b"fake icc profile, odd length".to_vec();
+    let exif = b"Exif\0\0MM\0*".to_vec();
+    let xmp = b"<x:xmpmeta/>".to_vec();
+    data = webpx::embed_icc(&data, &icc).unwrap();
+    data = webpx::embed_exif(&data, &exif).unwrap();
+    data = webpx::embed_xmp(&data, &xmp).unwrap();
+    assert_eq!(demux_durations(&data), durations);
+    let mut dec = AnimationDecoder::new(&data).unwrap();
+    assert_eq!(dec.info().loop_count, 7);
+    assert_eq!(dec.info().bgcolor, 0x8040_2010);
+    let got: Vec<u32> = dec
+        .decode_all()
+        .unwrap()
+        .iter()
+        .map(|f| f.duration_ms)
+        .collect();
+    assert_eq!(got, durations);
+    assert_eq!(webpx::get_icc_profile(&data).unwrap(), Some(icc));
+    assert_eq!(webpx::get_exif(&data).unwrap(), Some(exif));
+    assert_eq!(webpx::get_xmp(&data).unwrap(), Some(xmp));
+}
+
+/// `AnimationEncoder` stores the per-frame durations its timestamps imply,
+/// including a 0 ms frame, as libwebp's demuxer reads them.
+#[test]
+fn animation_encoder_durations_reach_demux() {
+    let durations = [40u32, 0, 130];
+    let mut enc = webpx::AnimationEncoder::with_options(8, 8, false, 2).unwrap();
+    enc.set_lossless(true);
+    let mut t = 0i32;
+    for (i, &d) in durations.iter().enumerate() {
+        enc.add_frame_rgba(&frame_pixels(8, 8, i as u8 * 40 + 1), t)
+            .unwrap();
+        t += d as i32;
+    }
+    let data = enc.finish(t).unwrap();
+    assert_eq!(demux_durations(&data), durations);
+    let dec = AnimationDecoder::new(&data).unwrap();
+    assert_eq!(dec.info().loop_count, 2);
+}
