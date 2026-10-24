@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+- None.
+
+### Fixed
+
+- `AnimationDecoder::decode_all` no longer overwrites the last frame's
+  `duration_ms` with the previous frame's duration (or 100 ms for a one-frame
+  animation). Every frame's duration is now the difference of libwebp's end
+  timestamps, which equals its ANMF duration; 40/0/130 ms decoded as 40/0/0,
+  250 ms as 100 (#18). (`tests/animation_timing.rs`)
+
 ### Added
 
 - `zencodec` integration upgraded to **0.1.25** (from 0.1.13) and now implements

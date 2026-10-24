@@ -311,17 +311,8 @@ impl AnimationDecoder {
             frames.push(frame);
         }
 
-        // Set the last frame's duration (assume same as previous or default)
-        let len = frames.len();
-        if len > 0 {
-            let prev_duration = if len > 1 {
-                frames[len - 2].duration_ms
-            } else {
-                100 // Default 100ms for single frame
-            };
-            frames[len - 1].duration_ms = prev_duration;
-        }
-
+        // No fix-up for the last frame: its end timestamp minus the previous
+        // end timestamp already is its stored ANMF duration.
         Ok(frames)
     }
 }
