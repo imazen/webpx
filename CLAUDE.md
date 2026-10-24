@@ -91,6 +91,19 @@ Larger test files available at `~/work/codec-corpus/image-rs/test-images/webp/`.
 - Use `WebPAnimEncoderOptionsInitInternal` and `WebPAnimEncoderNewInternal`
 - `WebPConfigInitInternal` takes `WEBP_ENCODER_ABI_VERSION` (NOT decoder)
 - Animation timestamps are END times, not START times
+  (`WebPAnimDecoderGetNext`: previous end + ANMF duration), so a frame's
+  duration is its end minus the previous end — including the last frame.
+- libwebp collapses one-frame animations to stills twice over: `WebPMuxAssemble`
+  (`MuxCleanup`) drops the ANMF/ANIM chunks of a single full-canvas frame, and
+  `WebPAnimEncoderAssemble` merges identical frames then calls
+  `OptimizeSingleFrame`. Test fixtures that need exact ANMF durations are
+  written chunk by chunk (`tests/animation_timing.rs::mux_animation`).
+- The demuxer reports `loop_count` 1 and frame duration 0 for a still image.
+- `WebPMuxAssemble` rejects zero-length ICCP/EXIF/XMP chunks
+  (`WEBP_MUX_INVALID_ARGUMENT`).
+- ANIM background color is stored as bytes [B, G, R, A] and read
+  little-endian, so `AnimationInfo::bgcolor` is 0xAARRGGBB. Loop count is a
+  u16 (`MAX_LOOP_COUNT` = 65536 exclusive).
 
 ## FFI soundness invariants (audit checklist)
 

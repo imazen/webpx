@@ -21,6 +21,9 @@
 - `AnimationDecoder::next_frame` now enforces `Limits::max_animation_ms`
   (default 5 min). Only `decode_all` checked it, so frame-by-frame decoding,
   including the zencodec `render_next_frame` path, decoded past the cap.
+  The deprecated `compat::webp_animation::DecoderIterator` maps errors to the
+  end of iteration, so it now stops at the cap; `Decoder::decode` returns
+  `DecodeFailed`.
   (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`)
 - zencodec `WebpAnimationFrameDecoder::render_next_frame` numbers frames
   0, 1, 2, … in `AnimationFrame::frame_index`; it passed 0 for every frame.
