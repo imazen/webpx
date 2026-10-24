@@ -1091,7 +1091,12 @@ impl zencodec::decode::Decode for WebpDecoder<'_> {
 
         let buf = PixelBuffer::from_vec(bytes, w, h, descriptor)
             .map_err_at(|inner| Error::InvalidInput(format!("{inner:?}")))?;
-        let info = ImageInfo::new(w, h, ImageFormat::WebP).with_alpha(descriptor.has_alpha());
+        // Describe the file (alpha flag, sequence, metadata) as `probe`
+        // does, not the output layout; only the dimensions come from the
+        // decoded buffer, which reflects any configured scaling.
+        let mut info = build_zencodec_image_info(crate::ImageInfo::from_webp(&self.data)?);
+        info.width = w;
+        info.height = h;
         let info = attach_metadata(info, &self.data, &self.limits)?;
         Ok(DecodeOutput::new(buf, info))
     }

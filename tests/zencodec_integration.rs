@@ -565,3 +565,30 @@ fn decode_extracts_metadata_into_image_info() {
         check(dec.info(), "animation decoder");
     }
 }
+
+/// `Decode::decode` reports the file's alpha flag, like `probe`, whatever
+/// pixel layout the caller asked for.
+#[test]
+fn still_decode_alpha_matches_probe() {
+    let opaque = rgba_test_image(8, 8);
+    let mut translucent = opaque.clone();
+    translucent[3] = 128;
+    for (px, alpha) in [(opaque, false), (translucent, true)] {
+        let webp = webpx::Encoder::new_rgba(&px, 8, 8)
+            .lossless(true)
+            .encode(webpx::Unstoppable)
+            .unwrap();
+        let probe = WebpDecoderConfig::new().job().probe(&webp).expect("probe");
+        assert_eq!(probe.has_alpha, alpha, "probe");
+        for desc in [PixelDescriptor::RGBA8_SRGB, PixelDescriptor::RGB8_SRGB] {
+            let out = WebpDecoderConfig::new()
+                .job()
+                .decoder(std::borrow::Cow::Borrowed(&webp), &[desc])
+                .expect("decoder")
+                .decode()
+                .expect("decode");
+            assert_eq!(out.info().has_alpha, alpha, "decode to {desc:?}");
+            assert_eq!((out.info().width, out.info().height), (8, 8));
+        }
+    }
+}

@@ -42,6 +42,11 @@
   `zencodec` feature now enables `icc` (no new dependencies), which the
   advertised encode/decode metadata support already needed.
   (`tests/zencodec_integration.rs::decode_extracts_metadata_into_image_info`)
+- zencodec `Decode::decode` builds its `ImageInfo` from the file (as `probe`
+  and zenwebp do), so `has_alpha` is the file's flag. It used the output
+  layout: an opaque image decoded to RGBA reported alpha, a translucent one
+  decoded to RGB reported none.
+  (`tests/zencodec_integration.rs::still_decode_alpha_matches_probe`)
   (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`)
 - zencodec `WebpAnimationFrameDecoder::render_next_frame` numbers frames
   0, 1, 2, … in `AnimationFrame::frame_index`; it passed 0 for every frame.
