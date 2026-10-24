@@ -13,6 +13,11 @@
   animation). Every frame's duration is now the difference of libwebp's end
   timestamps, which equals its ANMF duration; 40/0/130 ms decoded as 40/0/0,
   250 ms as 100 (#18). (`tests/animation_timing.rs`)
+- `AnimationDecoder::next_frame` now fills `Frame::duration_ms` (end timestamp
+  minus the previous frame's) instead of always returning 0; `reset` restarts
+  the timeline. The zencodec `WebpAnimationFrameDecoder::render_next_frame`
+  goes through `next_frame`, so its `AnimationFrame::duration_ms` was 0 for
+  every frame too. (`tests/animation_timing.rs::next_frame_durations_match_demux`)
 
 ### Added
 

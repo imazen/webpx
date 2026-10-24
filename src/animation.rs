@@ -23,9 +23,11 @@ pub struct Frame {
     pub width: u32,
     /// Frame height.
     pub height: u32,
-    /// Frame timestamp in milliseconds from animation start.
+    /// Frame end timestamp in milliseconds from animation start, as libwebp
+    /// reports it: the sum of this and every earlier frame's duration.
     pub timestamp_ms: i32,
-    /// Frame duration in milliseconds.
+    /// Frame duration in milliseconds: this frame's end timestamp minus the
+    /// previous frame's, which equals the duration stored in its ANMF chunk.
     pub duration_ms: u32,
 }
 
@@ -73,6 +75,9 @@ pub struct AnimationDecoder {
     /// keep enforcing per-frame and cumulative caps without the caller
     /// re-passing them.
     limits: crate::Limits,
+    /// End timestamp of the previously returned frame (0 before the first),
+    /// so each frame's duration is its end minus the previous end.
+    prev_timestamp_ms: i32,
     _data: Vec<u8>, // Keep data alive
 }
 
@@ -209,6 +214,7 @@ impl AnimationDecoder {
             },
             bpp,
             limits: *limits,
+            prev_timestamp_ms: 0,
             _data: data_copy,
         })
     }
@@ -262,9 +268,13 @@ impl AnimationDecoder {
             .saturating_mul(self.bpp);
         let data = unsafe { core::slice::from_raw_parts(buf, size).to_vec() };
 
-        // Calculate duration (difference from previous frame)
-        // For first frame, we'll set duration later from next frame timestamp
-        let duration_ms = 0; // Will be calculated by caller if needed
+        // libwebp returns each frame's *end* timestamp, so the difference
+        // from the previous end is the frame's ANMF duration. Saturating
+        // subtraction so a hostile non-monotonic timestamp sequence (e.g.
+        // previous = i32::MAX, current = i32::MIN) cannot wrap and produce a
+        // bogus duration.
+        let duration_ms = timestamp.saturating_sub(self.prev_timestamp_ms).max(0) as u32;
+        self.prev_timestamp_ms = timestamp;
 
         Ok(Some(Frame {
             data,
@@ -280,6 +290,7 @@ impl AnimationDecoder {
         unsafe {
             libwebp_sys::WebPAnimDecoderReset(self.decoder);
         }
+        self.prev_timestamp_ms = 0;
     }
 
     /// Decode all frames into a vector.
@@ -293,14 +304,8 @@ impl AnimationDecoder {
         const MAX_FRAME_HINT: u32 = 4096;
         let cap = (self.info.frame_count as usize).min(MAX_FRAME_HINT as usize);
         let mut frames = Vec::with_capacity(cap);
-        let mut prev_timestamp = 0i32;
 
-        while let Some(mut frame) = self.next_frame()? {
-            // Saturating subtraction so a hostile non-monotonic timestamp
-            // sequence (e.g. previous = i32::MAX, current = i32::MIN) cannot
-            // wrap and produce a bogus duration.
-            frame.duration_ms = frame.timestamp_ms.saturating_sub(prev_timestamp).max(0) as u32;
-            prev_timestamp = frame.timestamp_ms;
+        while let Some(frame) = self.next_frame()? {
             // Enforce `max_animation_ms` against the cumulative timestamp.
             // libwebp returns each frame's *end* timestamp, so this rejects
             // as soon as the running duration exceeds the cap rather than
@@ -311,8 +316,6 @@ impl AnimationDecoder {
             frames.push(frame);
         }
 
-        // No fix-up for the last frame: its end timestamp minus the previous
-        // end timestamp already is its stored ANMF duration.
         Ok(frames)
     }
 }

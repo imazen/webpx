@@ -126,3 +126,24 @@ fn decode_all_durations_match_demux() {
         "decode_all durations (want, got): {wrong:?}"
     );
 }
+
+/// Frame-by-frame decoding reports the same durations as `decode_all`, and
+/// `reset` starts the timeline over.
+#[test]
+fn next_frame_durations_match_demux() {
+    let durations = [40, 0, 130, 250];
+    let data = mux_animation(8, 8, &durations, 0, 0xffff_ffff);
+    let mut dec = AnimationDecoder::new(&data).unwrap();
+    for pass in 0..2 {
+        let mut got = Vec::new();
+        while let Some(frame) = dec.next_frame().unwrap() {
+            got.push(frame.duration_ms);
+        }
+        assert_eq!(got, durations, "pass {pass}");
+        dec.reset();
+    }
+    // A partial pass followed by reset must not carry the timeline over.
+    dec.next_frame().unwrap();
+    dec.reset();
+    assert_eq!(dec.next_frame().unwrap().unwrap().duration_ms, 40);
+}
