@@ -837,6 +837,25 @@ fn build_zencodec_image_info(info: crate::ImageInfo) -> ImageInfo {
     out
 }
 
+/// Attach the file's ICCP/EXIF/XMP chunks, as libwebp's demuxer returns them,
+/// to `info`. The decode capabilities advertise all three.
+fn attach_metadata(
+    mut info: ImageInfo,
+    data: &[u8],
+    limits: &Limits,
+) -> Result<ImageInfo, At<Error>> {
+    if let Some(icc) = crate::get_icc_profile_with_limits(data, limits)? {
+        info = info.with_icc_profile(icc);
+    }
+    if let Some(exif) = crate::get_exif_with_limits(data, limits)? {
+        info = info.with_exif(exif);
+    }
+    if let Some(xmp) = crate::get_xmp_with_limits(data, limits)? {
+        info = info.with_xmp(xmp);
+    }
+    Ok(info)
+}
+
 fn pick_decode_descriptor(preferred: &[PixelDescriptor]) -> PixelDescriptor {
     for &p in preferred {
         if p == PixelDescriptor::RGBA8_SRGB
@@ -867,7 +886,11 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
 
     fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         let info = crate::ImageInfo::from_webp(data)?;
-        Ok(build_zencodec_image_info(info))
+        attach_metadata(
+            build_zencodec_image_info(info),
+            data,
+            &Limits::from(self.limits),
+        )
     }
 
     fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<Error>> {
@@ -962,7 +985,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                 .map_err(|e| at!(Error::LimitExceeded(e)))?;
 
             let descriptor = pick_decode_descriptor(_preferred);
-            let zen_info = build_zencodec_image_info(probe);
+            let zen_info = attach_metadata(build_zencodec_image_info(probe), &_data, &limits)?;
             // Buffered approach: stash the input, expose the whole
             // image as a single batch via the native one-shot
             // decoder. A row-by-row implementation against
@@ -1019,6 +1042,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                     loop_count: Some(n_info.loop_count),
                     random_access: false,
                 });
+            let zen_info = attach_metadata(zen_info, &owned, &limits)?;
             Ok(WebpAnimationFrameDecoder {
                 inner,
                 _data: owned,
@@ -1068,6 +1092,7 @@ impl zencodec::decode::Decode for WebpDecoder<'_> {
         let buf = PixelBuffer::from_vec(bytes, w, h, descriptor)
             .map_err_at(|inner| Error::InvalidInput(format!("{inner:?}")))?;
         let info = ImageInfo::new(w, h, ImageFormat::WebP).with_alpha(descriptor.has_alpha());
+        let info = attach_metadata(info, &self.data, &self.limits)?;
         Ok(DecodeOutput::new(buf, info))
     }
 }

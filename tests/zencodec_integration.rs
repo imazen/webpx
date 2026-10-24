@@ -504,3 +504,64 @@ fn animation_durations_exact_past_u32_total() {
     assert_eq!(frames.len(), n);
     assert!(wrong.is_empty(), "(frame, duration): {wrong:?}");
 }
+
+/// The decoder advertises ICC/EXIF/XMP extraction; probe, still decode and
+/// animation decode must put the file's chunks into `ImageInfo`.
+#[cfg(feature = "icc")]
+#[test]
+fn decode_extracts_metadata_into_image_info() {
+    let icc: &[u8] = b"not a real icc profile";
+    let exif: &[u8] = b"Exif\0\0MM\0*";
+    let xmp: &[u8] = b"<x:xmpmeta/>";
+    let embed = |webp: Vec<u8>| {
+        let webp = webpx::embed_icc(&webp, icc).unwrap();
+        let webp = webpx::embed_exif(&webp, exif).unwrap();
+        webpx::embed_xmp(&webp, xmp).unwrap()
+    };
+    let check = |info: &zencodec::ImageInfo, what: &str| {
+        let m = info.metadata();
+        assert_eq!(m.icc_profile.as_deref(), Some(icc), "{what}: icc");
+        assert_eq!(m.exif.as_deref(), Some(exif), "{what}: exif");
+        assert_eq!(m.xmp.as_deref(), Some(xmp), "{what}: xmp");
+    };
+
+    let px = rgba_test_image(8, 8);
+    let still = embed(
+        webpx::Encoder::new_rgba(&px, 8, 8)
+            .lossless(true)
+            .encode(webpx::Unstoppable)
+            .unwrap(),
+    );
+    check(
+        &WebpDecoderConfig::new().job().probe(&still).expect("probe"),
+        "still probe",
+    );
+    let out = WebpDecoderConfig::new()
+        .job()
+        .decoder(
+            std::borrow::Cow::Borrowed(&still),
+            &[PixelDescriptor::RGBA8_SRGB],
+        )
+        .expect("decoder")
+        .decode()
+        .expect("decode");
+    check(out.info(), "still decode");
+
+    #[cfg(feature = "animation")]
+    {
+        use zencodec::decode::AnimationFrameDecoder;
+        let anim = embed(three_frame_animation([40, 50, 60], None));
+        check(
+            &WebpDecoderConfig::new().job().probe(&anim).expect("probe"),
+            "animation probe",
+        );
+        let dec = WebpDecoderConfig::new()
+            .job()
+            .animation_frame_decoder(
+                std::borrow::Cow::Borrowed(&anim),
+                &[PixelDescriptor::RGBA8_SRGB],
+            )
+            .expect("animation_frame_decoder ctor");
+        check(dec.info(), "animation decoder");
+    }
+}

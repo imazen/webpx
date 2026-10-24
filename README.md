@@ -296,7 +296,7 @@ Errors are returned as `Result<T, At<Error>>`, where `At` records the source loc
 | `animation` | no | Animated WebP encode/decode. |
 | `icc` | no | ICC / EXIF / XMP metadata mux. |
 | `streaming` | no | Incremental decode/encode. |
-| `zencodec` | no | [`zencodec`](https://docs.rs/zencodec) trait implementations (mirrors `zenwebp`'s surface for drop-in interchange). |
+| `zencodec` | no | [`zencodec`](https://docs.rs/zencodec) trait implementations (mirrors `zenwebp`'s surface for drop-in interchange). Enables `icc`. |
 
 ### `no_std`
 

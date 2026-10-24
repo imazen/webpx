@@ -43,7 +43,9 @@ icc = []              # ICC profile support (requires mux)
 streaming = []        # Incremental decode/encode
 # zencodec trait integration. Mirrors zenwebp's `pub mod zencodec`
 # surface so the same caller code works against either crate.
-zencodec = ["dep:zencodec", "dep:zenpixels", "decode", "encode", "std"]
+# `icc` (no extra deps) because the trait capabilities advertise ICC/EXIF/XMP
+# on both encode and decode.
+zencodec = ["dep:zencodec", "dep:zenpixels", "decode", "encode", "std", "icc"]
 
 [dependencies]
 libwebp-sys = "0.14.2"

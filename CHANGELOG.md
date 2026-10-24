@@ -36,6 +36,12 @@
   (257 frames of 2^24 - 1 ms: last frame stored as 255 ms); libwebp takes
   the wrapping difference of successive timestamps.
   (`tests/zencodec_integration.rs::animation_durations_exact_past_u32_total`)
+- zencodec decoding puts the file's ICC/EXIF/XMP into `ImageInfo` (`probe`,
+  `Decode::decode`, the streaming decoder and the animation decoder). The
+  decode capabilities advertised all three but no path attached them. The
+  `zencodec` feature now enables `icc` (no new dependencies), which the
+  advertised encode/decode metadata support already needed.
+  (`tests/zencodec_integration.rs::decode_extracts_metadata_into_image_info`)
   (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`)
 - zencodec `WebpAnimationFrameDecoder::render_next_frame` numbers frames
   0, 1, 2, … in `AnimationFrame::frame_index`; it passed 0 for every frame.
