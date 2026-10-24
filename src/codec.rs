@@ -1002,9 +1002,13 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
             let owned = _data.into_owned();
             let limits = Limits::from(self.limits);
             let inner = crate::AnimationDecoder::with_options_limits(&owned, mode, true, &limits)?;
+            // The output canvas is always RGBA/BGRA, but `has_alpha`
+            // describes the image: report the VP8X alpha flag, as `probe`
+            // does, rather than the output layout.
+            let has_alpha = crate::ImageInfo::from_webp(&owned)?.has_alpha;
             let n_info = inner.info();
             let zen_info = ImageInfo::new(n_info.width, n_info.height, ImageFormat::WebP)
-                .with_alpha(true)
+                .with_alpha(has_alpha)
                 .with_sequence(ImageSequence::Animation {
                     frame_count: Some(n_info.frame_count),
                     loop_count: Some(n_info.loop_count),

@@ -428,3 +428,36 @@ fn capabilities_advertise_animation() {
     let dcaps = <WebpDecoderConfig as zencodec::decode::DecoderConfig>::capabilities();
     assert_eq!(dcaps.animation(), cfg!(feature = "animation"));
 }
+
+/// Probe and animation-decoder `ImageInfo` agree with libwebp's VP8X alpha
+/// flag, for an opaque and a translucent animation.
+#[cfg(feature = "animation")]
+#[test]
+fn animation_alpha_matches_probe() {
+    use zencodec::decode::AnimationFrameDecoder;
+
+    let opaque = three_frame_animation([40, 50, 60], None);
+    let translucent = {
+        let mut enc = webpx::AnimationEncoder::new(8, 8).unwrap();
+        enc.set_lossless(true);
+        let mut px = rgba_test_image(8, 8);
+        px[3] = 128;
+        enc.add_frame_rgba(&px, 0).unwrap();
+        px[0] ^= 0xff;
+        enc.add_frame_rgba(&px, 40).unwrap();
+        enc.finish(80).unwrap()
+    };
+    for (webp, alpha) in [(opaque, false), (translucent, true)] {
+        assert_eq!(webpx::ImageInfo::from_webp(&webp).unwrap().has_alpha, alpha);
+        let probe = WebpDecoderConfig::new().job().probe(&webp).expect("probe");
+        let dec = WebpDecoderConfig::new()
+            .job()
+            .animation_frame_decoder(
+                std::borrow::Cow::Borrowed(&webp),
+                &[PixelDescriptor::RGBA8_SRGB],
+            )
+            .expect("animation_frame_decoder ctor");
+        assert_eq!(probe.has_alpha, alpha, "probe");
+        assert_eq!(dec.info().has_alpha, alpha, "animation decoder");
+    }
+}

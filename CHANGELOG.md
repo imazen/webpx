@@ -33,6 +33,10 @@
 - zencodec encode and decode capabilities report `animation()` when the
   `animation` feature is enabled; both reported false although the animation
   encoder and decoder work. (`tests/zencodec_integration.rs::capabilities_advertise_animation`)
+- zencodec `WebpAnimationFrameDecoder::info()` reports the file's VP8X alpha
+  flag in `has_alpha`, matching `probe`; it hard-coded `true`, so opaque
+  animations disagreed between the two paths.
+  (`tests/zencodec_integration.rs::animation_alpha_matches_probe`)
 
 ### Added
 
