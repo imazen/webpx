@@ -63,6 +63,12 @@
   flag in `has_alpha`, matching `probe`; it hard-coded `true`, so opaque
   animations disagreed between the two paths.
   (`tests/zencodec_integration.rs::animation_alpha_matches_probe`)
+- zencodec animation encoding with a lossless config gives lossless frames.
+  The encoder always set libwebp's `allow_mixed`, which encodes each frame
+  lossy or lossless, whichever is smaller, so `WebpEncoderConfig::lossless()`
+  animations decoded with changed pixels. `allow_mixed` is now set only for
+  lossy configs.
+  (`tests/zencodec_conformance.rs::lossless_animation_cross_path_equivalence`)
 
 ### Documented
 

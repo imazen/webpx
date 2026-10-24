@@ -636,7 +636,12 @@ impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
         // must match — libwebp's animation encoder is fixed-canvas.
         match self.canvas_dims {
             None => {
-                let mut enc = crate::AnimationEncoder::with_options(w, h, true, self.loop_count)?;
+                // `allow_mixed` lets libwebp encode each frame lossy or
+                // lossless, whichever is smaller, so it is only safe for
+                // lossy configs: a lossless config must give lossless frames.
+                let allow_mixed = !self.config.is_lossless();
+                let mut enc =
+                    crate::AnimationEncoder::with_options(w, h, allow_mixed, self.loop_count)?;
                 enc.set_quality(self.config.get_quality());
                 if self.config.is_lossless() {
                     enc.set_lossless(true);
