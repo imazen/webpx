@@ -589,7 +589,8 @@ pub struct WebpAnimationFrameEncoder {
     limits: Limits,
     /// Cumulative timestamp of frames added so far. webpx's animation
     /// API takes per-frame timestamps; we track them ourselves so the
-    /// trait's `duration_ms` parameter maps cleanly.
+    /// trait's `duration_ms` parameter maps cleanly. Wraps: libwebp only
+    /// looks at the `uint32` difference between successive timestamps.
     last_timestamp_ms: u32,
     /// Canvas dimensions captured from the first frame (lazy init).
     /// Subsequent frames must match these — libwebp's animation
@@ -690,7 +691,11 @@ impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
             _ => unreachable!(),
         }
 
-        self.last_timestamp_ms = self.last_timestamp_ms.saturating_add(duration_ms);
+        // Wrapping, not saturating: libwebp's WebPAnimEncoderAdd takes the
+        // `uint32` difference of successive timestamps ("integer wrap-around
+        // is OK"), so a wrapped total still yields every frame's exact
+        // duration, while a saturated one shortens the frames after it.
+        self.last_timestamp_ms = self.last_timestamp_ms.wrapping_add(duration_ms);
         Ok(())
     }
 

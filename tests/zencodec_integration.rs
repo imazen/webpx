@@ -461,3 +461,46 @@ fn animation_alpha_matches_probe() {
         assert_eq!(dec.info().has_alpha, alpha, "animation decoder");
     }
 }
+
+/// Frame durations pushed through the zencodec encoder reach the file exactly
+/// even when their running total passes `u32::MAX` ms (libwebp's encoder takes
+/// wrapping `int` timestamps).
+#[cfg(feature = "animation")]
+#[test]
+fn animation_durations_exact_past_u32_total() {
+    use zencodec::encode::AnimationFrameEncoder;
+
+    const MAX_ANMF_MS: u32 = (1 << 24) - 1;
+    let n = 257; // 257 × (2^24 - 1) ms > u32::MAX
+    let mut enc = WebpEncoderConfig::lossless()
+        .job()
+        .animation_frame_encoder()
+        .expect("animation_frame_encoder ctor");
+    for i in 0..n {
+        let mut px = rgba_test_image(8, 8);
+        px[0] = i as u8;
+        px[1] = (i >> 8) as u8;
+        let slice =
+            PixelSlice::new(&px, 8, 8, 8 * 4, PixelDescriptor::RGBA8_SRGB).expect("frame slice");
+        enc.push_frame(slice, MAX_ANMF_MS, None)
+            .expect("push frame");
+    }
+    let webp = enc.finish(None).expect("anim finish").into_vec();
+    let frames = webpx::AnimationDecoder::with_options_limits(
+        &webp,
+        webpx::ColorMode::Rgba,
+        false,
+        &webpx::Limits::none(),
+    )
+    .expect("decoder")
+    .decode_all()
+    .expect("decode_all");
+    let wrong: Vec<(usize, u32)> = frames
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.duration_ms != MAX_ANMF_MS)
+        .map(|(i, f)| (i, f.duration_ms))
+        .collect();
+    assert_eq!(frames.len(), n);
+    assert!(wrong.is_empty(), "(frame, duration): {wrong:?}");
+}

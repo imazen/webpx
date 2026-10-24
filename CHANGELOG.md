@@ -31,6 +31,11 @@
   the 24-bit ANMF duration, and `max_animation_ms` is checked against a `u64`
   running total. `Frame::timestamp_ms` is still libwebp's value.
   (`tests/animation_timing.rs::durations_survive_timestamp_wrap`)
+- zencodec `WebpAnimationFrameEncoder` accumulates timestamps with wrapping
+  addition. Saturating at `u32::MAX` shortened the frame that crossed it
+  (257 frames of 2^24 - 1 ms: last frame stored as 255 ms); libwebp takes
+  the wrapping difference of successive timestamps.
+  (`tests/zencodec_integration.rs::animation_durations_exact_past_u32_total`)
   (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`)
 - zencodec `WebpAnimationFrameDecoder::render_next_frame` numbers frames
   0, 1, 2, … in `AnimationFrame::frame_index`; it passed 0 for every frame.
