@@ -140,7 +140,17 @@ These are the patterns that have bitten webpx; treat any new FFI call site as su
 
 ## Known Issues
 
-None currently.
+Observed 2026-10-24 (rustc 1.99); neither is gated by CI.
+
+- `cargo test --no-default-features --features decode,encode,animation` fails
+  to compile the lib unit tests: `vec!` is not in scope in the
+  `src/compat/webp.rs` and `src/compat/webp_animation.rs` test modules. CI's
+  feature matrix always includes `std` and only builds tests there.
+- `ZEN_API_DOC=check cargo test --manifest-path apidoc/Cargo.toml` reports
+  the public-API snapshots stale from toolchain drift alone (derive internals
+  dropped from `webpx.internal.txt`, `std::io::Write` printed as
+  `core::io::write::Write`). Regenerate with `just api-doc` in a commit of
+  its own.
 
 ## Profiling Guidelines
 
