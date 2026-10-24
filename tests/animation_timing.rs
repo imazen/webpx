@@ -147,3 +147,19 @@ fn next_frame_durations_match_demux() {
     dec.reset();
     assert_eq!(dec.next_frame().unwrap().unwrap().duration_ms, 40);
 }
+
+/// `max_animation_ms` (default 5 min) applies to frame-by-frame decoding, not
+/// only to `decode_all`.
+#[test]
+fn next_frame_enforces_max_animation_ms() {
+    let data = mux_animation(8, 8, &[200_000, 200_000], 0, 0xffff_ffff);
+    let mut dec = AnimationDecoder::new(&data).unwrap();
+    assert_eq!(dec.next_frame().unwrap().unwrap().timestamp_ms, 200_000);
+    let err = dec
+        .next_frame()
+        .expect_err("400 s exceeds the 300 s default cap");
+    assert!(
+        matches!(err.error(), webpx::Error::LimitExceeded(_)),
+        "{err:?}"
+    );
+}

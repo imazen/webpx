@@ -18,6 +18,10 @@
   the timeline. The zencodec `WebpAnimationFrameDecoder::render_next_frame`
   goes through `next_frame`, so its `AnimationFrame::duration_ms` was 0 for
   every frame too. (`tests/animation_timing.rs::next_frame_durations_match_demux`)
+- `AnimationDecoder::next_frame` now enforces `Limits::max_animation_ms`
+  (default 5 min). Only `decode_all` checked it, so frame-by-frame decoding,
+  including the zencodec `render_next_frame` path, decoded past the cap.
+  (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`)
 
 ### Added
 

@@ -259,6 +259,13 @@ impl AnimationDecoder {
             )));
         }
 
+        // Enforce `max_animation_ms` against the cumulative timestamp before
+        // copying the frame. libwebp returns each frame's *end* timestamp, so
+        // this rejects as soon as the running duration exceeds the cap.
+        self.limits
+            .check_animation_ms(timestamp.max(0) as u64)
+            .map_err(|e| at!(Error::LimitExceeded(e)))?;
+
         // Copy the frame data (buffer is owned by decoder). Buffer size
         // matches the configured color mode (3 bpp for RGB/BGR, 4 bpp
         // otherwise). saturating_mul guards against 32-bit usize wrap if
@@ -306,13 +313,6 @@ impl AnimationDecoder {
         let mut frames = Vec::with_capacity(cap);
 
         while let Some(frame) = self.next_frame()? {
-            // Enforce `max_animation_ms` against the cumulative timestamp.
-            // libwebp returns each frame's *end* timestamp, so this rejects
-            // as soon as the running duration exceeds the cap rather than
-            // waiting until all frames are decoded.
-            self.limits
-                .check_animation_ms(frame.timestamp_ms.max(0) as u64)
-                .map_err(|e| at!(Error::LimitExceeded(e)))?;
             frames.push(frame);
         }
 
