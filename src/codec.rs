@@ -993,6 +993,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                 last_pixels: Vec::new(),
                 last_width: 0,
                 last_height: 0,
+                next_index: 0,
             })
         }
     }
@@ -1126,6 +1127,10 @@ pub struct WebpAnimationFrameDecoder {
     last_pixels: Vec<u8>,
     last_width: u32,
     last_height: u32,
+    /// Index of the next frame `render_next_frame` returns. libwebp yields
+    /// one composited canvas per ANMF frame, so iteration order is the
+    /// displayed-frame index.
+    next_index: u32,
 }
 
 #[cfg(feature = "animation")]
@@ -1162,13 +1167,12 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
             self.descriptor,
         )
         .map_err_at(|inner| Error::InvalidInput(format!("{inner:?}")))?;
+        let frame_index = self.next_index;
+        self.next_index = self.next_index.saturating_add(1);
         Ok(Some(zencodec::decode::AnimationFrame::new(
             slice,
             frame.duration_ms,
-            // frame_index isn't tracked here; pass 0 as a placeholder.
-            // libwebp's animation decoder doesn't expose a per-frame
-            // index distinct from iteration order.
-            0,
+            frame_index,
         )))
     }
 

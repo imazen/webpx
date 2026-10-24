@@ -22,6 +22,9 @@
   (default 5 min). Only `decode_all` checked it, so frame-by-frame decoding,
   including the zencodec `render_next_frame` path, decoded past the cap.
   (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`)
+- zencodec `WebpAnimationFrameDecoder::render_next_frame` numbers frames
+  0, 1, 2, … in `AnimationFrame::frame_index`; it passed 0 for every frame.
+  (`tests/zencodec_integration.rs::animation_frames_report_index_and_duration`)
 
 ### Added
 

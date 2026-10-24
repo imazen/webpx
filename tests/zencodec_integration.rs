@@ -337,3 +337,51 @@ fn limits_round_trip_between_webpx_and_zencodec() {
     // max_metadata_bytes is webpx-only, drops on the round trip.
     assert_eq!(back.max_metadata_bytes, None);
 }
+
+#[cfg(feature = "animation")]
+fn three_frame_animation(durations: [u32; 3], loop_count: Option<u32>) -> Vec<u8> {
+    use zencodec::encode::AnimationFrameEncoder;
+
+    let frame_a = rgba_test_image(8, 8);
+    let mut frame_b = frame_a.clone();
+    for px in frame_b.chunks_mut(4) {
+        px[0] = 255 - px[0];
+    }
+    let mut frame_c = frame_a.clone();
+    for px in frame_c.chunks_mut(4) {
+        px[1] = 255 - px[1];
+    }
+    let mut enc = WebpEncoderConfig::lossless()
+        .job()
+        .with_loop_count(loop_count)
+        .animation_frame_encoder()
+        .expect("animation_frame_encoder ctor");
+    for (frame, dur) in [&frame_a, &frame_b, &frame_c].into_iter().zip(durations) {
+        let slice =
+            PixelSlice::new(frame, 8, 8, 8 * 4, PixelDescriptor::RGBA8_SRGB).expect("frame slice");
+        enc.push_frame(slice, dur, None).expect("push frame");
+    }
+    enc.finish(None).expect("anim finish").into_vec()
+}
+
+/// `AnimationFrame::frame_index` counts displayed frames and `duration_ms`
+/// carries each frame's ANMF duration.
+#[cfg(feature = "animation")]
+#[test]
+fn animation_frames_report_index_and_duration() {
+    use zencodec::decode::AnimationFrameDecoder;
+
+    let webp = three_frame_animation([40, 0, 130], None);
+    let mut dec = WebpDecoderConfig::new()
+        .job()
+        .animation_frame_decoder(
+            std::borrow::Cow::Borrowed(&webp),
+            &[PixelDescriptor::RGBA8_SRGB],
+        )
+        .expect("animation_frame_decoder ctor");
+    let mut seen = Vec::new();
+    while let Some(frame) = dec.render_next_frame(None).expect("render frame") {
+        seen.push((frame.frame_index(), frame.duration_ms()));
+    }
+    assert_eq!(seen, [(0, 40), (1, 0), (2, 130)]);
+}
