@@ -419,3 +419,12 @@ fn animation_loop_count_out_of_range_is_rejected() {
         .animation_frame_encoder();
     assert!(r.is_err(), "65536 loops cannot be stored");
 }
+
+/// Animation support is advertised exactly when the `animation` feature is on.
+#[test]
+fn capabilities_advertise_animation() {
+    let caps = <WebpEncoderConfig as zencodec::encode::EncoderConfig>::capabilities();
+    assert_eq!(caps.animation(), cfg!(feature = "animation"));
+    let dcaps = <WebpDecoderConfig as zencodec::decode::DecoderConfig>::capabilities();
+    assert_eq!(dcaps.animation(), cfg!(feature = "animation"));
+}

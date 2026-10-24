@@ -30,6 +30,9 @@
   count 0 (forever) whatever the caller asked for. Counts above 65535 (the
   ANIM chunk's 16-bit field) are rejected by `animation_frame_encoder`.
   (`tests/zencodec_integration.rs::animation_loop_count_*`)
+- zencodec encode and decode capabilities report `animation()` when the
+  `animation` feature is enabled; both reported false although the animation
+  encoder and decoder work. (`tests/zencodec_integration.rs::capabilities_advertise_animation`)
 
 ### Added
 

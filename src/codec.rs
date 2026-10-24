@@ -134,6 +134,7 @@ static ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities =
         .with_exif(true)
         .with_xmp(true)
         .with_stop(true)
+        .with_animation(cfg!(feature = "animation"))
         .with_lossy(true)
         .with_lossless(true)
         .with_native_alpha(true)
@@ -781,6 +782,7 @@ static DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
         .with_exif(true)
         .with_xmp(true)
         .with_stop(true)
+        .with_animation(cfg!(feature = "animation"))
         .with_enforces_max_pixels(true);
 
 impl zencodec::decode::DecoderConfig for WebpDecoderConfig {
