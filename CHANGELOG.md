@@ -13,6 +13,12 @@
   it with `e.error().detail().and_then(|d| d.downcast_ref::<webpx::Error>())`.
   zencodec-testkit's error-envelope and truncation-series checks pass.
   (`tests/zencodec_conformance.rs`)
+- zencodec: with no usable format preference, a still decodes to its native
+  layout, `RGB8` for an opaque file and `RGBA8` with alpha, as zenwebp does
+  (it was always `RGBA8`). `output_info().native_format`, the push decoder
+  and the streaming decoder follow; an explicit preference is still honored,
+  and animations still decode to RGBA/BGRA (libwebp's animation decoder).
+  (`tests/zencodec_decode_geometry.rs::default_format_follows_the_alpha_flag`)
 
 ### Fixed
 

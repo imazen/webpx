@@ -934,16 +934,23 @@ fn attach_metadata(
     Ok(info)
 }
 
-fn pick_decode_descriptor(preferred: &[PixelDescriptor]) -> PixelDescriptor {
-    for &p in preferred {
-        if p == PixelDescriptor::RGBA8_SRGB
+/// The first of the caller's preferred formats webpx can decode to.
+fn pick_decode_descriptor(preferred: &[PixelDescriptor]) -> Option<PixelDescriptor> {
+    preferred.iter().copied().find(|&p| {
+        p == PixelDescriptor::RGBA8_SRGB
             || p == PixelDescriptor::BGRA8_SRGB
             || p == PixelDescriptor::RGB8_SRGB
-        {
-            return p;
-        }
+    })
+}
+
+/// The format a still decodes to when the caller has no usable preference:
+/// RGBA8 when the file has alpha, else RGB8 (as zenwebp does).
+fn native_descriptor(has_alpha: bool) -> PixelDescriptor {
+    if has_alpha {
+        PixelDescriptor::RGBA8_SRGB
+    } else {
+        PixelDescriptor::RGB8_SRGB
     }
-    PixelDescriptor::RGBA8_SRGB
 }
 
 // ── Orientation ─────────────────────────────────────────────────────────────
@@ -1063,7 +1070,7 @@ impl WebpDecodeJob {
             // libwebp's animation decoder only produces RGBA / BGRA;
             // map preferred descriptor to one of those.
             let mode = match pick_decode_descriptor(_preferred) {
-                PixelDescriptor::BGRA8_SRGB => ColorMode::Bgra,
+                Some(PixelDescriptor::BGRA8_SRGB) => ColorMode::Bgra,
                 _ => ColorMode::Rgba,
             };
             let descriptor = match mode {
@@ -1125,7 +1132,8 @@ impl WebpDecodeJob {
                 .check_dimensions(probe.width, probe.height)
                 .map_err(|e| at!(Error::LimitExceeded(e)))?;
 
-            let descriptor = pick_decode_descriptor(_preferred);
+            let descriptor =
+                pick_decode_descriptor(_preferred).unwrap_or(native_descriptor(probe.has_alpha));
             let config = self.config.inner;
             let (w, h) = native_output_dims(&config, probe.width, probe.height);
             let intrinsic = buffer_orientation(&config, probe.orientation.unwrap_or_default());
@@ -1159,8 +1167,8 @@ impl WebpDecodeJob {
         let shown = buffer_orientation(config, info.orientation.unwrap_or_default());
         let resolved = resolve_orientation(self.orientation, shown);
         let (w, h) = resolved.output_dimensions(w, h);
-        // What `decoder(data, &[])` produces: RGBA8 whatever the alpha flag.
-        let mut out = OutputInfo::full_decode(w, h, pick_decode_descriptor(&[]))
+        // What `decoder(data, &[])` produces.
+        let mut out = OutputInfo::full_decode(w, h, native_descriptor(info.has_alpha))
             .with_orientation_applied(resolved);
         if config.use_cropping {
             out.crop_applied = Some([
@@ -1245,15 +1253,15 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
             // through scanlines, but row-level WebP decoding requires the
             // incremental API plus more bookkeeping than we want here.
             let dec_job = self;
-            let chosen = pick_decode_descriptor(preferred);
             let mut info_z = dec_job.native_output_info(&data)?;
+            let chosen = pick_decode_descriptor(preferred).unwrap_or(info_z.native_format);
             info_z.native_format = chosen;
             info_z.has_alpha = chosen.has_alpha();
             let dec = WebpDecoder {
                 data,
                 config: dec_job.config.inner,
                 stop: dec_job.stop,
-                chosen,
+                chosen: Some(chosen),
                 limits: Limits::from(dec_job.limits),
                 orientation: dec_job.orientation,
             };
@@ -1307,7 +1315,8 @@ pub struct WebpDecoder<'a> {
     data: Cow<'a, [u8]>,
     config: DecoderConfig,
     stop: Option<zencodec::StopToken>,
-    chosen: PixelDescriptor,
+    /// The caller's preferred format; `None`: the file's native one.
+    chosen: Option<PixelDescriptor>,
     limits: Limits,
     orientation: OrientationHint,
 }
@@ -1315,9 +1324,11 @@ pub struct WebpDecoder<'a> {
 impl WebpDecoder<'_> {
     fn native_decode(self) -> Result<DecodeOutput, At<Error>> {
         let _ = &self.stop;
+        let file = crate::ImageInfo::from_webp(&self.data)?;
+        let chosen = self.chosen.unwrap_or(native_descriptor(file.has_alpha));
         let cfg = self.config.clone().limits(self.limits);
         let dec = crate::Decoder::new(&self.data)?.config(cfg);
-        let (bytes, w, h, descriptor) = match self.chosen {
+        let (bytes, w, h, descriptor) = match chosen {
             PixelDescriptor::RGBA8_SRGB => {
                 let (b, w, h) = dec.decode_rgba_raw()?;
                 (b, w, h, PixelDescriptor::RGBA8_SRGB)
@@ -1336,7 +1347,7 @@ impl WebpDecoder<'_> {
         // Describe the file (alpha flag, sequence, metadata) as `probe`
         // does, not the output layout; only the dimensions come from the
         // decoded buffer, which reflects any configured scaling.
-        let mut info = build_zencodec_image_info(crate::ImageInfo::from_webp(&self.data)?);
+        let mut info = build_zencodec_image_info(file);
         info.width = w;
         info.height = h;
         let info = attach_metadata(info, &self.data, &self.limits)?;

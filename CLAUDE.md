@@ -157,9 +157,6 @@ Observed 2026-10-24/25 (rustc 1.99); CI gates none of these.
 - `compat::webp_animation` ignores `EncoderOptions::{kmin, kmax}` and
   `LossyEncodingConfig::{segments, alpha_compression}` (documented on the
   types).
-- Default zencodec decode output is `RGBA8` for opaque files too; zenwebp
-  returns `RGB8`. Callers that pass no preference get different layouts
-  from the two crates.
 
 ## Profiling Guidelines
 

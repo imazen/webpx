@@ -183,3 +183,49 @@ fn flip_option_composes_with_exif_orientation() {
     assert_eq!(corrected.3, Orientation::Identity);
     assert_eq!(display(corrected), want);
 }
+
+/// With no format preference a still decodes to its native layout (RGB8 when
+/// opaque, RGBA8 with alpha, as zenwebp does) on every path; an explicit
+/// preference wins.
+#[test]
+fn default_format_follows_the_alpha_flag() {
+    for alpha in [false, true] {
+        let webp = encode(Orientation::Identity, alpha);
+        let native = if alpha {
+            PixelDescriptor::RGBA8_SRGB
+        } else {
+            PixelDescriptor::RGB8_SRGB
+        };
+        let job = || WebpDecoderConfig::new().job();
+        let decoded = |preferred: &[PixelDescriptor]| {
+            job()
+                .decoder(Cow::Borrowed(&webp), preferred)
+                .unwrap()
+                .decode()
+                .unwrap()
+                .into_buffer()
+                .descriptor()
+        };
+        assert_eq!(decoded(&[]), native, "alpha={alpha}");
+        assert_eq!(job().output_info(&webp).unwrap().native_format, native);
+        let mut sink = Sink::default();
+        job()
+            .push_decoder(Cow::Borrowed(&webp), &mut sink, &[])
+            .unwrap();
+        assert_eq!(sink.desc, Some(native));
+        #[cfg(feature = "streaming")]
+        {
+            use zencodec::decode::StreamingDecode as _;
+            let mut sd = job().streaming_decoder(Cow::Borrowed(&webp), &[]).unwrap();
+            assert_eq!(sd.next_batch().unwrap().unwrap().1.descriptor(), native);
+        }
+        assert_eq!(
+            decoded(&[PixelDescriptor::RGBA8_SRGB]),
+            PixelDescriptor::RGBA8_SRGB
+        );
+        assert_eq!(
+            decoded(&[PixelDescriptor::BGRA8_SRGB]),
+            PixelDescriptor::BGRA8_SRGB
+        );
+    }
+}
