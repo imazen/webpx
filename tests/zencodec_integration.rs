@@ -690,3 +690,43 @@ fn animation_start_frame_index_skips_earlier_frames() {
     assert!(frames(3).is_empty());
     assert!(frames(7).is_empty());
 }
+
+/// Animation frames use the whole encoder config, not just quality and
+/// lossless: changing only the method changes the encoded animation.
+#[cfg(feature = "animation")]
+#[test]
+fn animation_frames_use_the_full_encoder_config() {
+    use zencodec::encode::AnimationFrameEncoder;
+    let frames: Vec<Vec<u8>> = (0..3u32)
+        .map(|s| {
+            (0..32 * 32)
+                .flat_map(|i| {
+                    let (x, y) = (i % 32, i / 32);
+                    [
+                        (x * 7 + s * 40) as u8,
+                        (y * 5) as u8,
+                        ((x ^ y) * 3) as u8,
+                        255,
+                    ]
+                })
+                .collect()
+        })
+        .collect();
+    let encode = |method| {
+        let mut enc = WebpEncoderConfig::lossy()
+            .with_method(method)
+            .job()
+            .animation_frame_encoder()
+            .unwrap();
+        for f in &frames {
+            let s = PixelSlice::new(f, 32, 32, 32 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
+            enc.push_frame(s, 100, None).unwrap();
+        }
+        enc.finish(None).unwrap().into_vec()
+    };
+    assert_ne!(
+        encode(0),
+        encode(6),
+        "method had no effect on animation frames"
+    );
+}

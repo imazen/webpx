@@ -36,6 +36,11 @@ All are fixes, listed below; these are the ones existing callers can notice.
   frame, numbered from the index.
   (`tests/zencodec_integration.rs::{animation_canvas_size_is_enforced,
   animation_start_frame_index_skips_earlier_frames}`)
+- zencodec animation frames use the whole encoder config. The animation
+  encoder copied only quality and lossless into `AnimationEncoder`, so
+  method/effort, preset, alpha quality, sharp YUV and every other setting
+  were silently dropped for animations.
+  (`tests/zencodec_integration.rs::animation_frames_use_the_full_encoder_config`)
 - zencodec decode keeps zenpixels' `At` location trace on buffer errors
   (`map_err_at`) instead of flattening it into a string. (71a9dfa, #17)
 - `AnimationDecoder::decode_all` no longer overwrites the last frame's

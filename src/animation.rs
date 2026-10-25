@@ -472,6 +472,12 @@ impl AnimationEncoder {
         self.config.lossless = lossless;
     }
 
+    /// Use `config` (every field) for the frames added from now on.
+    #[cfg(feature = "zencodec")]
+    pub(crate) fn set_config(&mut self, config: EncoderConfig) {
+        self.config = config;
+    }
+
     /// Set ICC profile to embed.
     #[cfg(feature = "icc")]
     pub fn set_icc_profile(&mut self, profile: Vec<u8>) {
