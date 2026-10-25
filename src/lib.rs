@@ -169,8 +169,11 @@ whereat::define_at_crate_info!();
 mod config;
 pub mod error;
 mod exif_orientation;
+// Only the metadata (`icc`) paths use all of it.
 mod ffi;
 mod limits;
+#[cfg_attr(not(feature = "icc"), allow(dead_code))]
+mod riff;
 mod types;
 
 #[cfg(feature = "zencodec")]

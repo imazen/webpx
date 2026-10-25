@@ -110,12 +110,15 @@
   wrote to the sink. With the native `flip` option, the reported orientation
   and the `Correct` bake now include the vertical flip libwebp applied.
   `output_info` sets `crop_applied`. (`tests/zencodec_decode_geometry.rs`)
-
-### Documented
-
-- `AnimationEncoder::finish`: libwebp writes a still image (no duration or
-  loop count) when one frame remains after merging identical frames; pinned
-  by `tests/animation_timing.rs::single_frame_animation_encodes_as_still`.
+- One-frame animations stay animations. libwebp writes an animation that is
+  down to one frame (one frame added, or identical frames merged) as a still
+  image in `AnimationEncoder::finish`, and `embed_*`/`remove_*` on a
+  one-frame animation did the same through libwebp's mux, losing the loop
+  count, duration and background colour. Both now rewrap the still as a
+  one-frame animation (`src/riff.rs`). (`tests/animation_timing.rs::
+  {single_frame_animation_stays_animated, single_lossy_frame_stays_animated,
+  metadata_edits_keep_one_frame_animations}`,
+  `tests/zencodec_integration.rs::one_frame_animation_with_metadata_stays_animated`)
 
 ### Added
 

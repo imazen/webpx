@@ -194,7 +194,20 @@ fn embed_chunk(webp_data: &[u8], fourcc: &[u8; 4], chunk_data: &[u8]) -> Result<
         vec
     };
 
-    Ok(result)
+    keep_one_frame_animation(webp_data, result)
+}
+
+/// `WebPMuxAssemble` writes a one-frame full-canvas animation as a still
+/// image (`MuxCleanup`), dropping its loop count, duration and background
+/// colour. Restore them, so editing metadata never changes the image.
+fn keep_one_frame_animation(input: &[u8], output: Vec<u8>) -> Result<Vec<u8>> {
+    match crate::riff::one_frame_animation(input) {
+        Some(frame) if !crate::riff::is_animated(&output) => {
+            crate::riff::still_to_animation(&output, &frame)
+                .ok_or_else(|| at!(Error::MuxError(MuxError::BadData)))
+        }
+        _ => Ok(output),
+    }
 }
 
 /// Remove ICC profile from WebP data.
@@ -253,7 +266,7 @@ fn remove_chunk(webp_data: &[u8], fourcc: &[u8; 4]) -> Result<Vec<u8>> {
         vec
     };
 
-    Ok(result)
+    keep_one_frame_animation(webp_data, result)
 }
 
 #[cfg(test)]

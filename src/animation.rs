@@ -380,6 +380,8 @@ pub struct AnimationEncoder {
     width: u32,
     height: u32,
     config: EncoderConfig,
+    /// Timestamp of the first frame added.
+    first_timestamp_ms: Option<i32>,
     #[cfg(feature = "icc")]
     icc_profile: Option<Vec<u8>>,
 }
@@ -449,6 +451,7 @@ impl AnimationEncoder {
             width,
             height,
             config: EncoderConfig::default(),
+            first_timestamp_ms: None,
             #[cfg(feature = "icc")]
             icc_profile: None,
         })
@@ -630,6 +633,7 @@ impl AnimationEncoder {
                 self.last_error("failed to add frame")
             )));
         }
+        self.first_timestamp_ms.get_or_insert(timestamp_ms);
 
         Ok(())
     }
@@ -653,11 +657,10 @@ impl AnimationEncoder {
     /// Finish encoding and return the WebP data.
     ///
     /// libwebp merges consecutive identical frames (adding their
-    /// durations), and when only one frame remains it writes a still image
-    /// (`OptimizeSingleFrame`): no ANIM/ANMF chunks, so the duration and
-    /// loop count are not stored. Decoding such a file with
-    /// [`AnimationDecoder`] yields one frame of 0 ms and `loop_count` 1,
-    /// libwebp's values for a still image.
+    /// durations). When only one frame remains, libwebp writes a still image
+    /// (`OptimizeSingleFrame`); webpx rewraps it as a one-frame animation so
+    /// the duration, loop count and background colour are kept. A single
+    /// frame lasting more than 2^24 - 1 ms (WebP's limit) is an error.
     ///
     /// # Arguments
     ///
@@ -700,6 +703,29 @@ impl AnimationEncoder {
             let vec = slice.to_vec();
             libwebp_sys::WebPDataClear(&mut webp_data);
             vec
+        };
+
+        // libwebp writes an animation that is down to one frame (one frame
+        // added, or identical frames merged) as a still image. Keep it an
+        // animation, with its duration, loop count and background colour.
+        let result = if crate::riff::is_animated(&result) {
+            result
+        } else {
+            let first = self.first_timestamp_ms.unwrap_or(0);
+            let frame = crate::riff::OneFrame {
+                bgcolor: self.options.anim_params.bgcolor,
+                loop_count: self.options.anim_params.loop_count as u16,
+                duration: end_timestamp_ms.wrapping_sub(first) as u32,
+                // libwebp's flags for a first frame: no blending, no disposal.
+                flags: 0x02,
+            };
+            crate::riff::still_to_animation(&result, &frame).ok_or_else(|| {
+                at!(Error::AnimationError(alloc::format!(
+                    "the animation's single frame lasts {} ms; WebP frames can last at most {} ms",
+                    frame.duration,
+                    (1u32 << 24) - 1
+                )))
+            })?
         };
 
         // Embed ICC profile if set
