@@ -1,11 +1,6 @@
 # webpx ![CI](https://img.shields.io/github/actions/workflow/status/imazen/webpx/ci.yml?style=flat-square&label=CI) ![crates.io](https://img.shields.io/crates/v/webpx?style=flat-square) [![lib.rs](https://img.shields.io/crates/v/webpx?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/webpx) ![docs.rs](https://img.shields.io/docsrs/webpx?style=flat-square) ![license](https://img.shields.io/crates/l/webpx?style=flat-square)
 
-**For new projects, use [`zenwebp`](https://github.com/imazen/zenwebp)**, the pure-Rust WebP codec. It implements the same `zencodec` API as `webpx`, so code written against that API switches with a dependency change.
-
-- **Same pixels as libwebp.** zenwebp's decoder matched libwebp 1.6.0 byte for byte in 43,414 of 43,414 decodes across 13,601 files (RGBA, RGB, YUV, simple upsampling and animation) — [results](https://github.com/imazen/zenwebp/blob/main/benchmarks/decode_parity_2026-10-01.md).
-- **No C, no `unsafe`.** `#![forbid(unsafe_code)]`, no C toolchain, `no_std` + `alloc`, and native `wasm32-unknown-unknown` builds.
-- **Faster lossless encoding at the top setting.** Method 6 encodes 2.6× faster than libwebp with files 1.3% larger (512×512 photo). Speed by method and content, faster and slower, is in its [measurements](https://github.com/imazen/zenwebp/blob/main/docs/PERFORMANCE.md). SIMD (SSE2/SSE4.1/AVX2, NEON, WASM SIMD128) is picked at runtime.
-- **License:** AGPL-3.0 or commercial; `webpx` stays MIT / Apache-2.0.
+**For new projects, use [`zenwebp`](https://github.com/imazen/zenwebp)**: 100% safe Rust, bit-exact with libwebp, with extra modes that improve compression, and faster in most situations. It implements the same `zencodec` API as `webpx`. (zenwebp is AGPL-3.0 or commercial; `webpx` is MIT / Apache-2.0.)
 
 `webpx` is Rust bindings to Google's [libwebp](https://chromium.googlesource.com/webm/libwebp), covering lossy and lossless encode/decode, animation, ICC/EXIF/XMP metadata, streaming, and `no_std`, for callers who specifically need libwebp.
 
