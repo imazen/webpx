@@ -45,6 +45,9 @@ pub struct AnimationInfo {
     pub loop_count: u32,
     /// Background color (ARGB).
     pub bgcolor: u32,
+    /// EXIF orientation of the animation; frames are decoded in stored order.
+    /// See [`ImageInfo::orientation`](crate::ImageInfo::orientation).
+    pub orientation: Option<crate::Orientation>,
 }
 
 /// Animated WebP decoder.
@@ -214,6 +217,7 @@ impl AnimationDecoder {
                 frame_count: anim_info.frame_count,
                 loop_count: anim_info.loop_count,
                 bgcolor: anim_info.bgcolor,
+                orientation: crate::exif_orientation::from_webp(&data_copy),
             },
             bpp,
             limits: *limits,

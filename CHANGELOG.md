@@ -88,6 +88,14 @@
 
 ### Added
 
+- `ImageInfo::orientation` and `AnimationInfo::orientation`
+  (`Option<webpx::Orientation>`): the EXIF Orientation tag of the file's
+  `EXIF` chunk, read with the same rules as zencodec's EXIF parser
+  (differential test in `src/exif_orientation.rs`). Decoding still returns
+  stored-order pixels; the crate docs gained an Orientation section.
+  `webpx::Orientation` re-exports `zenpixels::Orientation`, as zenwebp uses,
+  so `zenpixels` (no_std, no new transitive dependencies beyond `bytemuck`)
+  is now a regular dependency. (`tests/orientation.rs`)
 - `Error::Unsupported(zencodec::UnsupportedOperation)` (with the `zencodec`
   feature) and `impl zencodec::CategorizedError for Error`: every webpx error
   maps to a zencodec `ErrorCategory`, with codec name `"webpx"`.

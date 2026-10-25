@@ -230,6 +230,14 @@ pub struct ImageInfo {
     pub frame_count: u32,
     /// Bitstream format (lossy or lossless).
     pub format: BitstreamFormat,
+    /// EXIF orientation, from the Orientation tag of the file's `EXIF` chunk.
+    ///
+    /// WebP decoding never applies it: every decode function returns pixels
+    /// in stored order and the stored `width`/`height`. When this is
+    /// `Some(o)` with `o` not [`Orientation::Identity`](crate::Orientation::Identity), the image is meant to
+    /// be displayed transformed by `o` (`o.output_dimensions(w, h)` gives the
+    /// display size). `None` when there is no `EXIF` chunk or no valid tag.
+    pub orientation: Option<crate::Orientation>,
 }
 
 impl ImageInfo {
@@ -274,6 +282,7 @@ impl ImageInfo {
             has_animation: features.has_animation != 0,
             frame_count: if features.has_animation != 0 { 0 } else { 1 }, // Animation frame count needs demux
             format,
+            orientation: crate::exif_orientation::from_webp(data),
         })
     }
 }

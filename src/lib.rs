@@ -69,6 +69,15 @@
 //! # Ok::<(), webpx::At<webpx::Error>>(())
 //! ```
 //!
+//! ## Orientation
+//!
+//! WebP decoding never rotates or flips: every decode function returns
+//! pixels in stored order. A camera image may carry an EXIF Orientation tag
+//! saying how to display them; [`ImageInfo::orientation`] (and
+//! `AnimationInfo::orientation` with the `animation` feature) reports it. Check it before showing or re-encoding
+//! decoded pixels, or decode through the `zencodec` layer with
+//! `OrientationHint::Correct` to get upright pixels.
+//!
 //! ## Decoding untrusted input
 //!
 //! [`Limits::default()`] applies opinionated production caps (64 MP per
@@ -159,6 +168,7 @@ whereat::define_at_crate_info!();
 
 mod config;
 pub mod error;
+mod exif_orientation;
 mod ffi;
 mod limits;
 mod types;
@@ -202,6 +212,7 @@ pub use config::{AlphaFilter, DecoderConfig, EncodeStats, EncoderConfig, ImageHi
 pub use error::{DecodingError, EncodingError, Error, MuxError, Result};
 pub use limits::{LimitExceeded, Limits};
 pub use types::{BitstreamFormat, ColorMode, ImageInfo, WebPData, YuvPlanes, YuvPlanesRef};
+pub use zenpixels::Orientation;
 
 // Re-export enough crate types for cooperative cancellation
 pub use enough::{Stop, StopReason, Unstoppable};

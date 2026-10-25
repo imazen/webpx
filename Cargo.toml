@@ -45,7 +45,7 @@ streaming = []        # Incremental decode/encode
 # surface so the same caller code works against either crate.
 # `icc` (no extra deps) because the trait capabilities advertise ICC/EXIF/XMP
 # on both encode and decode.
-zencodec = ["dep:zencodec", "dep:zenpixels", "decode", "encode", "std", "icc"]
+zencodec = ["dep:zencodec", "decode", "encode", "std", "icc"]
 
 [dependencies]
 libwebp-sys = "0.14.2"
@@ -57,7 +57,8 @@ whereat = "0.1.4"
 # same `zencodec` semver line; users who swap crates don't have to
 # upgrade their `zencodec` consumer.
 zencodec = { version = "0.1.25", optional = true, default-features = false }
-zenpixels = { version = "0.2.10", optional = true, default-features = false }
+# Always on: `ImageInfo::orientation` uses its `Orientation` type.
+zenpixels = { version = "0.2.14", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["plotters", "cargo_bench_support"] }
