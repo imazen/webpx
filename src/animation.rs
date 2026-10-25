@@ -472,10 +472,68 @@ impl AnimationEncoder {
         self.config.lossless = lossless;
     }
 
-    /// Use `config` (every field) for the frames added from now on.
-    #[cfg(feature = "zencodec")]
-    pub(crate) fn set_config(&mut self, config: EncoderConfig) {
+    /// Encode the frames added from now on with `config` (every field:
+    /// quality, method, preset, lossless, alpha, filters, ...).
+    pub fn set_config(&mut self, config: EncoderConfig) {
         self.config = config;
+    }
+
+    /// Set the canvas background colour stored in the ANIM chunk, as
+    /// `0xAARRGGBB` (the value [`AnimationInfo::bgcolor`] reports). The
+    /// default is `0xFFFFFFFF`, opaque white. WebP viewers may ignore it.
+    ///
+    /// Fails after the first frame was added: libwebp fixes its options when
+    /// the encoder is created.
+    pub fn set_background_color(&mut self, argb: u32) -> Result<()> {
+        self.check_no_frames("set_background_color")?;
+        self.options.anim_params.bgcolor = argb;
+        Ok(())
+    }
+
+    /// Set how often libwebp may insert keyframes (frames that don't depend
+    /// on earlier ones), in frames.
+    ///
+    /// - `max == 0`: no keyframes after the first frame (`min` must be 0).
+    /// - `max == 1`: every frame is a keyframe (`min` must be 0).
+    /// - otherwise a keyframe at most every `max` frames and at least `min`
+    ///   frames apart: `max / 2 + 1 <= min < max` and `max - min <= 30`.
+    ///
+    /// Values outside these rules are an error; libwebp would silently
+    /// change them. The default is libwebp's: no keyframes after the first
+    /// frame, the same as `max == 0`. Fails after the first frame.
+    pub fn set_keyframe_interval(&mut self, min: u32, max: u32) -> Result<()> {
+        self.check_no_frames("set_keyframe_interval")?;
+        let valid = match max {
+            0 | 1 => min == 0,
+            _ => min < max && min > max / 2 && max - min <= 30 && max <= i32::MAX as u32,
+        };
+        if !valid {
+            return Err(at!(Error::InvalidInput(format!(
+                "invalid keyframe interval min {min}, max {max}: need min 0 for max 0 or 1, \
+                 else max / 2 + 1 <= min < max and max - min <= 30"
+            ))));
+        }
+        self.options.kmin = min as i32;
+        self.options.kmax = max as i32;
+        Ok(())
+    }
+
+    /// Set libwebp's keyframe options unchecked; libwebp adjusts invalid
+    /// values. For the `webp-animation` compatibility shim, which passes
+    /// them through the same way.
+    pub(crate) fn set_keyframe_interval_unchecked(&mut self, kmin: i32, kmax: i32) {
+        self.options.kmin = kmin;
+        self.options.kmax = kmax;
+    }
+
+    fn check_no_frames(&self, what: &str) -> Result<()> {
+        if self.encoder.is_null() {
+            Ok(())
+        } else {
+            Err(at!(Error::InvalidConfig(format!(
+                "{what} must be called before the first frame is added"
+            ))))
+        }
     }
 
     /// Set ICC profile to embed.

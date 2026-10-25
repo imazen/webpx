@@ -37,6 +37,22 @@
   were silently dropped for animations.
   (`tests/zencodec_integration.rs::animation_frames_use_the_full_encoder_config`)
 
+### Added
+
+- `AnimationEncoder::set_config(EncoderConfig)`: every encoder setting for
+  animation frames (it was quality, preset and lossless only).
+- `AnimationEncoder::set_background_color(argb)`: the ANIM background colour
+  (`0xAARRGGBB`, as `AnimationInfo::bgcolor` reports; default opaque white).
+- `AnimationEncoder::set_keyframe_interval(min, max)`: libwebp's keyframe
+  interval, with libwebp's rules checked instead of silently adjusted. Both
+  setters fail once a frame was added. (`tests/animation_encoder.rs`)
+
+### Fixed (compat)
+
+- `compat::webp_animation` passes `EncoderOptions::{kmin, kmax}` to libwebp,
+  as webp-animation does; they were ignored.
+  (`tests/animation_encoder.rs::compat_keyframe_options_reach_libwebp`)
+
 ## [0.4.1] - 2026-10-25
 
 ### Behavior changes to check when upgrading

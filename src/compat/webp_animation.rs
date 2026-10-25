@@ -177,8 +177,7 @@ impl core::fmt::Display for Error {
 
 /// Encoder options.
 ///
-/// `kmin` and `kmax` are accepted for source compatibility and ignored: the
-/// encoder uses libwebp's default keyframe interval.
+/// `kmin` and `kmax` go to libwebp unchanged, as in `webp-animation`.
 #[deprecated(
     since = "0.2.1",
     note = "use the main webpx animation API; see module docs"
@@ -324,6 +323,9 @@ impl Encoder {
 
         let mut inner =
             crate::AnimationEncoder::new(width, height).map_err(|_| Error::EncoderCreateFailed)?;
+        // As webp-animation does: passed to libwebp as given (0, 0 disables
+        // keyframes after the first frame).
+        inner.set_keyframe_interval_unchecked(options.kmin, options.kmax);
 
         if let Some(config) = &options.encoding_config {
             inner.set_quality(config.quality);

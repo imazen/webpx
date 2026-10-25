@@ -92,3 +92,113 @@ fn loop_count_must_fit_sixteen_bits() {
 fn finish_without_frames_is_an_error() {
     assert!(AnimationEncoder::new(W, H).unwrap().finish(100).is_err());
 }
+
+#[test]
+fn background_color_is_stored() {
+    for frames in [&[0usize][..], &[0, 60]] {
+        let mut enc = AnimationEncoder::new(W, H).unwrap();
+        enc.set_background_color(0x8011_2233).unwrap();
+        let webp = encode(enc, frames);
+        let dec = AnimationDecoder::new(&webp).unwrap();
+        assert_eq!(dec.info().bgcolor, 0x8011_2233, "{} frame(s)", frames.len());
+    }
+}
+
+#[test]
+fn options_are_rejected_after_the_first_frame() {
+    let mut enc = AnimationEncoder::new(W, H).unwrap();
+    enc.add_frame_rgba(&frame(0), 0).unwrap();
+    assert!(enc.set_background_color(0).is_err());
+    assert!(enc.set_keyframe_interval(0, 1).is_err());
+}
+
+#[test]
+fn keyframe_interval_is_validated() {
+    let set = |min, max| {
+        AnimationEncoder::new(W, H)
+            .unwrap()
+            .set_keyframe_interval(min, max)
+    };
+    for (min, max) in [(0, 0), (0, 1), (2, 3), (6, 10), (9, 17), (26, 50)] {
+        assert!(set(min, max).is_ok(), "({min}, {max})");
+    }
+    // libwebp would silently change each of these.
+    for (min, max) in [(1, 0), (1, 1), (3, 3), (4, 3), (5, 10), (19, 50), (40, 80)] {
+        assert!(set(min, max).is_err(), "({min}, {max})");
+    }
+}
+
+/// Every frame a keyframe costs bytes over the default (no keyframes after
+/// the first) for frames that differ only a little.
+#[test]
+fn keyframe_interval_reaches_libwebp() {
+    // The same frame with a 2x2 square moving across it.
+    let frames: Vec<Vec<u8>> = (0..8u32)
+        .map(|i| {
+            let mut px = frame(0);
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let p = (((2 + dy) * W + 2 * i + dx) * 4) as usize;
+                px[p..p + 4].copy_from_slice(&[255, 0, 0, 255]);
+            }
+            px
+        })
+        .collect();
+    let size = |kf: Option<(u32, u32)>| {
+        let mut enc = AnimationEncoder::new(W, H).unwrap();
+        enc.set_lossless(true);
+        if let Some((min, max)) = kf {
+            enc.set_keyframe_interval(min, max).unwrap();
+        }
+        for (i, f) in frames.iter().enumerate() {
+            enc.add_frame_rgba(f, i as i32 * 100).unwrap();
+        }
+        enc.finish(800).unwrap().len()
+    };
+    let default = size(None);
+    assert_eq!(size(Some((0, 0))), default);
+    assert!(
+        size(Some((0, 1))) > default,
+        "all-keyframe {} vs default {default}",
+        size(Some((0, 1)))
+    );
+}
+
+#[test]
+fn set_config_applies_every_setting() {
+    let seeds = [0, 60, 120];
+    let with_method = |m| {
+        let mut enc = AnimationEncoder::new(W, H).unwrap();
+        enc.set_config(webpx::EncoderConfig::new().quality(80.0).method(m));
+        encode(enc, &seeds)
+    };
+    assert_ne!(with_method(0), with_method(6));
+}
+
+/// The webp-animation shim passes `kmin`/`kmax` to libwebp as that crate
+/// does; they were ignored.
+#[test]
+#[allow(deprecated)]
+fn compat_keyframe_options_reach_libwebp() {
+    use webpx::compat::webp_animation::{Encoder, EncoderOptions};
+    let frames: Vec<Vec<u8>> = (0..8u32)
+        .map(|i| {
+            let mut px = frame(0);
+            let p = ((3 * W + 2 * i) * 4) as usize;
+            px[p..p + 4].copy_from_slice(&[255, 0, 0, 255]);
+            px
+        })
+        .collect();
+    let size = |kmin, kmax| {
+        let options = EncoderOptions {
+            kmin,
+            kmax,
+            ..Default::default()
+        };
+        let mut enc = Encoder::new_with_options((W, H), options).unwrap();
+        for (i, f) in frames.iter().enumerate() {
+            enc.add_frame(f, i as i32 * 100).unwrap();
+        }
+        enc.finalize(800).unwrap().len()
+    };
+    assert!(size(0, 1) > size(0, 0));
+}

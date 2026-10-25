@@ -154,9 +154,8 @@ Observed 2026-10-24/25 (rustc 1.99); CI gates none of these.
   dropped from `webpx.internal.txt`, `std::io::Write` printed as
   `core::io::write::Write`). Regenerate with `just api-doc` in a commit of
   its own.
-- `compat::webp_animation` ignores `EncoderOptions::{kmin, kmax}` and
-  `LossyEncodingConfig::{segments, alpha_compression}` (documented on the
-  types).
+- `compat::webp_animation` ignores `LossyEncodingConfig::{segments,
+  alpha_compression}` (documented on the type).
 
 ## Profiling Guidelines
 
