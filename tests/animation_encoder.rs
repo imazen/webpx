@@ -95,7 +95,8 @@ fn finish_without_frames_is_an_error() {
 
 #[test]
 fn background_color_is_stored() {
-    for frames in [&[0usize][..], &[0, 60]] {
+    // Two frames: a one-frame animation is written as a still.
+    for frames in [&[0usize, 60][..], &[0, 60, 120]] {
         let mut enc = AnimationEncoder::new(W, H).unwrap();
         enc.set_background_color(0x8011_2233).unwrap();
         let webp = encode(enc, frames);

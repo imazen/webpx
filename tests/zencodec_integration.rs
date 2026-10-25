@@ -593,12 +593,11 @@ fn still_decode_alpha_matches_probe() {
     }
 }
 
-/// A one-frame zencodec animation with metadata stays an animation: libwebp
-/// writes it as a still in both the encoder and the metadata mux.
+/// A one-frame zencodec animation is written as a still, as libwebp and
+/// zenwebp do, and keeps its metadata and orientation.
 #[cfg(feature = "animation")]
 #[test]
-fn one_frame_animation_with_metadata_stays_animated() {
-    use zencodec::decode::AnimationFrameDecoder;
+fn one_frame_animation_is_written_as_a_still() {
     use zencodec::encode::AnimationFrameEncoder;
     use zencodec::{ImageSequence, Metadata, MetadataPolicy};
 
@@ -619,16 +618,9 @@ fn one_frame_animation_with_metadata_stays_animated() {
     let webp = enc.finish(None).unwrap().into_vec();
 
     let info = WebpDecoderConfig::new().job().probe(&webp).unwrap();
-    assert!(matches!(info.sequence, ImageSequence::Animation { .. }));
+    assert!(!matches!(info.sequence, ImageSequence::Animation { .. }));
     assert_eq!(info.orientation, zencodec::Orientation::Rotate180);
-    let mut dec = WebpDecoderConfig::new()
-        .job()
-        .animation_frame_decoder(std::borrow::Cow::Borrowed(&webp), &[])
-        .unwrap();
-    assert_eq!(dec.loop_count(), Some(2));
-    let frame = dec.render_next_frame(None).unwrap().unwrap();
-    assert_eq!(frame.duration_ms(), 120);
-    assert!(dec.render_next_frame(None).unwrap().is_none());
+    assert_eq!(info.embedded_metadata.xmp.as_deref(), Some(&b"<x/>"[..]));
 }
 
 /// `with_canvas_size` fixes the frame size: matching frames encode, others
