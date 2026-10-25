@@ -109,6 +109,8 @@ All are fixes, listed below; these are the ones existing callers can notice.
 - Lossy crops return exactly the requested region (odd origins were shifted
   one pixel), and an odd-origin lossy crop combined with scaling is now an
   error.
+- Still RGB-family decodes of an animated file (native and zencodec) return
+  its first frame instead of an error; YUV decodes still refuse animations.
 - `zenpixels` is a regular dependency; the `zencodec` feature enables `icc`.
   (4e5e455, f3d5913)
 
