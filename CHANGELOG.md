@@ -4,9 +4,15 @@
 
 ### QUEUED BREAKING CHANGES
 
-- 0.5.0: the zencodec trait impls return `At<zencodec::CodecError>` (the
-  zencodec error envelope, as zenwebp does) with `webpx::Error` as the
-  detail, instead of `At<webpx::Error>`.
+- zencodec: every trait impl's `type Error` is `At<zencodec::CodecError>`
+  (the zencodec error envelope, as zenwebp uses) instead of
+  `At<webpx::Error>`. The `webpx::Error` is the envelope's `detail()`, the
+  category comes from `CategorizedError`, the codec name is `"webpx"`, and the
+  `At` location trace is kept. Generic callers now recover the category after
+  `dyn` erasure; code that matched `webpx::Error` from a zencodec call reads
+  it with `e.error().detail().and_then(|d| d.downcast_ref::<webpx::Error>())`.
+  zencodec-testkit's error-envelope and truncation-series checks pass.
+  (`tests/zencodec_conformance.rs`)
 
 ## [0.4.1] - 2026-10-25
 

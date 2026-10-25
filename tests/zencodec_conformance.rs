@@ -1,8 +1,7 @@
 //! `zencodec-testkit` conformance checks against the webpx zencodec layer.
 //!
-//! Only the checks webpx passes are run here. The `At<CodecError>` error
-//! envelope and truncation-category checks need the trait impls' `type Error`
-//! to change, which is queued for 0.5.0 (CHANGELOG, QUEUED BREAKING CHANGES).
+//! Every check the testkit offers runs here, including the opt-in error
+//! envelope and truncation-series checks.
 
 #![cfg(feature = "zencodec")]
 
@@ -100,6 +99,18 @@ fn errors_are_categorized() {
     };
     assert_eq!(err.codec_name(), Some("webpx"));
     assert_eq!(err.category(), ErrorCategory::Image(ImageError::Malformed));
+    // The native error is the envelope's detail (the CHANGELOG migration).
+    let native = err
+        .error()
+        .detail()
+        .and_then(|d| d.downcast_ref::<webpx::Error>());
+    assert!(
+        matches!(
+            native,
+            Some(webpx::Error::DecodeFailed(_) | webpx::Error::InvalidWebP)
+        ),
+        "{native:?}"
+    );
 }
 
 /// Under every orientation-keeping metadata policy the displayed image
@@ -111,4 +122,45 @@ fn orientation_roundtrip() {
         WebpDecoderConfig::new(),
         &still(),
     ));
+}
+
+/// Errors cross `dyn` dispatch as `At<CodecError>`: the category and the codec
+/// name survive erasure.
+#[test]
+fn decode_error_envelope() {
+    ok(tk::check_decode_error_envelope(
+        WebpDecoderConfig::new(),
+        b"RIFF\x10\0\0\0WEBPVP8 garbage!!",
+    ));
+}
+
+/// Truncated lossless, lossy and animated files fail as image-data errors (never
+/// internal, resource, I/O or caller faults) and never panic.
+#[test]
+fn decode_truncation_series() {
+    use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+    let img = still();
+    for enc in [WebpEncoderConfig::lossless(), WebpEncoderConfig::lossy()] {
+        let bytes = enc.job().encoder().unwrap().encode(img.as_slice()).unwrap();
+        ok(tk::check_decode_truncation_series(
+            WebpDecoderConfig::new(),
+            bytes.data(),
+        ));
+    }
+    #[cfg(feature = "animation")]
+    {
+        use zencodec::encode::AnimationFrameEncoder as _;
+        let mut enc = WebpEncoderConfig::lossless()
+            .job()
+            .animation_frame_encoder()
+            .unwrap();
+        for f in frames() {
+            enc.push_frame(f.as_slice(), 50, None).unwrap();
+        }
+        let anim = enc.finish(None).unwrap();
+        ok(tk::check_decode_truncation_series(
+            WebpDecoderConfig::new(),
+            anim.data(),
+        ));
+    }
 }

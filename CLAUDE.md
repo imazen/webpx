@@ -154,11 +154,6 @@ Observed 2026-10-24/25 (rustc 1.99); CI gates none of these.
   dropped from `webpx.internal.txt`, `std::io::Write` printed as
   `core::io::write::Write`). Regenerate with `just api-doc` in a commit of
   its own.
-- zencodec-testkit 0.1.0: webpx passes every check except
-  `check_decode_error_envelope` and `check_decode_truncation_series`, which
-  need the trait impls' `type Error` to be `At<zencodec::CodecError>`
-  (queued for 0.5.0; see CHANGELOG). The passing checks run in
-  `tests/zencodec_conformance.rs`.
 - `compat::webp_animation` ignores `EncoderOptions::{kmin, kmax}` and
   `LossyEncodingConfig::{segments, alpha_compression}` (documented on the
   types).
