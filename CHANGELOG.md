@@ -87,6 +87,9 @@ All are fixes, listed below; these are the ones existing callers can notice.
   `Error::InvalidConfig`; `output_info().native_format` is `RGBA8` for opaque
   files too (what `decoder(.., &[])` returns); decode reports the file's EXIF
   orientation instead of `Identity`. (20dd298, 259b1e0, 69e3796)
+- Lossy crops return exactly the requested region (odd origins were shifted
+  one pixel), and an odd-origin lossy crop combined with scaling is now an
+  error.
 - `zenpixels` is a regular dependency; the `zencodec` feature enables `icc`.
   (4e5e455, f3d5913)
 

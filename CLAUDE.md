@@ -104,6 +104,20 @@ Larger test files available at `~/work/codec-corpus/image-rs/test-images/webp/`.
 - The demuxer reports `loop_count` 1 and frame duration 0 for a still image.
 - `WebPMuxAssemble` rejects zero-length ICCP/EXIF/XMP chunks
   (`WEBP_MUX_INVALID_ARGUMENT`).
+- Lossy crops: libwebp rounds `crop_left`/`crop_top` down to even and keeps
+  the size, and its fancy upsampler treats the crop edge as the image edge.
+  `Decoder::decode_advanced` decodes a 2-px margin and trims, so crops equal
+  the full decode (`tests/crop_exact.rs`).
+- libwebp 1.6.0 accepts NaN `quality`/`target_PSNR` and reads RGBA through
+  `uint32_t*` for ARGB pictures (unaligned = UB); webpx guards both
+  (`EncoderConfig::to_libwebp`, `ffi::picture::import_rgba`,
+  `just ubsan-alignment`).
+- libwebp 1.6.0 vs main (1844042d1c, measured 2026-10-25 by building webpx
+  against both, harness in the 2026-10-25 lane report): decode output is
+  byte-identical on 3199 files x crop/scale/dither/flip/nofancy/anim except
+  YUV decode of lossless files (chroma +-5, 0d14d84bdb makes VP8L->YUV use
+  the encoder's RGB->YUV import). Encode output shrinks slightly on main
+  (Cat5/Cat6 stats fix): q90 m4 pass 6 changed 177/297 files, x0.99994.
 - ANIM background color is stored as bytes [B, G, R, A] and read
   little-endian, so `AnimationInfo::bgcolor` is 0xAARRGGBB. Loop count is a
   u16 (`MAX_LOOP_COUNT` = 65536 exclusive).
