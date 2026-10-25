@@ -27,6 +27,15 @@ All are fixes, listed below; these are the ones existing callers can notice.
 
 ### Fixed
 
+- zencodec `WebpEncodeJob::with_canvas_size` and
+  `WebpDecodeJob::with_start_frame_index` were the trait's no-op defaults.
+  The canvas size is now the required frame size (a mismatching frame is an
+  error at `push_frame`; an impossible canvas is rejected by
+  `animation_frame_encoder`), and the animation decoder composites and drops
+  the frames before the start index, so the first yielded frame is that
+  frame, numbered from the index.
+  (`tests/zencodec_integration.rs::{animation_canvas_size_is_enforced,
+  animation_start_frame_index_skips_earlier_frames}`)
 - zencodec decode keeps zenpixels' `At` location trace on buffer errors
   (`map_err_at`) instead of flattening it into a string. (71a9dfa, #17)
 - `AnimationDecoder::decode_all` no longer overwrites the last frame's

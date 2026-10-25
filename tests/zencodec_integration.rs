@@ -630,3 +630,63 @@ fn one_frame_animation_with_metadata_stays_animated() {
     assert_eq!(frame.duration_ms(), 120);
     assert!(dec.render_next_frame(None).unwrap().is_none());
 }
+
+/// `with_canvas_size` fixes the frame size: matching frames encode, others
+/// are rejected at `push_frame`, and an impossible canvas is rejected up front.
+#[cfg(feature = "animation")]
+#[test]
+fn animation_canvas_size_is_enforced() {
+    use zencodec::encode::AnimationFrameEncoder;
+    let px = rgba_test_image(8, 8);
+    let slice = || PixelSlice::new(&px, 8, 8, 8 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
+    let job = |w, h| {
+        WebpEncoderConfig::lossless()
+            .job()
+            .with_canvas_size(w, h)
+            .animation_frame_encoder()
+    };
+    let mut ok = job(8, 8).unwrap();
+    ok.push_frame(slice(), 50, None).unwrap();
+    ok.push_frame(slice(), 50, None).unwrap();
+    let webp = ok.finish(None).unwrap().into_vec();
+    let info = webpx::ImageInfo::from_webp(&webp).unwrap();
+    assert_eq!((info.width, info.height), (8, 8));
+
+    let mut wrong = job(16, 8).unwrap();
+    assert!(wrong.push_frame(slice(), 50, None).is_err());
+    assert!(job(0, 8).is_err());
+    assert!(job(8, 16384).is_err());
+}
+
+/// `with_start_frame_index(n)` yields frame n first (composited over the
+/// earlier frames), numbered n, with its own duration.
+#[cfg(feature = "animation")]
+#[test]
+fn animation_start_frame_index_skips_earlier_frames() {
+    use std::borrow::Cow;
+    use zencodec::decode::AnimationFrameDecoder;
+    let anim = three_frame_animation([40, 0, 130], None);
+    let frames = |start| {
+        let mut dec = WebpDecoderConfig::new()
+            .job()
+            .with_start_frame_index(start)
+            .animation_frame_decoder(Cow::Borrowed(&anim), &[])
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(f) = dec.render_next_frame(None).unwrap() {
+            let p = f.pixels();
+            let rb = p.width() as usize * 4;
+            let px: Vec<u8> = (0..p.rows())
+                .flat_map(|y| p.row(y)[..rb].to_vec())
+                .collect();
+            out.push((f.frame_index(), f.duration_ms(), px));
+        }
+        out
+    };
+    let all = frames(0);
+    assert_eq!(all.len(), 3);
+    assert_eq!(frames(1), all[1..].to_vec());
+    assert_eq!(frames(2), all[2..].to_vec());
+    assert!(frames(3).is_empty());
+    assert!(frames(7).is_empty());
+}

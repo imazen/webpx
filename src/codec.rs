@@ -331,6 +331,7 @@ impl zencodec::encode::EncoderConfig for WebpEncoderConfig {
             orientation: Orientation::Identity,
             limits: ResourceLimits::none(),
             loop_count: None,
+            canvas_size: None,
         }
     }
 }
@@ -349,6 +350,9 @@ pub struct WebpEncodeJob {
     /// Animation loop count from `with_loop_count`; `None` is WebP's
     /// default of 0 (loop forever).
     loop_count: Option<u32>,
+    /// Animation canvas from `with_canvas_size`; every frame must have this
+    /// size. `None`: the first frame's size.
+    canvas_size: Option<(u32, u32)>,
 }
 
 impl WebpEncodeJob {
@@ -411,6 +415,11 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
         self
     }
 
+    fn with_canvas_size(mut self, width: u32, height: u32) -> Self {
+        self.canvas_size = Some((width, height));
+        self
+    }
+
     fn encoder(self) -> Result<WebpEncoder, At<Error>> {
         let exif = self.prepared_exif()?;
         Ok(WebpEncoder {
@@ -440,6 +449,13 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
             // The ANIM chunk stores the loop count in 16 bits; reject
             // what it can't hold rather than letting libwebp fail at
             // assembly after every frame was encoded.
+            if let Some((w, h)) = self.canvas_size
+                && (w == 0 || h == 0 || w > 16383 || h > 16383)
+            {
+                return Err(at!(Error::InvalidInput(format!(
+                    "WebP canvas must be 1..=16383 pixels on each side, got {w}x{h}"
+                ))));
+            }
             let loop_count = self.loop_count.unwrap_or(0);
             if loop_count > u32::from(u16::MAX) {
                 return Err(at!(Error::InvalidConfig(format!(
@@ -457,7 +473,7 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
                 xmp: self.xmp,
                 limits: Limits::from(self.limits),
                 last_timestamp_ms: 0,
-                canvas_dims: None,
+                canvas_dims: self.canvas_size,
                 loop_count,
             })
         }
@@ -630,10 +646,10 @@ pub struct WebpAnimationFrameEncoder {
     /// trait's `duration_ms` parameter maps cleanly. Wraps: libwebp only
     /// looks at the `uint32` difference between successive timestamps.
     last_timestamp_ms: u32,
-    /// Canvas dimensions captured from the first frame (lazy init).
-    /// Subsequent frames must match these — libwebp's animation
-    /// encoder is fixed-canvas, so a mismatch silently corrupts output
-    /// or panics inside libwebp. Reject up front instead.
+    /// Canvas dimensions: from `with_canvas_size`, else captured from the
+    /// first frame. Every frame must match — libwebp's animation encoder
+    /// is fixed-canvas, so a mismatch would corrupt output or fail inside
+    /// libwebp. Reject up front instead.
     canvas_dims: Option<(u32, u32)>,
     /// Loop count for the ANIM chunk (0 = forever), validated to fit 16 bits.
     loop_count: u32,
@@ -667,34 +683,28 @@ impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
             .check_dimensions(w, h)
             .map_err(|e| at!(Error::LimitExceeded(e)))?;
 
-        // Construct the underlying AnimationEncoder lazily on the
-        // first frame so we know the canvas size. Subsequent frames
-        // must match — libwebp's animation encoder is fixed-canvas.
-        match self.canvas_dims {
-            None => {
-                // `allow_mixed` lets libwebp encode each frame lossy or
-                // lossless, whichever is smaller, so it is only safe for
-                // lossy configs: a lossless config must give lossless frames.
-                let allow_mixed = !self.config.is_lossless();
-                let mut enc =
-                    crate::AnimationEncoder::with_options(w, h, allow_mixed, self.loop_count)?;
-                enc.set_quality(self.config.get_quality());
-                if self.config.is_lossless() {
-                    enc.set_lossless(true);
-                }
-                self.inner = Some(enc);
-                self.canvas_dims = Some((w, h));
+        // Every frame must match the canvas (from `with_canvas_size`,
+        // else the first frame) — libwebp's animation encoder is
+        // fixed-canvas.
+        let (cw, ch) = *self.canvas_dims.get_or_insert((w, h));
+        if (cw, ch) != (w, h) {
+            return Err(at!(Error::InvalidInput(format!(
+                "animation frame dimensions {w}x{h} do not match the {cw}x{ch} canvas"
+            ))));
+        }
+        // Construct the underlying AnimationEncoder on the first frame.
+        if self.inner.is_none() {
+            // `allow_mixed` lets libwebp encode each frame lossy or
+            // lossless, whichever is smaller, so it is only safe for
+            // lossy configs: a lossless config must give lossless frames.
+            let allow_mixed = !self.config.is_lossless();
+            let mut enc =
+                crate::AnimationEncoder::with_options(w, h, allow_mixed, self.loop_count)?;
+            enc.set_quality(self.config.get_quality());
+            if self.config.is_lossless() {
+                enc.set_lossless(true);
             }
-            Some((cw, ch)) if cw != w || ch != h => {
-                return Err(at!(Error::InvalidInput(format!(
-                    "animation frame dimensions {}x{} do not match canvas {}x{} \
-                     (set on first frame)",
-                    w, h, cw, ch
-                ))));
-            }
-            Some(_) => {
-                // Dimensions match; nothing to do.
-            }
+            self.inner = Some(enc);
         }
 
         let enc = self.inner.as_mut().expect("just initialized");
@@ -852,6 +862,7 @@ impl zencodec::decode::DecoderConfig for WebpDecoderConfig {
             stop: None,
             limits: ResourceLimits::none(),
             orientation: OrientationHint::Preserve,
+            start_frame_index: 0,
         }
     }
 }
@@ -867,6 +878,8 @@ pub struct WebpDecodeJob {
     /// the resolved transform into the pixels and reports the output
     /// dimensions with `Orientation::Identity`.
     orientation: OrientationHint,
+    /// First animation frame `animation_frame_decoder` yields.
+    start_frame_index: u32,
 }
 
 fn build_zencodec_image_info(info: crate::ImageInfo) -> ImageInfo {
@@ -1034,6 +1047,11 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
 
     fn with_orientation(mut self, hint: OrientationHint) -> Self {
         self.orientation = hint;
+        self
+    }
+
+    fn with_start_frame_index(mut self, index: u32) -> Self {
+        self.start_frame_index = index;
         self
     }
 
@@ -1231,6 +1249,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                 last_width: 0,
                 last_height: 0,
                 next_index: 0,
+                start_frame_index: self.start_frame_index,
             })
         }
     }
@@ -1399,6 +1418,9 @@ pub struct WebpAnimationFrameDecoder {
     /// one composited canvas per ANMF frame, so iteration order is the
     /// displayed-frame index.
     next_index: u32,
+    /// Frames before this index are composited but not returned
+    /// (`with_start_frame_index`).
+    start_frame_index: u32,
 }
 
 #[cfg(feature = "animation")]
@@ -1417,6 +1439,14 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
         &mut self,
         _stop: Option<&dyn enough::Stop>,
     ) -> Result<Option<zencodec::decode::AnimationFrame<'_>>, At<Error>> {
+        // Frames before `with_start_frame_index` are composited and dropped:
+        // a WebP frame draws onto the canvas the earlier frames left.
+        while self.next_index < self.start_frame_index {
+            if self.inner.next_frame()?.is_none() {
+                return Ok(None);
+            }
+            self.next_index += 1;
+        }
         let frame = match self.inner.next_frame()? {
             Some(f) => f,
             None => return Ok(None),
