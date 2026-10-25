@@ -14,6 +14,18 @@
   zencodec-testkit's error-envelope and truncation-series checks pass.
   (`tests/zencodec_conformance.rs`)
 
+### Fixed
+
+- zencodec `WebpEncodeJob::with_canvas_size` and
+  `WebpDecodeJob::with_start_frame_index` were the trait's no-op defaults.
+  The canvas size is now the required frame size (a mismatching frame is an
+  error at `push_frame`; an impossible canvas is rejected by
+  `animation_frame_encoder`), and the animation decoder composites and drops
+  the frames before the start index, so the first yielded frame is that
+  frame, numbered from the index.
+  (`tests/zencodec_integration.rs::{animation_canvas_size_is_enforced,
+  animation_start_frame_index_skips_earlier_frames}`)
+
 ## [0.4.1] - 2026-10-25
 
 ### Behavior changes to check when upgrading
