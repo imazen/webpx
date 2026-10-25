@@ -14,7 +14,7 @@
 
 use crate::config::DecoderConfig;
 use crate::error::{DecodingError, Error, Result};
-use crate::types::{DecodePixel, ImageInfo, YuvPlanes};
+use crate::types::{DecodePixel, ImageInfo, PixelLayout, YuvPlanes};
 use alloc::vec::Vec;
 use imgref::ImgVec;
 use rgb::alt::{BGR8, BGRA8};
@@ -38,6 +38,86 @@ pub(crate) fn default_limits_gate(data: &[u8]) -> Result<()> {
         .map_err(|e| at!(Error::LimitExceeded(e)))
 }
 
+// ── Animated input ──────────────────────────────────────────────────────────
+//
+// libwebp's still decoders refuse animated files. webpx's RGB(A)/BGR(A)
+// decodes return the first composited frame instead, as zenwebp's do; the
+// YUV decodes keep libwebp's refusal.
+
+/// Whether `data`'s VP8X header has the animation flag.
+fn is_animated(data: &[u8]) -> bool {
+    crate::riff::find_chunk(data, b"VP8X").is_some_and(|v| v.first().is_some_and(|f| f & 0x02 != 0))
+}
+
+/// The first composited frame of an animated `data` in `layout`, or `None`
+/// when `data` isn't animated.
+pub(crate) fn first_frame_if_animated(
+    data: &[u8],
+    layout: PixelLayout,
+    limits: &crate::Limits,
+) -> Result<Option<(Vec<u8>, u32, u32)>> {
+    if !is_animated(data) {
+        return Ok(None);
+    }
+    first_frame(data, layout, limits).map(Some)
+}
+
+#[cfg(feature = "animation")]
+pub(crate) fn first_frame(
+    data: &[u8],
+    layout: PixelLayout,
+    limits: &crate::Limits,
+) -> Result<(Vec<u8>, u32, u32)> {
+    let mode = match layout {
+        PixelLayout::Bgra | PixelLayout::Bgr => crate::ColorMode::Bgra,
+        _ => crate::ColorMode::Rgba,
+    };
+    let mut dec = crate::AnimationDecoder::with_options_limits(data, mode, false, limits)?;
+    let frame = dec.next_frame()?.ok_or_else(|| at!(Error::InvalidWebP))?;
+    let px = match layout {
+        PixelLayout::Rgb | PixelLayout::Bgr => frame
+            .data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[0], p[1], p[2]])
+            .collect(),
+        _ => frame.data,
+    };
+    Ok((px, frame.width, frame.height))
+}
+
+#[cfg(not(feature = "animation"))]
+pub(crate) fn first_frame(
+    _data: &[u8],
+    _layout: PixelLayout,
+    _limits: &crate::Limits,
+) -> Result<(Vec<u8>, u32, u32)> {
+    Err(at!(Error::DecodeFailed(DecodingError::UnsupportedFeature)))
+}
+
+/// Copy tightly packed `src` rows (`row` bytes each) into `out` rows
+/// `stride` bytes apart.
+fn copy_rows(src: &[u8], row: usize, out: &mut [u8], stride: usize) {
+    for (y, r) in src.chunks_exact(row).enumerate() {
+        out[y * stride..y * stride + row].copy_from_slice(r);
+    }
+}
+
+/// `bytes` (tightly packed `P` pixels) as a `Vec<P>`.
+fn bytes_to_pixels<P: DecodePixel>(bytes: &[u8]) -> Vec<P> {
+    let bpp = P::LAYOUT.bytes_per_pixel();
+    let n = bytes.len() / bpp;
+    let mut v: Vec<P> = Vec::with_capacity(n);
+    // SAFETY: `P` is one of the sealed rgb pixel types, plain bytes of size
+    // `bpp`, and `n * bpp` bytes are copied into capacity for `n` pixels.
+    unsafe {
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), v.as_mut_ptr() as *mut u8, n * bpp);
+        v.set_len(n);
+    }
+    v
+}
+
 /// Decode WebP data to RGBA pixels.
 ///
 /// Returns the decoded pixels and dimensions.
@@ -59,6 +139,9 @@ pub fn decode_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 }
 
 pub(crate) fn decode_rgba_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    if let Some(frame) = first_frame_if_animated(data, PixelLayout::Rgba, &crate::Limits::none())? {
+        return Ok(frame);
+    }
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -95,6 +178,9 @@ pub fn decode_rgb(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 }
 
 pub(crate) fn decode_rgb_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    if let Some(frame) = first_frame_if_animated(data, PixelLayout::Rgb, &crate::Limits::none())? {
+        return Ok(frame);
+    }
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -132,6 +218,9 @@ pub fn decode_bgra(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 }
 
 pub(crate) fn decode_bgra_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    if let Some(frame) = first_frame_if_animated(data, PixelLayout::Bgra, &crate::Limits::none())? {
+        return Ok(frame);
+    }
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -169,6 +258,9 @@ pub fn decode_bgr(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 }
 
 pub(crate) fn decode_bgr_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    if let Some(frame) = first_frame_if_animated(data, PixelLayout::Bgr, &crate::Limits::none())? {
+        return Ok(frame);
+    }
     let mut width: i32 = 0;
     let mut height: i32 = 0;
 
@@ -213,6 +305,9 @@ pub(crate) fn decode_bgr_unlimited(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 /// ```
 pub fn decode<P: DecodePixel>(data: &[u8]) -> Result<(Vec<P>, u32, u32)> {
     default_limits_gate(data)?;
+    if let Some((px, w, h)) = first_frame_if_animated(data, P::LAYOUT, &crate::Limits::none())? {
+        return Ok((bytes_to_pixels(&px), w, h));
+    }
     let (ptr, width, height) = P::decode_new(data)
         .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
@@ -269,6 +364,10 @@ pub(crate) fn decode_append_unlimited<P: DecodePixel>(
     data: &[u8],
     output: &mut Vec<P>,
 ) -> Result<(u32, u32)> {
+    if let Some((px, w, h)) = first_frame_if_animated(data, P::LAYOUT, &crate::Limits::none())? {
+        output.extend_from_slice(&bytes_to_pixels::<P>(&px));
+        return Ok((w, h));
+    }
     let (ptr, width, height) = P::decode_new(data)
         .ok_or_else(|| at!(Error::DecodeFailed(DecodingError::BitstreamError)))?;
 
@@ -396,6 +495,15 @@ pub(crate) fn decode_into_unlimited<P: DecodePixel>(
     // the actual byte count and inviting OOB writes.
     let output_bytes = output.len().saturating_mul(bpp);
 
+    if let Some((px, w, _)) = first_frame_if_animated(data, P::LAYOUT, &crate::Limits::none())? {
+        // SAFETY: `output` is `output_bytes` bytes of plain pixel data.
+        let out = unsafe {
+            core::slice::from_raw_parts_mut(output.as_mut_ptr() as *mut u8, output_bytes)
+        };
+        copy_rows(&px, w as usize * bpp, out, stride_bytes);
+        return Ok((width, height));
+    }
+
     // SAFETY: We've validated the buffer size and stride above
     let ok = unsafe {
         P::decode_into(
@@ -477,6 +585,12 @@ pub(crate) fn decode_rgba_into_unlimited(
         ))));
     }
 
+    if let Some((px, w, _)) =
+        first_frame_if_animated(data, PixelLayout::Rgba, &crate::Limits::none())?
+    {
+        copy_rows(&px, w as usize * 4, output, stride_bytes as usize);
+        return Ok((width as u32, height as u32));
+    }
     let result = unsafe {
         libwebp_sys::WebPDecodeRGBAInto(
             data.as_ptr(),
@@ -547,6 +661,12 @@ pub(crate) fn decode_bgra_into_unlimited(
         ))));
     }
 
+    if let Some((px, w, _)) =
+        first_frame_if_animated(data, PixelLayout::Bgra, &crate::Limits::none())?
+    {
+        copy_rows(&px, w as usize * 4, output, stride_bytes as usize);
+        return Ok((width as u32, height as u32));
+    }
     let result = unsafe {
         libwebp_sys::WebPDecodeBGRAInto(
             data.as_ptr(),
@@ -615,6 +735,12 @@ pub(crate) fn decode_rgb_into_unlimited(
         ))));
     }
 
+    if let Some((px, w, _)) =
+        first_frame_if_animated(data, PixelLayout::Rgb, &crate::Limits::none())?
+    {
+        copy_rows(&px, w as usize * 3, output, stride_bytes as usize);
+        return Ok((width as u32, height as u32));
+    }
     let result = unsafe {
         libwebp_sys::WebPDecodeRGBInto(
             data.as_ptr(),
@@ -685,6 +811,12 @@ pub(crate) fn decode_bgr_into_unlimited(
         ))));
     }
 
+    if let Some((px, w, _)) =
+        first_frame_if_animated(data, PixelLayout::Bgr, &crate::Limits::none())?
+    {
+        copy_rows(&px, w as usize * 3, output, stride_bytes as usize);
+        return Ok((width as u32, height as u32));
+    }
     let result = unsafe {
         libwebp_sys::WebPDecodeBGRInto(
             data.as_ptr(),
@@ -1206,6 +1338,33 @@ impl<'a> Decoder<'a> {
         if self.config.use_scaling {
             self.config
                 .check_still_image(self.config.scaled_width, self.config.scaled_height)?;
+        }
+
+        // An animated file decodes to its first composited frame. libwebp's
+        // animation decoder has none of the still decoder's output options,
+        // so those are refused rather than ignored.
+        if dec_config.input.has_animation != 0 {
+            let c = &self.config;
+            if c.use_cropping
+                || c.use_scaling
+                || c.flip
+                || c.bypass_filtering
+                || c.no_fancy_upsampling
+                || c.alpha_dithering > 0
+            {
+                return Err(at!(Error::InvalidConfig(
+                    "crop, scale, flip, bypass_filtering, no_fancy_upsampling and alpha_dithering \
+                     are not supported when decoding an animated file"
+                        .into(),
+                )));
+            }
+            let layout = match mode {
+                libwebp_sys::WEBP_CSP_MODE::MODE_BGRA => PixelLayout::Bgra,
+                libwebp_sys::WEBP_CSP_MODE::MODE_RGB => PixelLayout::Rgb,
+                libwebp_sys::WEBP_CSP_MODE::MODE_BGR => PixelLayout::Bgr,
+                _ => PixelLayout::Rgba,
+            };
+            return first_frame(self.data, layout, &c.limits);
         }
 
         // Configure output

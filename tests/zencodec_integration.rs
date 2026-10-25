@@ -724,8 +724,7 @@ fn animation_frames_use_the_full_encoder_config() {
 }
 
 /// zencodec's still decode of an animation returns its first composited
-/// frame (as zenwebp does) on every still path; libwebp's own still decoder
-/// refuses animations.
+/// frame (as zenwebp does) on every still path.
 #[cfg(feature = "animation")]
 #[test]
 fn still_decode_of_an_animation_is_its_first_frame() {
@@ -776,6 +775,7 @@ fn still_decode_of_an_animation_is_its_first_frame() {
         .unwrap()
         .decode();
     assert!(cropped.is_err());
-    // The native API keeps libwebp's refusal.
-    assert!(webpx::decode_rgba(&anim).is_err());
+    // The native still decodes agree; YUV refuses animations, like libwebp.
+    assert_eq!(webpx::decode_rgba(&anim).unwrap().0, first);
+    assert!(webpx::decode_yuv(&anim).is_err());
 }
