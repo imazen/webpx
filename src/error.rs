@@ -98,6 +98,11 @@ pub enum Error {
     IoError(String),
     /// A configured resource limit ([`Limits`](crate::Limits)) was exceeded.
     LimitExceeded(crate::LimitExceeded),
+    /// The zencodec operation is not supported by this codec (or by this
+    /// build's feature set). Recoverable through the error chain with
+    /// `zencodec::CodecErrorExt::unsupported_operation`.
+    #[cfg(feature = "zencodec")]
+    Unsupported(zencodec::UnsupportedOperation),
 }
 
 impl fmt::Display for Error {
@@ -116,6 +121,8 @@ impl fmt::Display for Error {
             Error::Stopped(reason) => write!(f, "{}", reason),
             Error::IoError(msg) => write!(f, "I/O error: {}", msg),
             Error::LimitExceeded(e) => write!(f, "limit exceeded: {}", e),
+            #[cfg(feature = "zencodec")]
+            Error::Unsupported(op) => write!(f, "{}", op),
         }
     }
 }
@@ -133,7 +140,100 @@ impl From<StopReason> for Error {
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::LimitExceeded(e) => Some(e),
+            #[cfg(feature = "zencodec")]
+            Error::Unsupported(op) => Some(op),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "zencodec")]
+impl From<zencodec::UnsupportedOperation> for Error {
+    fn from(op: zencodec::UnsupportedOperation) -> Self {
+        Error::Unsupported(op)
+    }
+}
+
+/// Maps every variant to the zencodec [`ErrorCategory`](zencodec::ErrorCategory),
+/// so generic zencodec consumers can route webpx errors (HTTP status, retry,
+/// logging) without naming this type.
+#[cfg(feature = "zencodec")]
+impl zencodec::CategorizedError for Error {
+    fn codec_name(&self) -> Option<&'static str> {
+        Some("webpx")
+    }
+
+    fn category(&self) -> zencodec::ErrorCategory {
+        use zencodec::{
+            CodecIoKind, ErrorCategory as C, ImageError, InternalKind, InvalidKind, LimitKind,
+            RequestError, ResourceError, UnsupportedImageKind,
+        };
+        let params = C::Request(RequestError::Invalid(InvalidKind::Parameters));
+        match self {
+            Error::InvalidInput(_) => C::Request(RequestError::Invalid(InvalidKind::Buffer)),
+            Error::InvalidConfig(_) | Error::IccError(_) => params,
+            Error::EncodeFailed(e) => match e {
+                EncodingError::OutOfMemory | EncodingError::BitstreamOutOfMemory => {
+                    C::Resource(ResourceError::OutOfMemory)
+                }
+                EncodingError::InvalidConfiguration
+                | EncodingError::Partition0Overflow
+                | EncodingError::PartitionOverflow => params,
+                EncodingError::BadDimension | EncodingError::FileTooBig => {
+                    C::Request(RequestError::Invalid(InvalidKind::Buffer))
+                }
+                EncodingError::BadWrite => C::Io(CodecIoKind::opaque()),
+                EncodingError::UserAbort => C::Stopped(StopReason::Cancelled),
+                EncodingError::NullParameter => C::Internal(InternalKind::Bug),
+                EncodingError::Ok | EncodingError::Last => C::Internal(InternalKind::Dependency),
+            },
+            Error::DecodeFailed(e) => match e {
+                DecodingError::OutOfMemory => C::Resource(ResourceError::OutOfMemory),
+                DecodingError::InvalidParam => params,
+                DecodingError::BitstreamError => C::Image(ImageError::Malformed),
+                DecodingError::UnsupportedFeature => {
+                    C::Image(ImageError::Unsupported(UnsupportedImageKind::Feature))
+                }
+                DecodingError::Suspended | DecodingError::NotEnoughData => {
+                    C::Image(ImageError::UnexpectedEof)
+                }
+                DecodingError::UserAbort => C::Stopped(StopReason::Cancelled),
+                DecodingError::Ok => C::Internal(InternalKind::Dependency),
+            },
+            Error::MuxError(e) => match e {
+                MuxError::BadData | MuxError::NotFound => C::Image(ImageError::Malformed),
+                MuxError::NotEnoughData => C::Image(ImageError::UnexpectedEof),
+                MuxError::MemoryError => C::Resource(ResourceError::OutOfMemory),
+                MuxError::InvalidArgument => params,
+                MuxError::Ok => C::Internal(InternalKind::Dependency),
+            },
+            Error::OutOfMemory => C::Resource(ResourceError::OutOfMemory),
+            // libwebp's animation encoder reports failures as text only.
+            Error::AnimationError(_) => C::Internal(InternalKind::Dependency),
+            Error::NeedMoreData => C::Image(ImageError::UnexpectedEof),
+            Error::InvalidWebP => C::Image(ImageError::Malformed),
+            Error::Stopped(reason) => C::Stopped(*reason),
+            Error::IoError(_) => C::Io(CodecIoKind::opaque()),
+            Error::LimitExceeded(e) => C::Resource(ResourceError::Limits(match e {
+                crate::LimitExceeded::Width { .. } => LimitKind::Width,
+                crate::LimitExceeded::Height { .. } => LimitKind::Height,
+                crate::LimitExceeded::Pixels { .. } => LimitKind::Pixels,
+                crate::LimitExceeded::TotalPixels { .. } => LimitKind::TotalPixels,
+                crate::LimitExceeded::InputSize { .. } => LimitKind::InputSize,
+                crate::LimitExceeded::OutputSize { .. } => LimitKind::OutputSize,
+                crate::LimitExceeded::Frames { .. } => LimitKind::Frames,
+                crate::LimitExceeded::Duration { .. } => LimitKind::Duration,
+                // A cap on how much metadata the decoder will allocate.
+                crate::LimitExceeded::MetadataSize { .. } => LimitKind::Memory,
+            })),
+            Error::Unsupported(op) => C::Request(RequestError::Unsupported(*op)),
+        }
+    }
+}
 
 /// Encoding error codes from libwebp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

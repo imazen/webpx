@@ -4,7 +4,9 @@
 
 ### QUEUED BREAKING CHANGES
 
-- None.
+- 0.5.0: the zencodec trait impls return `At<zencodec::CodecError>` (the
+  zencodec error envelope, as zenwebp does) with `webpx::Error` as the
+  detail, instead of `At<webpx::Error>`.
 
 ### Fixed
 
@@ -72,6 +74,11 @@
 - zencodec decode capabilities report `streaming()` when the `streaming`
   feature is enabled; it reported false although `streaming_decoder` works.
   (`tests/zencodec_conformance.rs::decode_capabilities_advertise_streaming`)
+- zencodec operations webpx doesn't support (row-level and pull encode, and
+  animation or streaming when those features are off) fail with
+  `Error::Unsupported`, which `CodecErrorExt::unsupported_operation()` finds;
+  they returned `Error::InvalidConfig(String)`.
+  (`tests/zencodec_conformance.rs::capability_honesty`)
 
 ### Documented
 
@@ -81,6 +88,11 @@
 
 ### Added
 
+- `Error::Unsupported(zencodec::UnsupportedOperation)` (with the `zencodec`
+  feature) and `impl zencodec::CategorizedError for Error`: every webpx error
+  maps to a zencodec `ErrorCategory`, with codec name `"webpx"`.
+  `Error::source()` now exposes the `LimitExceeded` / `UnsupportedOperation`
+  cause. (`tests/zencodec_conformance.rs::errors_are_categorized`)
 - `zencodec` integration upgraded to **0.1.25** (from 0.1.13) and now implements
   native `Fidelity`: `WebpEncoderConfig::{with_fidelity, resolved_target_fidelity}`
   honor `Lossless` (VP8L), a codec-specific quality dial (VP8), and map

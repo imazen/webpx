@@ -387,8 +387,8 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
     fn animation_frame_encoder(self) -> Result<WebpAnimationFrameEncoder, At<Error>> {
         #[cfg(not(feature = "animation"))]
         {
-            Err(at!(Error::InvalidConfig(
-                "webpx built without `animation` feature".into(),
+            Err(at!(Error::Unsupported(
+                UnsupportedOperation::AnimationEncode
             )))
         }
         #[cfg(feature = "animation")]
@@ -525,9 +525,7 @@ impl zencodec::encode::Encoder for WebpEncoder {
     type Error = At<Error>;
 
     fn reject(op: UnsupportedOperation) -> At<Error> {
-        at!(Error::InvalidConfig(format!(
-            "operation not supported by webpx WebP encoder: {op:?}"
-        )))
+        at!(Error::Unsupported(op))
     }
 
     fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
@@ -614,9 +612,7 @@ impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
     type Error = At<Error>;
 
     fn reject(op: UnsupportedOperation) -> At<Error> {
-        at!(Error::InvalidConfig(format!(
-            "operation not supported by webpx animation encoder: {op:?}"
-        )))
+        at!(Error::Unsupported(op))
     }
 
     fn push_frame(
@@ -734,10 +730,8 @@ pub struct WebpAnimationFrameEncoder {
 impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
     type Error = At<Error>;
 
-    fn reject(_op: UnsupportedOperation) -> At<Error> {
-        at!(Error::InvalidConfig(
-            "webpx built without `animation` feature".into(),
-        ))
+    fn reject(op: UnsupportedOperation) -> At<Error> {
+        at!(Error::Unsupported(op))
     }
 
     fn push_frame(
@@ -975,8 +969,8 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
     ) -> Result<WebpStreamingDecoder, At<Error>> {
         #[cfg(not(feature = "streaming"))]
         {
-            Err(at!(Error::InvalidConfig(
-                "webpx built without `streaming` feature".into(),
+            Err(at!(Error::Unsupported(
+                UnsupportedOperation::RowLevelDecode
             )))
         }
         #[cfg(feature = "streaming")]
@@ -1017,8 +1011,8 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
     ) -> Result<WebpAnimationFrameDecoder, At<Error>> {
         #[cfg(not(feature = "animation"))]
         {
-            Err(at!(Error::InvalidConfig(
-                "webpx built without `animation` feature".into(),
+            Err(at!(Error::Unsupported(
+                UnsupportedOperation::AnimationDecode
             )))
         }
         #[cfg(feature = "animation")]
@@ -1171,8 +1165,8 @@ impl zencodec::decode::StreamingDecode for WebpStreamingDecoder {
     type Error = At<Error>;
 
     fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
-        Err(at!(Error::InvalidConfig(
-            "webpx built without `streaming` feature".into(),
+        Err(at!(Error::Unsupported(
+            UnsupportedOperation::RowLevelDecode
         )))
     }
 
@@ -1311,8 +1305,8 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
         &mut self,
         _stop: Option<&dyn enough::Stop>,
     ) -> Result<Option<zencodec::decode::AnimationFrame<'_>>, At<Error>> {
-        Err(at!(Error::InvalidConfig(
-            "webpx built without `animation` feature".into(),
+        Err(at!(Error::Unsupported(
+            UnsupportedOperation::AnimationDecode
         )))
     }
 
@@ -1321,8 +1315,8 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
         _stop: Option<&dyn enough::Stop>,
         _sink: &mut dyn zencodec::decode::DecodeRowSink,
     ) -> Result<Option<OutputInfo>, At<Error>> {
-        Err(at!(Error::InvalidConfig(
-            "webpx built without `animation` feature".into(),
+        Err(at!(Error::Unsupported(
+            UnsupportedOperation::AnimationDecode
         )))
     }
 }
