@@ -970,6 +970,80 @@ fn native_descriptor(has_alpha: bool) -> PixelDescriptor {
 // reported orientation and the EXIF blob's tag become Identity, so nothing
 // downstream applies the transform a second time.
 
+/// Decode `data` to `descriptor` (RGBA8, BGRA8 or RGB8). For an animated
+/// file this is its first composited frame: zencodec's still decode of an
+/// animation yields the first frame (as zenwebp's does), while libwebp's
+/// still decoder refuses animations.
+fn decode_still(
+    data: &[u8],
+    cfg: DecoderConfig,
+    descriptor: PixelDescriptor,
+    animated: bool,
+) -> Result<(Vec<u8>, u32, u32), At<Error>> {
+    if animated {
+        return first_frame(data, &cfg, descriptor);
+    }
+    let dec = crate::Decoder::new(data)?.config(cfg);
+    match descriptor {
+        PixelDescriptor::BGRA8_SRGB => dec.decode_bgra_raw(),
+        PixelDescriptor::RGB8_SRGB => dec.decode_rgb_raw(),
+        _ => dec.decode_rgba_raw(),
+    }
+}
+
+#[cfg(feature = "animation")]
+fn first_frame(
+    data: &[u8],
+    cfg: &DecoderConfig,
+    descriptor: PixelDescriptor,
+) -> Result<(Vec<u8>, u32, u32), At<Error>> {
+    // libwebp's animation decoder has none of the still decoder's output
+    // options; reject them rather than ignore them.
+    if cfg.use_cropping
+        || cfg.use_scaling
+        || cfg.flip
+        || cfg.bypass_filtering
+        || cfg.no_fancy_upsampling
+        || cfg.alpha_dithering > 0
+    {
+        return Err(at!(Error::InvalidConfig(
+            "crop, scale, flip, bypass_filtering, no_fancy_upsampling and alpha_dithering \
+             are not supported when decoding an animated file"
+                .into(),
+        )));
+    }
+    let mode = if descriptor == PixelDescriptor::BGRA8_SRGB {
+        ColorMode::Bgra
+    } else {
+        ColorMode::Rgba
+    };
+    let mut dec = crate::AnimationDecoder::with_options_limits(data, mode, false, &cfg.limits)?;
+    let frame = dec.next_frame()?.ok_or_else(|| at!(Error::InvalidWebP))?;
+    let px = if descriptor == PixelDescriptor::RGB8_SRGB {
+        frame
+            .data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[0], p[1], p[2]])
+            .collect()
+    } else {
+        frame.data
+    };
+    Ok((px, frame.width, frame.height))
+}
+
+#[cfg(not(feature = "animation"))]
+fn first_frame(
+    _data: &[u8],
+    _cfg: &DecoderConfig,
+    _descriptor: PixelDescriptor,
+) -> Result<(Vec<u8>, u32, u32), At<Error>> {
+    Err(at!(Error::Unsupported(
+        UnsupportedOperation::AnimationDecode
+    )))
+}
+
 /// Size of a native decode of a `w`×`h` image under `config`: the scale
 /// target if set, else the crop size if set, else the image size, as
 /// `Decoder::decode_advanced` produces it.
@@ -1312,22 +1386,8 @@ impl WebpDecoder<'_> {
         let file = crate::ImageInfo::from_webp(&self.data)?;
         let chosen = self.chosen.unwrap_or(native_descriptor(file.has_alpha));
         let cfg = self.config.clone().limits(self.limits);
-        let dec = crate::Decoder::new(&self.data)?.config(cfg);
-        let (bytes, w, h, descriptor) = match chosen {
-            PixelDescriptor::RGBA8_SRGB => {
-                let (b, w, h) = dec.decode_rgba_raw()?;
-                (b, w, h, PixelDescriptor::RGBA8_SRGB)
-            }
-            PixelDescriptor::BGRA8_SRGB => {
-                let (b, w, h) = dec.decode_bgra_raw()?;
-                (b, w, h, PixelDescriptor::BGRA8_SRGB)
-            }
-            PixelDescriptor::RGB8_SRGB => {
-                let (b, w, h) = dec.decode_rgb_raw()?;
-                (b, w, h, PixelDescriptor::RGB8_SRGB)
-            }
-            _ => unreachable!(),
-        };
+        let descriptor = chosen;
+        let (bytes, w, h) = decode_still(&self.data, cfg, descriptor, file.has_animation)?;
 
         // Describe the file (alpha flag, sequence, metadata) as `probe`
         // does, not the output layout; only the dimensions come from the
@@ -1392,13 +1452,8 @@ impl WebpStreamingDecoder {
         }
         if self.decoded.is_none() {
             let cfg = self.config.clone().limits(self.limits);
-            let dec = crate::Decoder::new(&self.data)?.config(cfg);
-            let (bytes, w, h) = match self.descriptor {
-                PixelDescriptor::RGBA8_SRGB => dec.decode_rgba_raw()?,
-                PixelDescriptor::BGRA8_SRGB => dec.decode_bgra_raw()?,
-                PixelDescriptor::RGB8_SRGB => dec.decode_rgb_raw()?,
-                _ => unreachable!("pick_decode_descriptor only returns supported variants"),
-            };
+            let animated = crate::ImageInfo::from_webp(&self.data)?.has_animation;
+            let (bytes, w, h) = decode_still(&self.data, cfg, self.descriptor, animated)?;
             self.decoded = Some(orient_decoded(
                 bytes,
                 w,

@@ -722,3 +722,60 @@ fn animation_frames_use_the_full_encoder_config() {
         "method had no effect on animation frames"
     );
 }
+
+/// zencodec's still decode of an animation returns its first composited
+/// frame (as zenwebp does) on every still path; libwebp's own still decoder
+/// refuses animations.
+#[cfg(feature = "animation")]
+#[test]
+fn still_decode_of_an_animation_is_its_first_frame() {
+    use std::borrow::Cow;
+    let anim = three_frame_animation([40, 0, 130], None);
+    let first = webpx::AnimationDecoder::new(&anim)
+        .unwrap()
+        .decode_all()
+        .unwrap()
+        .remove(0)
+        .data;
+    let rgba = PixelDescriptor::RGBA8_SRGB;
+    let packed = |s: PixelSlice<'_>| -> Vec<u8> {
+        let rb = s.width() as usize * s.descriptor().bytes_per_pixel();
+        (0..s.rows())
+            .flat_map(|y| s.row(y)[..rb].to_vec())
+            .collect()
+    };
+    let out = WebpDecoderConfig::new()
+        .job()
+        .decoder(Cow::Borrowed(&anim), &[rgba])
+        .unwrap()
+        .decode()
+        .unwrap();
+    assert_eq!(packed(out.into_buffer().as_slice()), first);
+    #[cfg(feature = "streaming")]
+    {
+        use zencodec::decode::StreamingDecode as _;
+        let mut sd = WebpDecoderConfig::new()
+            .job()
+            .streaming_decoder(Cow::Borrowed(&anim), &[rgba])
+            .unwrap();
+        assert_eq!(packed(sd.next_batch().unwrap().unwrap().1), first);
+    }
+    // RGB drops alpha only.
+    let rgb = WebpDecoderConfig::new()
+        .job()
+        .decoder(Cow::Borrowed(&anim), &[PixelDescriptor::RGB8_SRGB])
+        .unwrap()
+        .decode()
+        .unwrap();
+    let want: Vec<u8> = first.chunks(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    assert_eq!(packed(rgb.into_buffer().as_slice()), want);
+    // Still-decoder options the animation decoder lacks are refused.
+    let cropped = WebpDecoderConfig::from_native(webpx::DecoderConfig::new().crop(0, 0, 4, 4))
+        .job()
+        .decoder(Cow::Borrowed(&anim), &[rgba])
+        .unwrap()
+        .decode();
+    assert!(cropped.is_err());
+    // The native API keeps libwebp's refusal.
+    assert!(webpx::decode_rgba(&anim).is_err());
+}
