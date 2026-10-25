@@ -79,6 +79,18 @@
   `Error::Unsupported`, which `CodecErrorExt::unsupported_operation()` finds;
   they returned `Error::InvalidConfig(String)`.
   (`tests/zencodec_conformance.rs::capability_honesty`)
+- zencodec orientation. Decode (probe, `decode`, streaming, push-sink,
+  animation) reports the file's EXIF orientation in `ImageInfo::orientation`
+  (it was always `Identity`) and honors `DecodeJob::with_orientation`: under
+  `Correct`, `CorrectAndTransform` and `ExactTransform` the pixels are
+  transformed, the reported dimensions are the output's, and the reported
+  orientation and the EXIF blob's tag become `Identity`, so nothing rotates
+  twice; `output_info` reports the transform in `orientation_applied`.
+  Encode writes `Metadata::orientation` into the EXIF Orientation tag (it was
+  dropped), adding a blob when needed and keeping the caller's other tags.
+  zencodec-testkit's orientation round-trip now passes.
+  (`tests/zencodec_orientation.rs`,
+  `tests/zencodec_conformance.rs::orientation_roundtrip`)
 
 ### Documented
 

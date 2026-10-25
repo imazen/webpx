@@ -18,7 +18,7 @@
 //! — are wired through `zencodec`. Animation and streaming require the
 //! matching webpx Cargo features (`animation`, `streaming`); when
 //! disabled, the corresponding wrapper types stub out and surface
-//! `Error::InvalidConfig` from their constructors.
+//! `Error::Unsupported` from their constructors.
 
 use alloc::borrow::Cow;
 use alloc::format;
@@ -29,7 +29,8 @@ use whereat::{At, ResultAtExt, at};
 use zencodec::decode::{DecodeOutput, DecodeRowSink, OutputInfo};
 use zencodec::encode::EncodeOutput;
 use zencodec::{
-    ImageFormat, ImageInfo, ImageSequence, Metadata, ResourceLimits, UnsupportedOperation,
+    ImageFormat, ImageInfo, ImageSequence, Metadata, Orientation, OrientationHint, ResourceLimits,
+    UnsupportedOperation,
 };
 use zenpixels::{PixelBuffer, PixelDescriptor, PixelSlice};
 
@@ -327,6 +328,7 @@ impl zencodec::encode::EncoderConfig for WebpEncoderConfig {
             icc: None,
             exif: None,
             xmp: None,
+            orientation: Orientation::Identity,
             limits: ResourceLimits::none(),
             loop_count: None,
         }
@@ -340,10 +342,45 @@ pub struct WebpEncodeJob {
     icc: Option<Arc<[u8]>>,
     exif: Option<Arc<[u8]>>,
     xmp: Option<Arc<[u8]>>,
+    /// `Metadata::orientation`. WebP can carry it only as the EXIF
+    /// Orientation tag, so `prepared_exif` writes it there.
+    orientation: Orientation,
     limits: ResourceLimits,
     /// Animation loop count from `with_loop_count`; `None` is WebP's
     /// default of 0 (loop forever).
     loop_count: Option<u32>,
+}
+
+impl WebpEncodeJob {
+    /// The EXIF blob to embed: the caller's, with its Orientation tag set to
+    /// `self.orientation` (`Metadata::orientation` is authoritative). A new
+    /// blob is created when the image needs a tag and has no EXIF; the
+    /// caller's bytes are kept unchanged when the tag already agrees.
+    fn prepared_exif(&self) -> Result<Option<Arc<[u8]>>, At<Error>> {
+        let original = self.exif.as_deref();
+        let tagged = original.and_then(zencodec::helpers::parse_exif_orientation);
+        if tagged == Some(self.orientation) || (self.orientation.is_identity() && tagged.is_none())
+        {
+            return Ok(self.exif.clone());
+        }
+        // Rewrite the existing tag in place (byte-identical otherwise) ...
+        if let Some(rewritten) =
+            original.and_then(|b| zencodec::helpers::set_exif_orientation(b, self.orientation))
+        {
+            return Ok(Some(rewritten.into()));
+        }
+        // ... or add one, re-serializing the blob.
+        let mut exif = match original {
+            Some(bytes) => zencodec::exif::Exif::parse(bytes).ok_or_else(|| {
+                at!(Error::InvalidInput(
+                    "EXIF blob is not valid TIFF, so its orientation tag can't be set".into()
+                ))
+            })?,
+            None => zencodec::exif::Exif::new(zencodec::exif::TextEncoding::Ascii),
+        };
+        exif.set_orientation(self.orientation);
+        Ok(Some(exif.to_bytes().into()))
+    }
 }
 
 impl zencodec::encode::EncodeJob for WebpEncodeJob {
@@ -360,6 +397,7 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
         self.icc = meta.icc_profile;
         self.exif = meta.exif;
         self.xmp = meta.xmp;
+        self.orientation = meta.orientation;
         self
     }
 
@@ -374,11 +412,12 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
     }
 
     fn encoder(self) -> Result<WebpEncoder, At<Error>> {
+        let exif = self.prepared_exif()?;
         Ok(WebpEncoder {
             config: self.config.inner.clone(),
             stop: self.stop,
             icc: self.icc,
-            exif: self.exif,
+            exif,
             xmp: self.xmp,
             limits: Limits::from(self.limits),
         })
@@ -408,12 +447,13 @@ impl zencodec::encode::EncodeJob for WebpEncodeJob {
                     u16::MAX
                 ))));
             }
+            let exif = self.prepared_exif()?;
             Ok(WebpAnimationFrameEncoder {
                 inner: None,
                 config: self.config.inner.clone(),
                 stop: self.stop,
                 icc: self.icc,
-                exif: self.exif,
+                exif,
                 xmp: self.xmp,
                 limits: Limits::from(self.limits),
                 last_timestamp_ms: 0,
@@ -811,6 +851,7 @@ impl zencodec::decode::DecoderConfig for WebpDecoderConfig {
             config: self,
             stop: None,
             limits: ResourceLimits::none(),
+            orientation: OrientationHint::Preserve,
         }
     }
 }
@@ -820,10 +861,17 @@ pub struct WebpDecodeJob {
     config: WebpDecoderConfig,
     stop: Option<zencodec::StopToken>,
     limits: ResourceLimits,
+    /// How to handle the file's EXIF orientation. Under the default
+    /// `Preserve`, pixels stay in stored order and `ImageInfo` reports the
+    /// stored dimensions plus the EXIF orientation. Every other hint bakes
+    /// the resolved transform into the pixels and reports the output
+    /// dimensions with `Orientation::Identity`.
+    orientation: OrientationHint,
 }
 
 fn build_zencodec_image_info(info: crate::ImageInfo) -> ImageInfo {
-    let mut out = ImageInfo::new(info.width, info.height, ImageFormat::WebP);
+    let mut out = ImageInfo::new(info.width, info.height, ImageFormat::WebP)
+        .with_orientation(info.orientation.unwrap_or_default());
     if info.has_alpha {
         out = out.with_alpha(true);
     }
@@ -868,6 +916,82 @@ fn pick_decode_descriptor(preferred: &[PixelDescriptor]) -> PixelDescriptor {
     PixelDescriptor::RGBA8_SRGB
 }
 
+// ── Orientation ─────────────────────────────────────────────────────────────
+//
+// WebP carries orientation only as the EXIF Orientation tag; the bitstream is
+// always in stored order. `Preserve` reports the tag and leaves the pixels
+// alone. The other hints bake: the resolved transform is applied to the
+// pixels, the reported dimensions become the output dimensions, and both the
+// reported orientation and the EXIF blob's tag become Identity, so nothing
+// downstream applies the transform a second time.
+
+/// The transform to bake into stored-order pixels for `hint`, given the
+/// file's EXIF orientation. `Identity` for `Preserve`.
+fn resolve_orientation(hint: OrientationHint, intrinsic: Orientation) -> Orientation {
+    match hint {
+        OrientationHint::Correct => intrinsic,
+        OrientationHint::CorrectAndTransform(t) => intrinsic.then(t),
+        OrientationHint::ExactTransform(t) => t,
+        _ => Orientation::Identity,
+    }
+}
+
+/// Rewrite `info` (stored dimensions + EXIF orientation) to describe the
+/// output of `hint`. Unchanged for `Preserve`.
+fn orient_info(mut info: ImageInfo, hint: OrientationHint) -> ImageInfo {
+    if !hint.bakes() {
+        return info;
+    }
+    let resolved = resolve_orientation(hint, info.orientation);
+    (info.width, info.height) = resolved.output_dimensions(info.width, info.height);
+    if let Some(exif) = info.embedded_metadata.exif.as_deref()
+        && let Some(upright) = zencodec::helpers::set_exif_orientation(exif, Orientation::Identity)
+    {
+        info.embedded_metadata.exif = Some(upright.into());
+    }
+    info.with_orientation(Orientation::Identity)
+}
+
+/// `src` (`w`×`h` pixels of `bpp` bytes, rows `stride` bytes apart)
+/// transformed by `o`, tightly packed, with its dimensions.
+fn orient_pixels(
+    src: &[u8],
+    w: u32,
+    h: u32,
+    stride: usize,
+    bpp: usize,
+    o: Orientation,
+) -> (Vec<u8>, u32, u32) {
+    let (ow, oh) = o.output_dimensions(w, h);
+    let mut out = alloc::vec![0u8; (ow as usize) * (oh as usize) * bpp];
+    for sy in 0..h {
+        let row = &src[sy as usize * stride..][..w as usize * bpp];
+        for (sx, px) in (0..w).zip(row.chunks_exact(bpp)) {
+            let (dx, dy) = o.forward_map(sx, sy, w, h);
+            let d = (dy as usize * ow as usize + dx as usize) * bpp;
+            out[d..d + bpp].copy_from_slice(px);
+        }
+    }
+    (out, ow, oh)
+}
+
+/// Bake `hint` into decoded stored-order pixels; returns them unchanged for
+/// `Preserve` or an identity transform.
+fn orient_decoded(
+    bytes: Vec<u8>,
+    w: u32,
+    h: u32,
+    bpp: usize,
+    hint: OrientationHint,
+    intrinsic: Orientation,
+) -> (Vec<u8>, u32, u32) {
+    let resolved = resolve_orientation(hint, intrinsic);
+    if resolved.is_identity() {
+        return (bytes, w, h);
+    }
+    orient_pixels(&bytes, w, h, w as usize * bpp, bpp, resolved)
+}
+
 impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
     type Error = At<Error>;
     type Dec = WebpDecoder<'a>;
@@ -884,13 +1008,19 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
         self
     }
 
+    fn with_orientation(mut self, hint: OrientationHint) -> Self {
+        self.orientation = hint;
+        self
+    }
+
     fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         let info = crate::ImageInfo::from_webp(data)?;
-        attach_metadata(
+        let info = attach_metadata(
             build_zencodec_image_info(info),
             data,
             &Limits::from(self.limits),
-        )
+        )?;
+        Ok(orient_info(info, self.orientation))
     }
 
     fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<Error>> {
@@ -900,7 +1030,9 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
         } else {
             PixelDescriptor::RGB8_SRGB
         };
-        Ok(OutputInfo::full_decode(info.width, info.height, descriptor))
+        let resolved = resolve_orientation(self.orientation, info.orientation.unwrap_or_default());
+        let (w, h) = resolved.output_dimensions(info.width, info.height);
+        Ok(OutputInfo::full_decode(w, h, descriptor).with_orientation_applied(resolved))
     }
 
     fn decoder(
@@ -915,6 +1047,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
             stop: self.stop,
             chosen,
             limits: Limits::from(self.limits),
+            orientation: self.orientation,
         })
     }
 
@@ -937,6 +1070,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
             stop: dec_job.stop,
             chosen,
             limits: Limits::from(dec_job.limits),
+            orientation: dec_job.orientation,
         };
         let out = <WebpDecoder<'_> as zencodec::decode::Decode>::decode(dec)?;
         let buf = out.into_buffer();
@@ -985,7 +1119,9 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                 .map_err(|e| at!(Error::LimitExceeded(e)))?;
 
             let descriptor = pick_decode_descriptor(_preferred);
+            let intrinsic = probe.orientation.unwrap_or_default();
             let zen_info = attach_metadata(build_zencodec_image_info(probe), &_data, &limits)?;
+            let zen_info = orient_info(zen_info, self.orientation);
             // Buffered approach: stash the input, expose the whole
             // image as a single batch via the native one-shot
             // decoder. A row-by-row implementation against
@@ -998,6 +1134,8 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                 info: zen_info,
                 config: self.config.inner,
                 limits,
+                orientation: self.orientation,
+                intrinsic,
                 emitted: false,
                 decoded: None,
             })
@@ -1043,11 +1181,14 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                     random_access: false,
                 });
             let zen_info = attach_metadata(zen_info, &owned, &limits)?;
+            let intrinsic = n_info.orientation.unwrap_or_default();
+            let zen_info = orient_info(zen_info.with_orientation(intrinsic), self.orientation);
             Ok(WebpAnimationFrameDecoder {
                 inner,
                 _data: owned,
                 info: zen_info,
                 descriptor,
+                bake: resolve_orientation(self.orientation, intrinsic),
                 last_pixels: Vec::new(),
                 last_width: 0,
                 last_height: 0,
@@ -1064,6 +1205,7 @@ pub struct WebpDecoder<'a> {
     stop: Option<zencodec::StopToken>,
     chosen: PixelDescriptor,
     limits: Limits,
+    orientation: OrientationHint,
 }
 
 impl zencodec::decode::Decode for WebpDecoder<'_> {
@@ -1089,8 +1231,6 @@ impl zencodec::decode::Decode for WebpDecoder<'_> {
             _ => unreachable!(),
         };
 
-        let buf = PixelBuffer::from_vec(bytes, w, h, descriptor)
-            .map_err_at(|inner| Error::InvalidInput(format!("{inner:?}")))?;
         // Describe the file (alpha flag, sequence, metadata) as `probe`
         // does, not the output layout; only the dimensions come from the
         // decoded buffer, which reflects any configured scaling.
@@ -1098,6 +1238,17 @@ impl zencodec::decode::Decode for WebpDecoder<'_> {
         info.width = w;
         info.height = h;
         let info = attach_metadata(info, &self.data, &self.limits)?;
+        let (bytes, w, h) = orient_decoded(
+            bytes,
+            w,
+            h,
+            descriptor.bytes_per_pixel(),
+            self.orientation,
+            info.orientation,
+        );
+        let info = orient_info(info, self.orientation);
+        let buf = PixelBuffer::from_vec(bytes, w, h, descriptor)
+            .map_err_at(|inner| Error::InvalidInput(format!("{inner:?}")))?;
         Ok(DecodeOutput::new(buf, info))
     }
 }
@@ -1118,6 +1269,9 @@ pub struct WebpStreamingDecoder {
     info: ImageInfo,
     config: DecoderConfig,
     limits: Limits,
+    orientation: OrientationHint,
+    /// The file's EXIF orientation (`info` reports the baked result).
+    intrinsic: Orientation,
     emitted: bool,
     decoded: Option<(Vec<u8>, u32, u32)>,
 }
@@ -1139,7 +1293,14 @@ impl zencodec::decode::StreamingDecode for WebpStreamingDecoder {
                 PixelDescriptor::RGB8_SRGB => dec.decode_rgb_raw()?,
                 _ => unreachable!("pick_decode_descriptor only returns supported variants"),
             };
-            self.decoded = Some((bytes, w, h));
+            self.decoded = Some(orient_decoded(
+                bytes,
+                w,
+                h,
+                self.descriptor.bytes_per_pixel(),
+                self.orientation,
+                self.intrinsic,
+            ));
         }
         self.emitted = true;
         let (bytes, w, h) = self.decoded.as_ref().unwrap();
@@ -1185,6 +1346,9 @@ pub struct WebpAnimationFrameDecoder {
     _data: Vec<u8>,
     info: ImageInfo,
     descriptor: PixelDescriptor,
+    /// Transform applied to every composited frame (`Identity` unless an
+    /// orientation hint bakes).
+    bake: Orientation,
     /// Most recently produced frame's pixels. Owned so the
     /// `AnimationFrame<'_>` we return can borrow from it; cleared on
     /// each new `render_next_frame` call.
@@ -1218,9 +1382,22 @@ impl zencodec::decode::AnimationFrameDecoder for WebpAnimationFrameDecoder {
             None => return Ok(None),
         };
         // Cache pixels so the returned PixelSlice can borrow safely.
-        self.last_pixels = frame.data;
-        self.last_width = frame.width;
-        self.last_height = frame.height;
+        let (pixels, w, h) = if self.bake.is_identity() {
+            (frame.data, frame.width, frame.height)
+        } else {
+            let bpp = self.descriptor.bytes_per_pixel();
+            orient_pixels(
+                &frame.data,
+                frame.width,
+                frame.height,
+                frame.width as usize * bpp,
+                bpp,
+                self.bake,
+            )
+        };
+        self.last_pixels = pixels;
+        self.last_width = w;
+        self.last_height = h;
         let stride_bytes =
             (self.last_width as usize).saturating_mul(self.descriptor.bytes_per_pixel());
         let slice = PixelSlice::new(

@@ -101,3 +101,14 @@ fn errors_are_categorized() {
     assert_eq!(err.codec_name(), Some("webpx"));
     assert_eq!(err.category(), ErrorCategory::Image(ImageError::Malformed));
 }
+
+/// Under every orientation-keeping metadata policy the displayed image
+/// survives an encode/decode round trip, without loss or double rotation.
+#[test]
+fn orientation_roundtrip() {
+    ok(tk::check_orientation_roundtrip(
+        WebpEncoderConfig::lossless(),
+        WebpDecoderConfig::new(),
+        &still(),
+    ));
+}
