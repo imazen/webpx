@@ -28,6 +28,12 @@ All are fixes, listed below; these are the ones existing callers can notice.
 
 ### Fixed
 
+- zencodec still decodes (`decode`, push decode, streaming) of an animated
+  file return its first composited frame, as zenwebp's do and as zencodec
+  expects; they failed with libwebp's "bitstream error". Crop, scale, flip
+  and the other still-decoder options are refused for animations. The
+  native API still refuses animations, like libwebp.
+  (`tests/zencodec_integration.rs::still_decode_of_an_animation_is_its_first_frame`)
 - Encoding rejects a NaN `quality` or `target_psnr` (and a negative
   `target_psnr`) with `Error::InvalidConfig`. libwebp 1.6.0's checks let NaN
   through to float-to-int casts that are undefined for NaN; on x86 the
