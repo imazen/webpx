@@ -712,10 +712,10 @@ impl zencodec::encode::AnimationFrameEncoder for WebpAnimationFrameEncoder {
                 let allow_mixed = !self.config.is_lossless();
                 let mut enc =
                     crate::AnimationEncoder::with_options(w, h, allow_mixed, self.loop_count)?;
-                enc.set_quality(self.config.get_quality());
-                if self.config.is_lossless() {
-                    enc.set_lossless(true);
-                }
+                // The whole config, not just quality and lossless: method,
+                // preset, alpha quality, sharp YUV and the rest apply to
+                // animation frames as they do to stills.
+                enc.set_config(self.config.clone());
                 self.inner = Some(enc);
             }
 

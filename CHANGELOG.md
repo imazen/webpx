@@ -25,6 +25,11 @@
   frame, numbered from the index.
   (`tests/zencodec_integration.rs::{animation_canvas_size_is_enforced,
   animation_start_frame_index_skips_earlier_frames}`)
+- zencodec animation frames use the whole encoder config. The animation
+  encoder copied only quality and lossless into `AnimationEncoder`, so
+  method/effort, preset, alpha quality, sharp YUV and every other setting
+  were silently dropped for animations.
+  (`tests/zencodec_integration.rs::animation_frames_use_the_full_encoder_config`)
 
 ## [0.4.1] - 2026-10-25
 
