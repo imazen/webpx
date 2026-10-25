@@ -101,6 +101,11 @@ Larger test files available at `~/work/codec-corpus/image-rs/test-images/webp/`.
   exact ANMF durations are written chunk by chunk
   (`tests/animation_timing.rs::mux_animation`).
 - The demuxer reports `loop_count` 1 and frame duration 0 for a still image.
+- libwebp's still decoders (simple, advanced and incremental) refuse animated
+  files. webpx's RGB-family still decodes return the first composited frame
+  via `decode::first_frame` (AnimationDecoder), as zenwebp's do; YUV decodes
+  keep refusing (user decision 2026-10-25). `StreamingDecoder` holds back the
+  first 21 bytes to see the VP8X animation flag before feeding libwebp.
 - `WebPMuxAssemble` rejects zero-length ICCP/EXIF/XMP chunks
   (`WEBP_MUX_INVALID_ARGUMENT`).
 - ANIM background color is stored as bytes [B, G, R, A] and read

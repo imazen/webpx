@@ -23,11 +23,22 @@ All are fixes, listed below; these are the ones existing callers can notice.
 - Lossy crops return exactly the requested region (odd origins were shifted
   one pixel), and an odd-origin lossy crop combined with scaling is now an
   error.
+- Still RGB-family decodes of an animated file (native and zencodec) return
+  its first frame instead of an error; YUV decodes still refuse animations.
 - `zenpixels` is a regular dependency; the `zencodec` feature enables `icc`.
   (4e5e455, f3d5913)
 
 ### Fixed
 
+- Native RGB/RGBA/BGRA/BGR decodes of an animated file return its first
+  composited frame, as zenwebp's do: the `decode_*` free functions, the typed
+  and `_into`/`_append` variants, the `Decoder` builder and
+  `StreamingDecoder` (which buffers an animated stream and returns the frame
+  from `finish`). libwebp's still decoders refuse animations, which webpx
+  passed on as "bitstream error". `decode_yuv` still refuses them, as
+  libwebp and zenwebp do; crop, scale, flip and the filter options are
+  refused for animations; `StreamingDecoder::with_buffer` refuses an animated
+  stream. (`tests/animated_still_decode.rs`)
 - zencodec still decodes (`decode`, push decode, streaming) of an animated
   file return its first composited frame, as zenwebp's do and as zencodec
   expects; they failed with libwebp's "bitstream error". Crop, scale, flip

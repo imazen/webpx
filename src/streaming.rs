@@ -73,6 +73,15 @@ pub struct StreamingDecoder<'a> {
     /// Canvas dimensions live in the first ~30 bytes for every WebP
     /// layout, so this stays tiny; 4 KiB is a defensive ceiling.
     header_stash: Vec<u8>,
+    /// The first bytes of the stream, held back from libwebp until the
+    /// VP8X flags show whether the file is animated (`None` once decided).
+    prefix: Option<Vec<u8>>,
+    /// The whole stream, when it is an animation: libwebp's incremental
+    /// decoder refuses animations, so `finish` decodes the first frame with
+    /// the animation decoder instead.
+    animation: Option<Vec<u8>>,
+    /// Output goes to a caller buffer (`with_buffer`).
+    external_buffer: bool,
     // Ties the decoder's lifetime to the caller-supplied output buffer
     // when `with_buffer` is used. For `new()` the lifetime is `'static`
     // because libwebp owns the buffer.
@@ -82,6 +91,11 @@ pub struct StreamingDecoder<'a> {
 // SAFETY: The WebPIDecoder is internally thread-safe for single-threaded access
 #[cfg(feature = "decode")]
 unsafe impl Send for StreamingDecoder<'_> {}
+
+/// Whether a stream prefix (at least 21 bytes) is an animated VP8X file.
+fn prefix_is_animated(p: &[u8]) -> bool {
+    p.len() >= 21 && &p[..4] == b"RIFF" && &p[8..16] == b"WEBPVP8X" && p[20] & 0x02 != 0
+}
 
 /// Extract the declared canvas dimensions from a stream prefix, if the
 /// header has arrived.
@@ -157,6 +171,9 @@ impl StreamingDecoder<'static> {
             appended_bytes: 0,
             dims_checked: false,
             header_stash: Vec::new(),
+            prefix: Some(Vec::new()),
+            animation: None,
+            external_buffer: false,
             _marker: PhantomData,
         })
     }
@@ -224,6 +241,9 @@ impl<'a> StreamingDecoder<'a> {
             appended_bytes: 0,
             dims_checked: false,
             header_stash: Vec::new(),
+            prefix: Some(Vec::new()),
+            animation: None,
+            external_buffer: true,
             _marker: PhantomData,
         })
     }
@@ -252,8 +272,41 @@ impl<'a> StreamingDecoder<'a> {
     ///
     /// Enforces the decoder's [`crate::Limits`] (default:
     /// [`crate::Limits::default`]; see [`Self::limits`]).
+    ///
+    /// An animated stream is buffered whole (bounded by `max_input_bytes`)
+    /// and reports `NeedMoreData` until [`finish`](Self::finish), which
+    /// returns its first composited frame, as the still decoders do.
     pub fn append(&mut self, data: &[u8]) -> Result<DecodeStatus> {
         self.check_append_limits(data)?;
+        if let Some(stream) = &mut self.animation {
+            stream.extend_from_slice(data);
+            return Ok(DecodeStatus::NeedMoreData);
+        }
+        if let Some(prefix) = &mut self.prefix {
+            // RIFF header (12) + VP8X chunk header (8) + its flags byte.
+            const NEEDED: usize = 21;
+            prefix.extend_from_slice(data);
+            if prefix.len() < NEEDED {
+                return Ok(DecodeStatus::NeedMoreData);
+            }
+            let prefix = self.prefix.take().unwrap_or_default();
+            if prefix_is_animated(&prefix) {
+                if self.external_buffer {
+                    return Err(at!(Error::InvalidInput(
+                        "an animated WebP can't be decoded into a caller buffer; \
+                         use StreamingDecoder::new or AnimationDecoder"
+                            .into(),
+                    )));
+                }
+                self.animation = Some(prefix);
+                return Ok(DecodeStatus::NeedMoreData);
+            }
+            return self.feed(&prefix);
+        }
+        self.feed(data)
+    }
+
+    fn feed(&mut self, data: &[u8]) -> Result<DecodeStatus> {
         let status = unsafe { libwebp_sys::WebPIAppend(self.decoder, data.as_ptr(), data.len()) };
         self.process_status(status)
     }
@@ -369,6 +422,9 @@ impl<'a> StreamingDecoder<'a> {
 
     /// Get the current image dimensions (available after some data is decoded).
     pub fn dimensions(&self) -> Option<(u32, u32)> {
+        if let Some(stream) = &self.animation {
+            return probe_canvas_dims(stream);
+        }
         if self.width > 0 && self.height > 0 {
             Some((self.width as u32, self.height as u32))
         } else {
@@ -434,7 +490,28 @@ impl<'a> StreamingDecoder<'a> {
     /// Finish decoding and return the complete image.
     ///
     /// Returns an error if decoding is not complete.
-    pub fn finish(self) -> Result<(Vec<u8>, u32, u32)> {
+    pub fn finish(mut self) -> Result<(Vec<u8>, u32, u32)> {
+        if let Some(stream) = self.animation.take() {
+            let layout = match self.color_mode {
+                ColorMode::Bgra => crate::types::PixelLayout::Bgra,
+                ColorMode::Rgb => crate::types::PixelLayout::Rgb,
+                ColorMode::Bgr => crate::types::PixelLayout::Bgr,
+                _ => crate::types::PixelLayout::Rgba,
+            };
+            let (mut px, w, h) = crate::decode::first_frame(&stream, layout, &self.limits)?;
+            if self.color_mode == ColorMode::Argb {
+                for p in px.as_chunks_mut::<4>().0 {
+                    p.rotate_right(1); // RGBA -> ARGB
+                }
+            }
+            return Ok((px, w, h));
+        }
+        if let Some(prefix) = self.prefix.take() {
+            // A stream shorter than the animation check: hand it over.
+            if !prefix.is_empty() {
+                let _ = self.feed(&prefix);
+            }
+        }
         let mut last_y = 0i32;
         let mut width = 0i32;
         let mut height = 0i32;
