@@ -140,7 +140,7 @@ These are the patterns that have bitten webpx; treat any new FFI call site as su
 
 ## Known Issues
 
-Observed 2026-10-24 (rustc 1.99); neither is gated by CI.
+Observed 2026-10-24/25 (rustc 1.99); CI gates none of these.
 
 - `cargo test --no-default-features --features decode,encode,animation` fails
   to compile the lib unit tests: `vec!` is not in scope in the
@@ -151,6 +151,24 @@ Observed 2026-10-24 (rustc 1.99); neither is gated by CI.
   dropped from `webpx.internal.txt`, `std::io::Write` printed as
   `core::io::write::Write`). Regenerate with `just api-doc` in a commit of
   its own.
+- zencodec-testkit 0.1.0 checks webpx fails (observed 2026-10-25; the
+  passing ones run in `tests/zencodec_conformance.rs`). Each fix needs public
+  API, so each goes through a PR:
+  - `check_capability_honesty`: undeclared encode paths (`push_rows`,
+    `encode_from`) return `Error::InvalidConfig(String)`, so
+    `CodecErrorExt::unsupported_operation()` finds no `UnsupportedOperation`
+    in the chain. Needs an `Error` variant that carries it.
+  - `check_decode_error_envelope`, `check_decode_truncation_series`: the
+    trait impls use `type Error = At<webpx::Error>`, not `At<CodecError>`,
+    so the error category doesn't survive dyn erasure.
+  - `check_orientation_roundtrip`: decode never reports EXIF orientation
+    (`ImageInfo::orientation` stays `Identity`).
+- `AnimationEncoder::new` passes `allow_mixed = true` (libwebp's own default
+  is 0), so after `set_lossless(true)` libwebp may still encode a frame lossy
+  when that is smaller, despite the method's doc saying "all frames". The
+  zencodec layer avoids it by passing `allow_mixed = false` for lossless.
+  Changing `new`'s default changes lossy output sizes, so it is a decision
+  for the maintainer.
 
 ## Profiling Guidelines
 
