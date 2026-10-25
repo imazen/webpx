@@ -1190,6 +1190,58 @@ impl<'a> Decoder<'a> {
             dec_config.options.scaled_height = self.config.scaled_height as i32;
         }
 
+        // A lossy crop must give the same pixels as cropping the full decode.
+        // libwebp doesn't on its own: it rounds the origin down to even
+        // (decode.h: "Will be snapped to even values") while keeping the
+        // size, which shifts an odd-origin crop up/left by one pixel, and its
+        // fancy upsampler treats the crop edge as the image edge, which
+        // changes the colours along it. Decode a region with a 2-pixel
+        // margin (clamped to the image, even origin) and trim it below.
+        let mut trim = None;
+        let (iw, ih) = (
+            dec_config.input.width as u32,
+            dec_config.input.height as u32,
+        );
+        let c = &self.config;
+        let inside = c
+            .crop_left
+            .checked_add(c.crop_width)
+            .is_some_and(|r| r <= iw)
+            && c.crop_top
+                .checked_add(c.crop_height)
+                .is_some_and(|b| b <= ih);
+        // An out-of-bounds crop is left for libwebp to reject.
+        if c.use_cropping && inside && dec_config.input.format == 1 {
+            let x0 = c.crop_left.saturating_sub(2) & !1;
+            let y0 = c.crop_top.saturating_sub(2) & !1;
+            let x1 = (c.crop_left.saturating_add(c.crop_width).saturating_add(2)).min(iw);
+            let y1 = (c.crop_top.saturating_add(c.crop_height).saturating_add(2)).min(ih);
+            let exact = (x0, y0, x1, y1)
+                == (
+                    c.crop_left,
+                    c.crop_top,
+                    c.crop_left + c.crop_width,
+                    c.crop_top + c.crop_height,
+                );
+            if self.config.use_scaling {
+                // The margin can't be trimmed after scaling; only libwebp's
+                // own origin rounding is a problem there.
+                if c.crop_left & 1 != 0 || c.crop_top & 1 != 0 {
+                    return Err(at!(Error::InvalidConfig(
+                        "a lossy image can't be cropped at an odd crop_left/crop_top and scaled: \
+                         libwebp rounds the origin down to even before scaling"
+                            .into(),
+                    )));
+                }
+            } else if !exact && x1 > c.crop_left && y1 > c.crop_top {
+                dec_config.options.crop_left = x0 as i32;
+                dec_config.options.crop_top = y0 as i32;
+                dec_config.options.crop_width = (x1 - x0) as i32;
+                dec_config.options.crop_height = (y1 - y0) as i32;
+                trim = Some((c.crop_left - x0, c.crop_top - y0, y1 - y0));
+            }
+        }
+
         dec_config.options.bypass_filtering = self.config.bypass_filtering as i32;
         dec_config.options.no_fancy_upsampling = self.config.no_fancy_upsampling as i32;
         dec_config.options.use_threads = self.config.use_threads as i32;
@@ -1238,7 +1290,32 @@ impl<'a> Decoder<'a> {
             }
             let size = dec_config.output.u.RGBA.size;
             let slice = core::slice::from_raw_parts(dec_config.output.u.RGBA.rgba, size);
-            let vec = slice.to_vec();
+            let vec = match trim {
+                None => slice.to_vec(),
+                Some((dx, dy, decoded_h)) => {
+                    // Cut the requested rectangle out of the margin. `flip`
+                    // reverses the rows, so the top margin is then at the
+                    // bottom.
+                    let stride = dec_config.output.u.RGBA.stride as usize;
+                    let bpp = match mode {
+                        libwebp_sys::WEBP_CSP_MODE::MODE_RGB
+                        | libwebp_sys::WEBP_CSP_MODE::MODE_BGR => 3,
+                        _ => 4,
+                    };
+                    let skip_rows = if self.config.flip {
+                        decoded_h - dy - height
+                    } else {
+                        dy
+                    } as usize;
+                    let row_bytes = width as usize * bpp;
+                    let mut out = Vec::with_capacity(row_bytes * height as usize);
+                    for y in 0..height as usize {
+                        let start = (y + skip_rows) * stride + dx as usize * bpp;
+                        out.extend_from_slice(&slice[start..start + row_bytes]);
+                    }
+                    out
+                }
+            };
             libwebp_sys::WebPFreeDecBuffer(&mut dec_config.output);
             vec
         };
