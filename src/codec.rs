@@ -925,6 +925,30 @@ fn pick_decode_descriptor(preferred: &[PixelDescriptor]) -> PixelDescriptor {
 // reported orientation and the EXIF blob's tag become Identity, so nothing
 // downstream applies the transform a second time.
 
+/// Size of a native decode of a `w`×`h` image under `config`: the scale
+/// target if set, else the crop size if set, else the image size, as
+/// `Decoder::decode_advanced` produces it.
+fn native_output_dims(config: &DecoderConfig, w: u32, h: u32) -> (u32, u32) {
+    if config.use_scaling {
+        (config.scaled_width, config.scaled_height)
+    } else if config.use_cropping {
+        (config.crop_width, config.crop_height)
+    } else {
+        (w, h)
+    }
+}
+
+/// How to display a decoded buffer, given the file's EXIF orientation: the
+/// native `flip` option already flipped the buffer vertically, so undoing
+/// that comes first.
+fn buffer_orientation(config: &DecoderConfig, intrinsic: Orientation) -> Orientation {
+    if config.flip {
+        Orientation::FlipV.then(intrinsic)
+    } else {
+        intrinsic
+    }
+}
+
 /// The transform to bake into stored-order pixels for `hint`, given the
 /// file's EXIF orientation. `Identity` for `Preserve`.
 fn resolve_orientation(hint: OrientationHint, intrinsic: Orientation) -> Orientation {
@@ -1025,14 +1049,23 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
 
     fn output_info(&self, data: &[u8]) -> Result<OutputInfo, At<Error>> {
         let info = crate::ImageInfo::from_webp(data)?;
-        let descriptor = if info.has_alpha {
-            PixelDescriptor::RGBA8_SRGB
-        } else {
-            PixelDescriptor::RGB8_SRGB
-        };
-        let resolved = resolve_orientation(self.orientation, info.orientation.unwrap_or_default());
-        let (w, h) = resolved.output_dimensions(info.width, info.height);
-        Ok(OutputInfo::full_decode(w, h, descriptor).with_orientation_applied(resolved))
+        let config = &self.config.inner;
+        let (w, h) = native_output_dims(config, info.width, info.height);
+        let shown = buffer_orientation(config, info.orientation.unwrap_or_default());
+        let resolved = resolve_orientation(self.orientation, shown);
+        let (w, h) = resolved.output_dimensions(w, h);
+        // What `decoder(data, &[])` produces: RGBA8 whatever the alpha flag.
+        let mut out = OutputInfo::full_decode(w, h, pick_decode_descriptor(&[]))
+            .with_orientation_applied(resolved);
+        if config.use_cropping {
+            out.crop_applied = Some([
+                config.crop_left,
+                config.crop_top,
+                config.crop_width,
+                config.crop_height,
+            ]);
+        }
+        Ok(out)
     }
 
     fn decoder(
@@ -1062,8 +1095,10 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
         // through scanlines, but row-level WebP decoding requires the
         // incremental API plus more bookkeeping than we want here.
         let dec_job = self;
-        let info_z = dec_job.output_info(&data)?;
         let chosen = pick_decode_descriptor(preferred);
+        let mut info_z = dec_job.output_info(&data)?;
+        info_z.native_format = chosen;
+        info_z.has_alpha = chosen.has_alpha();
         let dec = WebpDecoder {
             data,
             config: dec_job.config.inner,
@@ -1119,9 +1154,12 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                 .map_err(|e| at!(Error::LimitExceeded(e)))?;
 
             let descriptor = pick_decode_descriptor(_preferred);
-            let intrinsic = probe.orientation.unwrap_or_default();
-            let zen_info = attach_metadata(build_zencodec_image_info(probe), &_data, &limits)?;
-            let zen_info = orient_info(zen_info, self.orientation);
+            let config = self.config.inner;
+            let (w, h) = native_output_dims(&config, probe.width, probe.height);
+            let intrinsic = buffer_orientation(&config, probe.orientation.unwrap_or_default());
+            let mut zen_info = attach_metadata(build_zencodec_image_info(probe), &_data, &limits)?;
+            (zen_info.width, zen_info.height) = (w, h);
+            let zen_info = orient_info(zen_info.with_orientation(intrinsic), self.orientation);
             // Buffered approach: stash the input, expose the whole
             // image as a single batch via the native one-shot
             // decoder. A row-by-row implementation against
@@ -1132,7 +1170,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for WebpDecodeJob {
                 data: _data.into_owned(),
                 descriptor,
                 info: zen_info,
-                config: self.config.inner,
+                config,
                 limits,
                 orientation: self.orientation,
                 intrinsic,
@@ -1213,7 +1251,7 @@ impl zencodec::decode::Decode for WebpDecoder<'_> {
 
     fn decode(self) -> Result<DecodeOutput, At<Error>> {
         let _ = &self.stop;
-        let cfg = self.config.limits(self.limits);
+        let cfg = self.config.clone().limits(self.limits);
         let dec = crate::Decoder::new(&self.data)?.config(cfg);
         let (bytes, w, h, descriptor) = match self.chosen {
             PixelDescriptor::RGBA8_SRGB => {
@@ -1238,6 +1276,8 @@ impl zencodec::decode::Decode for WebpDecoder<'_> {
         info.width = w;
         info.height = h;
         let info = attach_metadata(info, &self.data, &self.limits)?;
+        let shown = buffer_orientation(&self.config, info.orientation);
+        let info = info.with_orientation(shown);
         let (bytes, w, h) = orient_decoded(
             bytes,
             w,

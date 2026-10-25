@@ -102,6 +102,14 @@
 - `AnimationEncoder::with_options` rejects a loop count above 65535 up front;
   it failed at `finish` with "failed to assemble animation". `finish` and
   `add_frame*` errors now carry libwebp's `WebPAnimEncoderGetError` text.
+- zencodec decode geometry matches the decoded buffer.
+  `output_info` ignored the native crop/scale options (it reported the file
+  size) and reported `RGB8` for opaque files although `decoder(.., &[])`
+  produces `RGBA8`; the streaming decoder's `info()` also ignored crop/scale;
+  `push_decoder` returned `output_info`'s format instead of the format it
+  wrote to the sink. With the native `flip` option, the reported orientation
+  and the `Correct` bake now include the vertical flip libwebp applied.
+  `output_info` sets `crop_applied`. (`tests/zencodec_decode_geometry.rs`)
 
 ### Documented
 
