@@ -96,10 +96,9 @@ Larger test files available at `~/work/codec-corpus/image-rs/test-images/webp/`.
 - libwebp collapses one-frame animations to stills twice over: `WebPMuxAssemble`
   (`MuxCleanup`) drops the ANMF/ANIM chunks of a single full-canvas frame, and
   `WebPAnimEncoderAssemble` merges identical frames then calls
-  `OptimizeSingleFrame`. webpx undoes both (`src/riff.rs::still_to_animation`,
-  called from `AnimationEncoder::finish` and every mux `embed_*`/`remove_*`),
-  so the loop count, duration and background colour survive. Test fixtures
-  that need exact ANMF durations are written chunk by chunk
+  `OptimizeSingleFrame`. webpx keeps that (a one-frame animation is a
+  still, as in zenwebp; user decision 2026-10-25). Test fixtures that need
+  exact ANMF durations are written chunk by chunk
   (`tests/animation_timing.rs::mux_animation`).
 - The demuxer reports `loop_count` 1 and frame duration 0 for a still image.
 - `WebPMuxAssemble` rejects zero-length ICCP/EXIF/XMP chunks

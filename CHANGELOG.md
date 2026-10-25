@@ -16,8 +16,6 @@ All are fixes, listed below; these are the ones existing callers can notice.
 
 - `AnimationEncoder::new` no longer lets libwebp encode frames lossy when you
   asked for lossless (`allow_mixed` now off by default). (c3a18ed)
-- One-frame animations, from `AnimationEncoder` or after `embed_*`/`remove_*`,
-  stay animations instead of becoming still images. (2127b62)
 - zencodec: unsupported operations return `Error::Unsupported`, not
   `Error::InvalidConfig`; `output_info().native_format` is `RGBA8` for opaque
   files too (what `decoder(.., &[])` returns); decode reports the file's EXIF
@@ -165,18 +163,6 @@ All are fixes, listed below; these are the ones existing callers can notice.
   wrote to the sink. With the native `flip` option, the reported orientation
   and the `Correct` bake now include the vertical flip libwebp applied.
   `output_info` sets `crop_applied`. (`tests/zencodec_decode_geometry.rs`) (259b1e0)
-- One-frame animations stay animations. libwebp writes an animation that is
-  down to one frame (one frame added, or identical frames merged) as a still
-  image in `AnimationEncoder::finish`, and `embed_*`/`remove_*` on a
-  one-frame animation did the same through libwebp's mux, losing the loop
-  count, duration and background colour. Both now rewrap the still as a
-  one-frame animation (`src/riff.rs`). (`tests/animation_timing.rs::
-  {single_frame_animation_stays_animated, single_lossy_frame_stays_animated,
-  metadata_edits_keep_one_frame_animations}`,
-  `tests/zencodec_integration.rs::one_frame_animation_with_metadata_stays_animated`) (2127b62)
-
-### Added
-
 - README, crate docs and the crates.io description open by pointing new
   projects to zenwebp.
 - `SECURITY.md`: supported versions, private reporting, scope. (7bc108b)

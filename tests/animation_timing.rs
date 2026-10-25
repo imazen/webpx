@@ -238,11 +238,10 @@ fn animation_encoder_durations_reach_demux() {
 }
 
 /// libwebp's `WebPAnimEncoderAssemble` writes a still image when one frame
-/// remains (a single frame, or identical frames merged). `AnimationEncoder`
-/// keeps it an animation: one frame with the whole duration, the loop count
-/// and the background colour.
+/// remains (a single frame, or identical frames merged); the duration and loop
+/// count are not stored. Pinned so a libwebp change shows up here.
 #[test]
-fn single_frame_animation_stays_animated() {
+fn single_frame_animation_encodes_as_still() {
     let px = frame_pixels(8, 8, 1);
     for frames in [1, 2] {
         let mut enc = webpx::AnimationEncoder::with_options(8, 8, false, 3).unwrap();
@@ -251,99 +250,44 @@ fn single_frame_animation_stays_animated() {
             enc.add_frame_rgba(&px, i * 100).unwrap();
         }
         let data = enc.finish(250).unwrap();
-        assert!(
-            webpx::ImageInfo::from_webp(&data).unwrap().has_animation,
-            "{frames} frame(s)"
-        );
-        assert_eq!(demux_durations(&data), [250], "{frames} frame(s)");
+        assert_eq!(&data[12..16], b"VP8L", "{frames} frame(s)");
+        assert!(!webpx::ImageInfo::from_webp(&data).unwrap().has_animation);
         let mut dec = AnimationDecoder::new(&data).unwrap();
-        assert_eq!(dec.info().loop_count, 3);
-        assert_eq!(dec.info().bgcolor, 0xffff_ffff);
-        let got = dec.decode_all().unwrap();
-        assert_eq!(got.len(), 1);
-        assert_eq!((got[0].duration_ms, &got[0].data), (250, &px));
-    }
-}
-
-/// The same for lossy frames, with and without alpha (VP8, and VP8X + ALPH
-/// + VP8 still images).
-#[test]
-fn single_lossy_frame_stays_animated() {
-    for alpha in [255u8, 100] {
-        let mut px = frame_pixels(8, 8, 9);
-        px.iter_mut().skip(3).step_by(4).for_each(|a| *a = alpha);
-        let mut enc = webpx::AnimationEncoder::with_options(8, 8, false, 7).unwrap();
-        enc.add_frame_rgba(&px, 0).unwrap();
-        let data = enc.finish(40).unwrap();
-        let info = webpx::ImageInfo::from_webp(&data).unwrap();
-        assert!(info.has_animation, "alpha {alpha}");
-        assert_eq!(info.has_alpha, alpha != 255, "alpha {alpha}");
-        assert_eq!(demux_durations(&data), [40], "alpha {alpha}");
-        let mut dec = AnimationDecoder::new(&data).unwrap();
-        assert_eq!(dec.info().loop_count, 7);
-        let frames = dec.decode_all().unwrap();
-        assert_eq!(frames.len(), 1);
-        assert!(
-            frames[0]
-                .data
-                .iter()
-                .skip(3)
-                .step_by(4)
-                .all(|&a| a == alpha)
-        );
-    }
-}
-
-/// libwebp's `WebPMuxAssemble` also writes a one-frame full-canvas animation
-/// as a still. Adding or removing metadata must not change the image.
-#[cfg(feature = "icc")]
-#[test]
-fn metadata_edits_keep_one_frame_animations() {
-    let anim = mux_animation(8, 8, &[250], 3, 0x8011_2233);
-    let pixels = |d: &[u8]| {
-        AnimationDecoder::new(d)
-            .unwrap()
+        assert_eq!(dec.info().loop_count, 1);
+        let got: Vec<u32> = dec
             .decode_all()
             .unwrap()
-            .into_iter()
-            .map(|f| (f.duration_ms, f.data))
-            .collect::<Vec<_>>()
-    };
-    let want = pixels(&anim);
-    let exif = b"II*\0\x08\0\0\0\0\0\0\0\0\0";
-    let edited = [
-        ("exif", webpx::embed_exif(&anim, exif).unwrap()),
-        ("icc", webpx::embed_icc(&anim, &[1, 2, 3]).unwrap()),
-        ("xmp", webpx::embed_xmp(&anim, b"<x/>").unwrap()),
-        (
-            "remove exif",
-            webpx::remove_exif(&webpx::embed_exif(&anim, exif).unwrap()).unwrap(),
-        ),
-        ("remove icc", webpx::remove_icc(&anim).unwrap()),
-    ];
-    for (what, data) in &edited {
-        let dec = AnimationDecoder::new(data).unwrap();
-        assert_eq!(
-            (dec.info().loop_count, dec.info().bgcolor),
-            (3, 0x8011_2233),
-            "{what}"
-        );
-        assert_eq!(demux_durations(data), [250], "{what}");
-        assert_eq!(pixels(data), want, "{what}");
+            .iter()
+            .map(|f| f.duration_ms)
+            .collect();
+        assert_eq!(got, [0]);
     }
-    assert_eq!(
-        webpx::get_exif(&edited[0].1).unwrap().as_deref(),
-        Some(&exif[..])
-    );
-    assert_eq!(
-        webpx::get_icc_profile(&edited[1].1).unwrap().as_deref(),
-        Some(&[1u8, 2, 3][..])
-    );
-    assert_eq!(
-        webpx::get_xmp(&edited[2].1).unwrap().as_deref(),
-        Some(&b"<x/>"[..])
-    );
-    assert_eq!(webpx::get_exif(&edited[3].1).unwrap(), None);
+}
+
+/// libwebp's mux also writes a one-frame full-canvas animation as a still
+/// when metadata is added or removed (`MuxCleanup`); the pixels are kept. A
+/// frame that doesn't cover the canvas stays an animation.
+#[cfg(feature = "icc")]
+#[test]
+fn metadata_edits_write_one_frame_animations_as_stills() {
+    let exif = b"II*\0\x08\0\0\0\0\0\0\0\0\0";
+    let anim = mux_animation(8, 8, &[250], 3, 0x8011_2233);
+    let first = |d: &[u8]| {
+        AnimationDecoder::new(d).unwrap().decode_all().unwrap()[0]
+            .data
+            .clone()
+    };
+    for edited in [
+        webpx::embed_exif(&anim, exif).unwrap(),
+        webpx::embed_icc(&anim, &[1, 2, 3]).unwrap(),
+        webpx::remove_xmp(&anim).unwrap(),
+    ] {
+        assert!(!webpx::ImageInfo::from_webp(&edited).unwrap().has_animation);
+        assert_eq!(first(&edited), first(&anim));
+    }
+    let two = mux_animation(8, 8, &[250, 100], 3, 0x8011_2233);
+    let edited = webpx::embed_exif(&two, exif).unwrap();
+    assert_eq!(demux_durations(&edited), [250, 100]);
 }
 
 /// libwebp's end timestamp is a C `int`; 129 frames of 2^24 - 1 ms total
