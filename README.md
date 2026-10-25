@@ -16,14 +16,14 @@ For new projects, prefer zenwebp: it's the pure-Rust path, with no C dependency 
 
 ```toml
 [dependencies]
-webpx = "0.4.0"
+webpx = "0.4.1"
 ```
 
 Opt into the non-default features you need:
 
 ```toml
 [dependencies]
-webpx = { version = "0.4.0", features = ["animation", "icc", "streaming"] }
+webpx = { version = "0.4.1", features = ["animation", "icc", "streaming"] }
 ```
 
 ## Quick start
@@ -40,6 +40,8 @@ let (pixels, width, height) = decode_rgba(&webp_bytes)?;
 // `pixels.len() == width as usize * height as usize * 4`, in R,G,B,A order.
 # Ok::<(), webpx::At<webpx::Error>>(())
 ```
+
+Decoding never applies the EXIF orientation tag: pixels come back in stored order, and `ImageInfo::from_webp(&webp_bytes)?.orientation` says how to display them.
 
 `decode_rgba` enforces `Limits::default()` on the input — see [Decoding untrusted input](#decoding-untrusted-input). For metadata-stripping, cropping/scaling, BGRA, or zero-copy output, use the [`Decoder`](#decoding-with-cropping--scaling) builder.
 
@@ -304,7 +306,7 @@ Errors are returned as `Result<T, At<Error>>`, where `At` records the source loc
 
 ```toml
 [dependencies]
-webpx = { version = "0.4.0", default-features = false, features = ["decode", "encode"] }
+webpx = { version = "0.4.1", default-features = false, features = ["decode", "encode"] }
 ```
 
 (The underlying libwebp still requires a C toolchain at build time.)

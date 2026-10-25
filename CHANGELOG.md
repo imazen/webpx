@@ -8,6 +8,23 @@
   zencodec error envelope, as zenwebp does) with `webpx::Error` as the
   detail, instead of `At<webpx::Error>`.
 
+## [0.4.1] - 2026-10-25
+
+### Behavior changes to check when upgrading
+
+All are fixes, listed below; these are the ones existing callers can notice.
+
+- `AnimationEncoder::new` no longer lets libwebp encode frames lossy when you
+  asked for lossless (`allow_mixed` now off by default). (c3a18ed)
+- One-frame animations, from `AnimationEncoder` or after `embed_*`/`remove_*`,
+  stay animations instead of becoming still images. (2127b62)
+- zencodec: unsupported operations return `Error::Unsupported`, not
+  `Error::InvalidConfig`; `output_info().native_format` is `RGBA8` for opaque
+  files too (what `decoder(.., &[])` returns); decode reports the file's EXIF
+  orientation instead of `Identity`. (20dd298, 259b1e0, 69e3796)
+- `zenpixels` is a regular dependency; the `zencodec` feature enables `icc`.
+  (4e5e455, f3d5913)
+
 ### Fixed
 
 - zencodec decode keeps zenpixels' `At` location trace on buffer errors
