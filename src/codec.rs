@@ -793,6 +793,7 @@ static DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
         .with_xmp(true)
         .with_stop(true)
         .with_animation(cfg!(feature = "animation"))
+        .with_streaming(cfg!(feature = "streaming"))
         .with_enforces_max_pixels(true);
 
 impl zencodec::decode::DecoderConfig for WebpDecoderConfig {

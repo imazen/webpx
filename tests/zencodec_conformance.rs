@@ -63,3 +63,13 @@ fn lossless_animation_cross_path_equivalence() {
         &frames(),
     ));
 }
+
+/// The streaming decoder works (buffered, one batch), so the capabilities
+/// must say so; with the flag set, the cross-path check above also compares
+/// the streaming path's pixels.
+#[cfg(feature = "streaming")]
+#[test]
+fn decode_capabilities_advertise_streaming() {
+    use zencodec::decode::DecoderConfig as _;
+    assert!(WebpDecoderConfig::capabilities().streaming());
+}

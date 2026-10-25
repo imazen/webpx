@@ -69,6 +69,9 @@
   animations decoded with changed pixels. `allow_mixed` is now set only for
   lossy configs.
   (`tests/zencodec_conformance.rs::lossless_animation_cross_path_equivalence`)
+- zencodec decode capabilities report `streaming()` when the `streaming`
+  feature is enabled; it reported false although `streaming_decoder` works.
+  (`tests/zencodec_conformance.rs::decode_capabilities_advertise_streaming`)
 
 ### Documented
 
