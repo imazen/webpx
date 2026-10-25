@@ -1,6 +1,9 @@
 //! # webpx
 //!
-//! Complete WebP encoding and decoding with ICC profiles, streaming, and animation support.
+//! For new projects, use [`zenwebp`](https://github.com/imazen/zenwebp), the
+//! pure-Rust WebP codec with the same `zencodec` API. webpx is WebP encoding
+//! and decoding through libwebp, with ICC profiles, streaming, and animation
+//! support.
 //!
 //! `webpx` provides ergonomic Rust bindings to Google's libwebp library
 //! (FFI to the upstream C codebase).

@@ -146,6 +146,8 @@ All are fixes, listed below; these are the ones existing callers can notice.
 
 ### Added
 
+- README, crate docs and the crates.io description open by pointing new
+  projects to zenwebp.
 - `SECURITY.md`: supported versions, private reporting, scope. (7bc108b)
 - `ImageInfo::orientation` and `AnimationInfo::orientation`
   (`Option<webpx::Orientation>`): the EXIF Orientation tag of the file's
