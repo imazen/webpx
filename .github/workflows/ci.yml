@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, '0.4.x']
   pull_request:
-    branches: [main]
+    branches: [main, '0.4.x']
 
 # Superseded runs only waste runner queue — particularly the two macOS
 # jobs per run, which wait on GitHub's scarcest pool. Release gating
