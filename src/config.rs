@@ -923,6 +923,18 @@ impl EncoderConfig {
 
     /// Convert to libwebp WebPConfig.
     pub(crate) fn to_libwebp(&self) -> Result<libwebp_sys::WebPConfig> {
+        // libwebp 1.6.0's range checks are `quality < 0 || quality > 100` and
+        // `target_PSNR < 0`, which NaN passes; it then reaches float-to-int
+        // casts that are undefined for NaN (fixed upstream after 1.6.0).
+        if self.quality.is_nan() {
+            return Err(at!(Error::InvalidConfig("quality is NaN".into())));
+        }
+        if self.target_psnr.is_nan() || self.target_psnr < 0.0 {
+            return Err(at!(Error::InvalidConfig(alloc::format!(
+                "target_psnr must be 0 (off) or positive, got {}",
+                self.target_psnr
+            ))));
+        }
         // `libwebp_sys::WebPConfig::new_with_preset()` internally does
         // `MaybeUninit::uninit()` + `WebPConfigInitInternal` + `assume_init`.
         // The bindgen-generated struct exposes libwebp's reserved `pad`

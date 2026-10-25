@@ -653,3 +653,25 @@ fn progress_hook_panic_is_caught_and_replayed() {
         }
     }
 }
+
+/// NaN quality or target PSNR is rejected before libwebp: libwebp 1.6.0's
+/// checks let NaN through to undefined float-to-int casts.
+#[test]
+fn nan_quality_and_target_psnr_are_rejected() {
+    let px = vec![128u8; 16 * 16 * 4];
+    for cfg in [
+        webpx::EncoderConfig::new().quality(f32::NAN),
+        webpx::EncoderConfig::new_lossless().quality(f32::NAN),
+        webpx::EncoderConfig::new().target_psnr(f32::NAN),
+        webpx::EncoderConfig::new().target_psnr(-1.0),
+    ] {
+        assert!(cfg.encode_rgba(&px, 16, 16, webpx::Unstoppable).is_err());
+    }
+    assert!(
+        webpx::EncoderConfig::new()
+            .quality(75.0)
+            .target_psnr(40.0)
+            .encode_rgba(&px, 16, 16, webpx::Unstoppable)
+            .is_ok()
+    );
+}

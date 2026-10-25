@@ -27,6 +27,11 @@ All are fixes, listed below; these are the ones existing callers can notice.
 
 ### Fixed
 
+- Encoding rejects a NaN `quality` or `target_psnr` (and a negative
+  `target_psnr`) with `Error::InvalidConfig`. libwebp 1.6.0's checks let NaN
+  through to float-to-int casts that are undefined for NaN; on x86 the
+  encode succeeded with an arbitrary setting. (libwebp fixed this after
+  1.6.0, 6b1fa207c3.) (`tests/soundness.rs::nan_quality_and_target_psnr_are_rejected`)
 - zencodec `WebpEncodeJob::with_canvas_size` and
   `WebpDecodeJob::with_start_frame_index` were the trait's no-op defaults.
   The canvas size is now the required frame size (a mismatching frame is an
