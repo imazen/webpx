@@ -176,6 +176,9 @@ impl core::fmt::Display for Error {
 }
 
 /// Encoder options.
+///
+/// `kmin` and `kmax` are accepted for source compatibility and ignored: the
+/// encoder uses libwebp's default keyframe interval.
 #[deprecated(
     since = "0.2.1",
     note = "use the main webpx animation API; see module docs"
@@ -226,6 +229,9 @@ pub enum EncodingType {
 }
 
 /// Lossy encoding configuration.
+///
+/// Both fields are accepted for source compatibility and ignored; only
+/// [`EncodingConfig::quality`] and the lossy/lossless choice are applied.
 #[deprecated(
     since = "0.2.1",
     note = "use the main webpx animation API; see module docs"

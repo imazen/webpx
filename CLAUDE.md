@@ -151,24 +151,17 @@ Observed 2026-10-24/25 (rustc 1.99); CI gates none of these.
   dropped from `webpx.internal.txt`, `std::io::Write` printed as
   `core::io::write::Write`). Regenerate with `just api-doc` in a commit of
   its own.
-- zencodec-testkit 0.1.0 checks webpx fails (observed 2026-10-25; the
-  passing ones run in `tests/zencodec_conformance.rs`). Each fix needs public
-  API, so each goes through a PR:
-  - `check_capability_honesty`: undeclared encode paths (`push_rows`,
-    `encode_from`) return `Error::InvalidConfig(String)`, so
-    `CodecErrorExt::unsupported_operation()` finds no `UnsupportedOperation`
-    in the chain. Needs an `Error` variant that carries it.
-  - `check_decode_error_envelope`, `check_decode_truncation_series`: the
-    trait impls use `type Error = At<webpx::Error>`, not `At<CodecError>`,
-    so the error category doesn't survive dyn erasure.
-  - `check_orientation_roundtrip`: decode never reports EXIF orientation
-    (`ImageInfo::orientation` stays `Identity`).
-- `AnimationEncoder::new` passes `allow_mixed = true` (libwebp's own default
-  is 0), so after `set_lossless(true)` libwebp may still encode a frame lossy
-  when that is smaller, despite the method's doc saying "all frames". The
-  zencodec layer avoids it by passing `allow_mixed = false` for lossless.
-  Changing `new`'s default changes lossy output sizes, so it is a decision
-  for the maintainer.
+- zencodec-testkit 0.1.0: webpx passes every check except
+  `check_decode_error_envelope` and `check_decode_truncation_series`, which
+  need the trait impls' `type Error` to be `At<zencodec::CodecError>`
+  (queued for 0.5.0; see CHANGELOG). The passing checks run in
+  `tests/zencodec_conformance.rs`.
+- `compat::webp_animation` ignores `EncoderOptions::{kmin, kmax}` and
+  `LossyEncodingConfig::{segments, alpha_compression}` (documented on the
+  types).
+- Default zencodec decode output is `RGBA8` for opaque files too; zenwebp
+  returns `RGB8`. Callers that pass no preference get different layouts
+  from the two crates.
 
 ## Profiling Guidelines
 
