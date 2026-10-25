@@ -62,3 +62,54 @@ impl Drop for Picture {
         unsafe { libwebp_sys::WebPPictureFree(&mut self.inner) };
     }
 }
+
+/// `WebPPictureImportRGBA` without libwebp 1.6.0's unaligned reads.
+///
+/// For an ARGB picture on little-endian targets, libwebp 1.6.0 reads the
+/// RGBA rows through `uint32_t*` (`VP8LConvertBGRAToRGBA`), which is
+/// undefined behaviour unless the pointer and the stride are 4-byte
+/// aligned, and faults on targets without unaligned loads (fixed upstream
+/// after 1.6.0, b31469df48). A `&[u8]` from the caller has no alignment
+/// guarantee, so unaligned input is first copied into an aligned buffer.
+///
+/// # Safety
+///
+/// `picture` must point to an initialized `WebPPicture` whose `width` and
+/// `height` are set, and `rgba` must hold `height` rows `stride` bytes apart
+/// (the last row needs only `width * 4` bytes).
+pub(crate) unsafe fn import_rgba(
+    picture: *mut libwebp_sys::WebPPicture,
+    rgba: &[u8],
+    stride: usize,
+) -> i32 {
+    // SAFETY: the caller guarantees `picture` is valid.
+    let (w, h) = unsafe {
+        (
+            (*picture).width.max(0) as usize,
+            (*picture).height.max(0) as usize,
+        )
+    };
+    if (rgba.as_ptr() as usize).is_multiple_of(4) && stride.is_multiple_of(4) {
+        // SAFETY: as documented; the buffer and stride are aligned.
+        return unsafe {
+            libwebp_sys::WebPPictureImportRGBA(picture, rgba.as_ptr(), stride as i32)
+        };
+    }
+    let row = w.saturating_mul(4);
+    // Each u32 holds one pixel's four bytes in memory order.
+    let mut aligned = alloc::vec![0u32; w.saturating_mul(h)];
+    for y in 0..h {
+        let src = &rgba[y * stride..y * stride + row];
+        for (d, p) in aligned[y * w..(y + 1) * w]
+            .iter_mut()
+            .zip(src.as_chunks::<4>().0)
+        {
+            *d = u32::from_ne_bytes(*p);
+        }
+    }
+    // SAFETY: `aligned` is 4-byte aligned, holds `h` tight rows of `row` bytes
+    // and outlives the call (libwebp copies the pixels into the picture).
+    unsafe {
+        libwebp_sys::WebPPictureImportRGBA(picture, aligned.as_ptr() as *const u8, row as i32)
+    }
+}

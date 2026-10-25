@@ -675,3 +675,37 @@ fn nan_quality_and_target_psnr_are_rejected() {
             .is_ok()
     );
 }
+
+/// RGBA input at any byte offset encodes exactly like aligned input, and
+/// webpx never hands libwebp an unaligned RGBA pointer: libwebp 1.6.0 reads
+/// RGBA through `uint32_t*` for ARGB pictures (lossless, animation frames),
+/// which is undefined behaviour for unaligned input. Run under
+/// `-fsanitize=alignment` (see CLAUDE.md) to check the second half.
+#[test]
+fn unaligned_rgba_input_encodes_like_aligned() {
+    let (w, h) = (13u32, 7u32);
+    let px: Vec<u8> = (0..w * h * 4).map(|i| (i * 37 % 251) as u8).collect();
+    let want = webpx::EncoderConfig::new_lossless()
+        .encode_rgba(&px, w, h, webpx::Unstoppable)
+        .unwrap();
+    for shift in 1..4 {
+        let mut buf = vec![0u8; px.len() + shift];
+        buf[shift..].copy_from_slice(&px);
+        let got = webpx::EncoderConfig::new_lossless()
+            .encode_rgba(&buf[shift..], w, h, webpx::Unstoppable)
+            .unwrap();
+        assert_eq!(got, want, "offset {shift}");
+        // Strided rows (stride not a multiple of 4) through the builder.
+        let stride = w * 4 + 1;
+        let mut strided = vec![0u8; (stride * h) as usize];
+        for y in 0..h as usize {
+            strided[y * stride as usize..][..(w * 4) as usize]
+                .copy_from_slice(&px[y * (w * 4) as usize..][..(w * 4) as usize]);
+        }
+        let got = webpx::Encoder::new_rgba_stride(&strided, w, h, stride)
+            .lossless(true)
+            .encode(webpx::Unstoppable)
+            .unwrap();
+        assert_eq!(got, want, "stride {stride}");
+    }
+}

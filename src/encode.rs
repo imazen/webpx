@@ -161,13 +161,7 @@ pub(crate) fn encode_with_config_stats(
 
     // Import pixel data
     let import_ok = if bpp == 4 {
-        unsafe {
-            libwebp_sys::WebPPictureImportRGBA(
-                picture.as_mut_ptr(),
-                data.as_ptr(),
-                (width * 4) as i32,
-            )
-        }
+        unsafe { crate::ffi::picture::import_rgba(picture.as_mut_ptr(), data, width as usize * 4) }
     } else {
         unsafe {
             libwebp_sys::WebPPictureImportRGB(
@@ -233,13 +227,7 @@ pub(crate) fn encode_with_config_stoppable<S: Stop>(
 
     // Import pixel data
     let import_ok = if bpp == 4 {
-        unsafe {
-            libwebp_sys::WebPPictureImportRGBA(
-                picture.as_mut_ptr(),
-                data.as_ptr(),
-                (width * 4) as i32,
-            )
-        }
+        unsafe { crate::ffi::picture::import_rgba(picture.as_mut_ptr(), data, width as usize * 4) }
     } else {
         unsafe {
             libwebp_sys::WebPPictureImportRGB(
@@ -878,10 +866,10 @@ impl<'a> Encoder<'a> {
                 validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
                 picture.inner_mut().use_argb = 1;
                 unsafe {
-                    libwebp_sys::WebPPictureImportRGBA(
+                    crate::ffi::picture::import_rgba(
                         picture.as_mut_ptr(),
-                        data.as_ptr(),
-                        *stride_bytes as i32,
+                        data,
+                        *stride_bytes as usize,
                     )
                 }
             }
@@ -1189,9 +1177,7 @@ impl<'a> Encoder<'a> {
             EncoderInput::Rgba { data, stride_bytes } => {
                 validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
                 picture.use_argb = 1;
-                unsafe {
-                    libwebp_sys::WebPPictureImportRGBA(picture, data.as_ptr(), *stride_bytes as i32)
-                }
+                unsafe { crate::ffi::picture::import_rgba(picture, data, *stride_bytes as usize) }
             }
             EncoderInput::Bgra { data, stride_bytes } => {
                 validate_buffer_size_stride(data.len(), self.width, self.height, *stride_bytes, 4)?;
