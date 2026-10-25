@@ -873,12 +873,20 @@ impl zencodec::decode::DecoderConfig for WebpDecoderConfig {
         &DECODE_CAPABILITIES
     }
 
-    fn job<'a>(self) -> Self::Job<'a> {
+    fn job<'a>(mut self) -> Self::Job<'a> {
+        // A native config's `apply_orientation` is this layer's `Correct`
+        // hint; the native flag is cleared so the transform is applied once.
+        let orientation = if self.inner.apply_orientation {
+            OrientationHint::Correct
+        } else {
+            OrientationHint::Preserve
+        };
+        self.inner.apply_orientation = false;
         WebpDecodeJob {
             config: self,
             stop: None,
             limits: ResourceLimits::none(),
-            orientation: OrientationHint::Preserve,
+            orientation,
             start_frame_index: 0,
         }
     }
@@ -1013,29 +1021,6 @@ fn orient_info(mut info: ImageInfo, hint: OrientationHint) -> ImageInfo {
     info.with_orientation(Orientation::Identity)
 }
 
-/// `src` (`w`×`h` pixels of `bpp` bytes, rows `stride` bytes apart)
-/// transformed by `o`, tightly packed, with its dimensions.
-fn orient_pixels(
-    src: &[u8],
-    w: u32,
-    h: u32,
-    stride: usize,
-    bpp: usize,
-    o: Orientation,
-) -> (Vec<u8>, u32, u32) {
-    let (ow, oh) = o.output_dimensions(w, h);
-    let mut out = alloc::vec![0u8; (ow as usize) * (oh as usize) * bpp];
-    for sy in 0..h {
-        let row = &src[sy as usize * stride..][..w as usize * bpp];
-        for (sx, px) in (0..w).zip(row.chunks_exact(bpp)) {
-            let (dx, dy) = o.forward_map(sx, sy, w, h);
-            let d = (dy as usize * ow as usize + dx as usize) * bpp;
-            out[d..d + bpp].copy_from_slice(px);
-        }
-    }
-    (out, ow, oh)
-}
-
 /// Bake `hint` into decoded stored-order pixels; returns them unchanged for
 /// `Preserve` or an identity transform.
 fn orient_decoded(
@@ -1050,7 +1035,7 @@ fn orient_decoded(
     if resolved.is_identity() {
         return (bytes, w, h);
     }
-    orient_pixels(&bytes, w, h, w as usize * bpp, bpp, resolved)
+    crate::orient::orient_pixels(&bytes, w, h, w as usize * bpp, bpp, resolved)
 }
 
 impl WebpDecodeJob {
@@ -1517,7 +1502,7 @@ impl WebpAnimationFrameDecoder {
             (frame.data, frame.width, frame.height)
         } else {
             let bpp = self.descriptor.bytes_per_pixel();
-            orient_pixels(
+            crate::orient::orient_pixels(
                 &frame.data,
                 frame.width,
                 frame.height,

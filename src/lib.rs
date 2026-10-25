@@ -77,9 +77,10 @@
 //! WebP decoding never rotates or flips: every decode function returns
 //! pixels in stored order. A camera image may carry an EXIF Orientation tag
 //! saying how to display them; [`ImageInfo::orientation`] (and
-//! `AnimationInfo::orientation` with the `animation` feature) reports it. Check it before showing or re-encoding
-//! decoded pixels, or decode through the `zencodec` layer with
-//! `OrientationHint::Correct` to get upright pixels.
+//! `AnimationInfo::orientation` with the `animation` feature) reports it.
+//! Set [`DecoderConfig::apply_orientation`] to get pixels the way they are
+//! meant to be displayed, or decode through the `zencodec` layer with
+//! `OrientationHint::Correct`.
 //!
 //! ## Decoding untrusted input
 //!
@@ -172,6 +173,8 @@ whereat::define_at_crate_info!();
 mod config;
 pub mod error;
 mod exif_orientation;
+#[cfg(feature = "decode")]
+mod orient;
 // Only the metadata (`icc`) paths use all of it.
 mod ffi;
 mod limits;

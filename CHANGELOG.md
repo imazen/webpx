@@ -59,6 +59,12 @@
 
 ### Added
 
+- `DecoderConfig::apply_orientation(bool)`: `Decoder` returns pixels with the
+  file's EXIF orientation applied (after crop, scale and `flip`), width and
+  height swapped for 90°/270°. Default off (stored order). The `_into`,
+  `decode_append` and `decode_yuv` paths reject it; through
+  `zencodec::WebpDecoderConfig::from_native` it becomes
+  `OrientationHint::Correct`. (`tests/native_orientation.rs`)
 - `AnimationEncoder::set_config(EncoderConfig)`: every encoder setting for
   animation frames (it was quality, preset and lossless only).
 - `AnimationEncoder::set_background_color(argb)`: the ANIM background colour

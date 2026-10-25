@@ -868,24 +868,32 @@ impl<'a> Decoder<'a> {
 
     /// Decode to raw RGBA bytes.
     pub fn decode_rgba_raw(self) -> Result<(Vec<u8>, u32, u32)> {
-        if self.config.needs_advanced_api() {
-            self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGBA)
-        } else {
-            // Reaching the simple path means `needs_advanced_api()` is
-            // false, which requires `limits.has_any()` to be false — the
-            // caller explicitly configured `Limits::none()`. Honor that
-            // opt-out by skipping the free functions' default gate.
-            decode_rgba_unlimited(self.data)
-        }
+        let orientation = self.output_orientation();
+        let decoded = {
+            if self.config.needs_advanced_api() {
+                self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGBA)
+            } else {
+                // Reaching the simple path means `needs_advanced_api()` is
+                // false, which requires `limits.has_any()` to be false — the
+                // caller explicitly configured `Limits::none()`. Honor that
+                // opt-out by skipping the free functions' default gate.
+                decode_rgba_unlimited(self.data)
+            }
+        }?;
+        Ok(apply_output_orientation(decoded, 4, orientation))
     }
 
     /// Decode to raw RGB bytes.
     pub fn decode_rgb_raw(self) -> Result<(Vec<u8>, u32, u32)> {
-        if self.config.needs_advanced_api() {
-            self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGB)
-        } else {
-            decode_rgb_unlimited(self.data)
-        }
+        let orientation = self.output_orientation();
+        let decoded = {
+            if self.config.needs_advanced_api() {
+                self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_RGB)
+            } else {
+                decode_rgb_unlimited(self.data)
+            }
+        }?;
+        Ok(apply_output_orientation(decoded, 3, orientation))
     }
 
     /// Decode to BGRA ImgVec.
@@ -933,20 +941,28 @@ impl<'a> Decoder<'a> {
 
     /// Decode to raw BGRA bytes.
     pub fn decode_bgra_raw(self) -> Result<(Vec<u8>, u32, u32)> {
-        if self.config.needs_advanced_api() {
-            self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGRA)
-        } else {
-            decode_bgra_unlimited(self.data)
-        }
+        let orientation = self.output_orientation();
+        let decoded = {
+            if self.config.needs_advanced_api() {
+                self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGRA)
+            } else {
+                decode_bgra_unlimited(self.data)
+            }
+        }?;
+        Ok(apply_output_orientation(decoded, 4, orientation))
     }
 
     /// Decode to raw BGR bytes.
     pub fn decode_bgr_raw(self) -> Result<(Vec<u8>, u32, u32)> {
-        if self.config.needs_advanced_api() {
-            self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGR)
-        } else {
-            decode_bgr_unlimited(self.data)
-        }
+        let orientation = self.output_orientation();
+        let decoded = {
+            if self.config.needs_advanced_api() {
+                self.decode_advanced(libwebp_sys::WEBP_CSP_MODE::MODE_BGR)
+            } else {
+                decode_bgr_unlimited(self.data)
+            }
+        }?;
+        Ok(apply_output_orientation(decoded, 3, orientation))
     }
 
     /// Gate for decode paths that use libwebp's *simple* API
@@ -958,7 +974,27 @@ impl<'a> Decoder<'a> {
     /// `decode_advanced` never run on these paths. `use_threads` is
     /// deliberately not rejected — it is a performance hint with no
     /// effect on output.
+    /// The transform `apply_orientation` adds to the decoded pixels, if any:
+    /// the file's EXIF orientation, after undoing `flip` (libwebp flips the
+    /// output vertically first).
+    fn output_orientation(&self) -> Option<crate::Orientation> {
+        if !self.config.apply_orientation {
+            return None;
+        }
+        let tag = self.info.orientation.unwrap_or_default();
+        Some(if self.config.flip {
+            crate::Orientation::FlipV.then(tag)
+        } else {
+            tag
+        })
+    }
+
     fn check_simple_path_config(&self, method: &str, alternative: &str) -> Result<()> {
+        if self.config.apply_orientation {
+            return Err(at!(Error::InvalidConfig(alloc::format!(
+                "apply_orientation is not supported with {method}; use {alternative} instead"
+            ))));
+        }
         if self.config.use_cropping || self.config.use_scaling {
             return Err(at!(Error::InvalidConfig(alloc::format!(
                 "cropping/scaling not supported with {method}; use {alternative} instead"
@@ -1321,6 +1357,22 @@ impl<'a> Decoder<'a> {
         };
 
         Ok((pixels, width, height))
+    }
+}
+
+/// `decoded` (tightly packed, `bpp` bytes per pixel) transformed by
+/// `orientation`, when there is one to apply.
+fn apply_output_orientation(
+    decoded: (Vec<u8>, u32, u32),
+    bpp: usize,
+    orientation: Option<crate::Orientation>,
+) -> (Vec<u8>, u32, u32) {
+    match orientation {
+        Some(o) if !o.is_identity() => {
+            let (px, w, h) = decoded;
+            crate::orient::orient_pixels(&px, w, h, w as usize * bpp, bpp, o)
+        }
+        _ => decoded,
     }
 }
 

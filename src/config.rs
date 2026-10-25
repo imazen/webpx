@@ -1054,6 +1054,7 @@ pub struct DecoderConfig {
     pub(crate) use_threads: bool,
     pub(crate) flip: bool,
     pub(crate) alpha_dithering: u8,
+    pub(crate) apply_orientation: bool,
     /// Resource limits applied at parse time. See [`crate::Limits`].
     pub(crate) limits: crate::Limits,
 }
@@ -1103,6 +1104,23 @@ impl DecoderConfig {
     #[must_use]
     pub fn use_threads(mut self, enable: bool) -> Self {
         self.use_threads = enable;
+        self
+    }
+
+    /// Return pixels the way the image is meant to be displayed: apply the
+    /// file's EXIF orientation ([`ImageInfo::orientation`](crate::ImageInfo::orientation))
+    /// to the decoded pixels, swapping width and height for 90°/270°
+    /// rotations. Default `false`: pixels in stored order, as libwebp
+    /// returns them.
+    ///
+    /// The transform is applied last, after cropping (whose rectangle is in
+    /// stored coordinates), scaling and [`flip`](Self::flip). The `_into`,
+    /// `decode_append` and `decode_yuv` paths reject it. Through the
+    /// `zencodec` layer it becomes `OrientationHint::Correct`, which also
+    /// rewrites the EXIF tag in the reported metadata.
+    #[must_use]
+    pub fn apply_orientation(mut self, enable: bool) -> Self {
+        self.apply_orientation = enable;
         self
     }
 
