@@ -113,7 +113,7 @@ Larger test files available at `~/work/codec-corpus/image-rs/test-images/webp/`.
   (`EncoderConfig::to_libwebp`, `ffi::picture::import_rgba`,
   `just ubsan-alignment`).
 - libwebp 1.6.0 vs main (1844042d1c, measured 2026-10-25 by building webpx
-  against both, harness in the 2026-10-25 lane report): decode output is
+  against both with `examples/libwebp_diff.rs`): decode output is
   byte-identical on 3199 files x crop/scale/dither/flip/nofancy/anim except
   YUV decode of lossless files (chroma +-5, 0d14d84bdb makes VP8L->YUV use
   the encoder's RGB->YUV import). Encode output shrinks slightly on main

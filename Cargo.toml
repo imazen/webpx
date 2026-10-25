@@ -92,6 +92,10 @@ name = "pixel_api_demo"
 required-features = ["animation", "encode"]
 
 [[example]]
+name = "libwebp_diff"
+required-features = ["decode", "encode", "animation"]
+
+[[example]]
 name = "decode_with_limits"
 required-features = ["decode", "encode", "animation", "icc"]
 
