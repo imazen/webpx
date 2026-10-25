@@ -22,6 +22,9 @@ All are fixes, listed below; these are the ones existing callers can notice.
   `Error::InvalidConfig`; `output_info().native_format` is `RGBA8` for opaque
   files too (what `decoder(.., &[])` returns); decode reports the file's EXIF
   orientation instead of `Identity`. (20dd298, 259b1e0, 69e3796)
+- Lossy crops return exactly the requested region (odd origins were shifted
+  one pixel), and an odd-origin lossy crop combined with scaling is now an
+  error.
 - `zenpixels` is a regular dependency; the `zencodec` feature enables `icc`.
   (4e5e455, f3d5913)
 
@@ -32,6 +35,14 @@ All are fixes, listed below; these are the ones existing callers can notice.
   through to float-to-int casts that are undefined for NaN; on x86 the
   encode succeeded with an arbitrary setting. (libwebp fixed this after
   1.6.0, 6b1fa207c3.) (`tests/soundness.rs::nan_quality_and_target_psnr_are_rejected`)
+- A crop of a lossy image returns exactly the pixels of that region of the
+  full decode. libwebp rounds a lossy crop's origin down to even while keeping
+  its size, so an odd `crop_left`/`crop_top` returned the region shifted one
+  pixel up/left (alpha off by up to 255 on `lossy_alpha.webp`); and its fancy
+  upsampler treats the crop edge as the image edge, which changed colours
+  along it. webpx now decodes the region with a 2-pixel margin and trims it.
+  An odd-origin lossy crop combined with scaling is an error, because the
+  rounding can't be undone after scaling. (`tests/crop_exact.rs`)
 - zencodec `WebpEncodeJob::with_canvas_size` and
   `WebpDecodeJob::with_start_frame_index` were the trait's no-op defaults.
   The canvas size is now the required frame size (a mismatching frame is an
