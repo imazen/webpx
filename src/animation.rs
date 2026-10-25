@@ -370,7 +370,13 @@ impl Drop for AnimationDecoder {
 /// ```
 #[cfg(feature = "encode")]
 pub struct AnimationEncoder {
+    /// Created at the first frame, once the frame config is known (see
+    /// `allow_mixed`); null until then.
     encoder: *mut libwebp_sys::WebPAnimEncoder,
+    options: libwebp_sys::WebPAnimEncoderOptions,
+    /// Whether the caller allowed mixed lossy/lossless frames. libwebp's
+    /// option only takes effect when the first frame is lossy.
+    allow_mixed: bool,
     width: u32,
     height: u32,
     config: EncoderConfig,
@@ -384,9 +390,11 @@ unsafe impl Send for AnimationEncoder {}
 
 #[cfg(feature = "encode")]
 impl AnimationEncoder {
-    /// Create a new animation encoder.
+    /// Create a new animation encoder that loops forever, with libwebp's
+    /// default options: every frame is encoded exactly as its config says
+    /// (lossy, or lossless after [`set_lossless(true)`](Self::set_lossless)).
     pub fn new(width: u32, height: u32) -> Result<Self> {
-        Self::with_options(width, height, true, 0)
+        Self::with_options(width, height, false, 0)
     }
 
     /// Create a new animation encoder with options.
@@ -395,8 +403,14 @@ impl AnimationEncoder {
     ///
     /// * `width` - Canvas width
     /// * `height` - Canvas height
-    /// * `allow_mixed` - Allow mixing lossy and lossless frames
-    /// * `loop_count` - Animation loop count (0 = infinite)
+    /// * `allow_mixed` - Let libwebp encode each lossy frame lossless instead
+    ///   when that is smaller. It never makes a lossless frame lossy: when the
+    ///   first frame is lossless the option is off for the whole animation,
+    ///   and adding a lossless frame after a lossy first frame with
+    ///   `allow_mixed` on is an error, since libwebp would then pick lossy or
+    ///   lossless for it by size.
+    /// * `loop_count` - Animation loop count (0 = infinite), at most 65535
+    ///   (the ANIM chunk's 16-bit field).
     pub fn with_options(
         width: u32,
         height: u32,
@@ -405,6 +419,12 @@ impl AnimationEncoder {
     ) -> Result<Self> {
         if width == 0 || height == 0 || width > 16383 || height > 16383 {
             return Err(at!(Error::InvalidInput("invalid dimensions".into())));
+        }
+        if loop_count > u32::from(u16::MAX) {
+            return Err(at!(Error::InvalidInput(format!(
+                "loop count must be at most {}, got {loop_count}",
+                u16::MAX
+            ))));
         }
 
         let mut options = core::mem::MaybeUninit::<libwebp_sys::WebPAnimEncoderOptions>::zeroed();
@@ -420,25 +440,12 @@ impl AnimationEncoder {
             )));
         }
         let mut options = unsafe { options.assume_init() };
-
-        options.allow_mixed = allow_mixed as i32;
         options.anim_params.loop_count = loop_count as i32;
 
-        let encoder = unsafe {
-            libwebp_sys::WebPAnimEncoderNewInternal(
-                width as i32,
-                height as i32,
-                &options,
-                libwebp_sys::WEBP_MUX_ABI_VERSION as i32,
-            )
-        };
-
-        if encoder.is_null() {
-            return Err(at!(Error::OutOfMemory));
-        }
-
         Ok(Self {
-            encoder,
+            encoder: ptr::null_mut(),
+            options,
+            allow_mixed,
             width,
             height,
             config: EncoderConfig::default(),
@@ -553,6 +560,29 @@ impl AnimationEncoder {
         }
 
         let webp_config = self.config.to_libwebp()?;
+        if self.encoder.is_null() {
+            // `allow_mixed` makes libwebp try both lossy and lossless for
+            // every frame, lossless-configured ones included, so it is only
+            // enabled when the first frame is lossy.
+            self.options.allow_mixed = (self.allow_mixed && !self.config.lossless) as i32;
+            self.encoder = unsafe {
+                libwebp_sys::WebPAnimEncoderNewInternal(
+                    self.width as i32,
+                    self.height as i32,
+                    &self.options,
+                    libwebp_sys::WEBP_MUX_ABI_VERSION as i32,
+                )
+            };
+            if self.encoder.is_null() {
+                return Err(at!(Error::OutOfMemory));
+            }
+        } else if self.options.allow_mixed != 0 && self.config.lossless {
+            return Err(at!(Error::InvalidConfig(
+                "a lossless frame can't follow a lossy first frame when allow_mixed is on: \
+                 libwebp would encode it lossy if that were smaller"
+                    .into(),
+            )));
+        }
 
         // Use webpx's zeroed RAII wrapper, not
         // `libwebp_sys::WebPPicture::new()`: the generated helper starts from
@@ -596,20 +626,28 @@ impl AnimationEncoder {
         };
 
         if ok == 0 {
-            let error_msg = unsafe {
-                let ptr = libwebp_sys::WebPAnimEncoderGetError(self.encoder);
-                if ptr.is_null() {
-                    "unknown error"
-                } else {
-                    core::ffi::CStr::from_ptr(ptr)
-                        .to_str()
-                        .unwrap_or("unknown error")
-                }
-            };
-            return Err(at!(Error::AnimationError(error_msg.into())));
+            return Err(at!(Error::AnimationError(
+                self.last_error("failed to add frame")
+            )));
         }
 
         Ok(())
+    }
+
+    /// libwebp's message for the last failed call, or `fallback`.
+    fn last_error(&self, fallback: &str) -> alloc::string::String {
+        let msg = unsafe {
+            let ptr = libwebp_sys::WebPAnimEncoderGetError(self.encoder);
+            if ptr.is_null() {
+                None
+            } else {
+                core::ffi::CStr::from_ptr(ptr).to_str().ok()
+            }
+        };
+        match msg {
+            Some(m) if !m.is_empty() => m.into(),
+            _ => fallback.into(),
+        }
     }
 
     /// Finish encoding and return the WebP data.
@@ -625,6 +663,9 @@ impl AnimationEncoder {
     ///
     /// * `end_timestamp_ms` - End timestamp (determines duration of last frame)
     pub fn finish(self, end_timestamp_ms: i32) -> Result<Vec<u8>> {
+        if self.encoder.is_null() {
+            return Err(at!(Error::InvalidInput("animation has no frames".into())));
+        }
         // Add NULL frame to signal end
         let ok = unsafe {
             libwebp_sys::WebPAnimEncoderAdd(
@@ -637,7 +678,7 @@ impl AnimationEncoder {
 
         if ok == 0 {
             return Err(at!(Error::AnimationError(
-                "failed to finalize animation".into()
+                self.last_error("failed to finalize animation")
             )));
         }
 
@@ -647,7 +688,7 @@ impl AnimationEncoder {
 
         if ok == 0 {
             return Err(at!(Error::AnimationError(
-                "failed to assemble animation".into()
+                self.last_error("failed to assemble animation")
             )));
         }
 

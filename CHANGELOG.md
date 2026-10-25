@@ -91,6 +91,17 @@
   zencodec-testkit's orientation round-trip now passes.
   (`tests/zencodec_orientation.rs`,
   `tests/zencodec_conformance.rs::orientation_roundtrip`)
+- `AnimationEncoder` lossless means lossless. `new` passed libwebp
+  `allow_mixed = true` (libwebp's default is off), which lets libwebp encode
+  any frame lossy when that is smaller, so `set_lossless(true)` animations
+  decoded with changed pixels. `new` now uses `allow_mixed = false`;
+  `with_options(.., allow_mixed: true, ..)` only applies it when the first
+  frame is lossy, and rejects a later lossless frame instead of letting
+  libwebp pick. The libwebp encoder is now created at the first frame.
+  (`tests/animation_encoder.rs`)
+- `AnimationEncoder::with_options` rejects a loop count above 65535 up front;
+  it failed at `finish` with "failed to assemble animation". `finish` and
+  `add_frame*` errors now carry libwebp's `WebPAnimEncoderGetError` text.
 
 ### Documented
 
