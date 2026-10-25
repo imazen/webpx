@@ -43,6 +43,13 @@ All are fixes, listed below; these are the ones existing callers can notice.
   along it. webpx now decodes the region with a 2-pixel margin and trims it.
   An odd-origin lossy crop combined with scaling is an error, because the
   rounding can't be undone after scaling. (`tests/crop_exact.rs`)
+- RGBA input at a non-4-byte-aligned address or stride no longer reaches
+  libwebp: for ARGB pictures (lossless, animation frames) libwebp 1.6.0 reads
+  RGBA rows through `uint32_t*`, undefined behaviour that UBSan reports at
+  `dsp/lossless.c:465` and that faults on targets without unaligned loads
+  (fixed upstream after 1.6.0, b31469df48). Such input is copied into an
+  aligned buffer first. `just ubsan-alignment` runs the tests under the
+  check. (`tests/soundness.rs::unaligned_rgba_input_encodes_like_aligned`)
 - zencodec `WebpEncodeJob::with_canvas_size` and
   `WebpDecodeJob::with_start_frame_index` were the trait's no-op defaults.
   The canvas size is now the required frame size (a mismatching frame is an

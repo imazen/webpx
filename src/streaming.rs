@@ -580,11 +580,7 @@ impl StreamingEncoder {
         picture.inner_mut().use_argb = 1;
 
         let import_ok = unsafe {
-            libwebp_sys::WebPPictureImportRGBA(
-                picture.as_mut_ptr(),
-                data.as_ptr(),
-                (self.width * 4) as i32,
-            )
+            crate::ffi::picture::import_rgba(picture.as_mut_ptr(), data, self.width as usize * 4)
         };
 
         if import_ok == 0 {

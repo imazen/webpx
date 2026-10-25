@@ -175,3 +175,8 @@ fuzz target="image_info" time="60":
     cp -n fuzz/seeds/* fuzz/corpus/{{target}}/ 2>/dev/null || true
     cd fuzz && cargo +nightly fuzz run {{target}} corpus/{{target}} \
         -- -dict=webp.dict -max_total_time={{time}}
+
+# Run the tests with libwebp's C code built under UBSan's alignment check
+# (catches unaligned pointers handed to libwebp, e.g. RGBA import).
+ubsan-alignment:
+    CFLAGS="-fsanitize=alignment -fno-sanitize-recover=alignment" RUSTFLAGS="-C link-arg=-lubsan" CARGO_TARGET_DIR=target/ubsan cargo test --all-features --tests

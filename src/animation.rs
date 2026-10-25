@@ -607,7 +607,7 @@ impl AnimationEncoder {
         let import_ok = unsafe {
             match layout {
                 PixelLayout::Rgba => {
-                    libwebp_sys::WebPPictureImportRGBA(picture.as_mut_ptr(), data.as_ptr(), stride)
+                    crate::ffi::picture::import_rgba(picture.as_mut_ptr(), data, stride as usize)
                 }
                 PixelLayout::Rgb => {
                     libwebp_sys::WebPPictureImportRGB(picture.as_mut_ptr(), data.as_ptr(), stride)
