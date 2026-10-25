@@ -10,75 +10,76 @@
 
 ### Fixed
 
+- zencodec decode keeps zenpixels' `At` location trace on buffer errors
+  (`map_err_at`) instead of flattening it into a string. (71a9dfa, #17)
 - `AnimationDecoder::decode_all` no longer overwrites the last frame's
   `duration_ms` with the previous frame's duration (or 100 ms for a one-frame
   animation). Every frame's duration is now the difference of libwebp's end
   timestamps, which equals its ANMF duration; 40/0/130 ms decoded as 40/0/0,
-  250 ms as 100 (#18). (`tests/animation_timing.rs`)
+  250 ms as 100 (#18). (`tests/animation_timing.rs`) (ad83d6a)
 - `AnimationDecoder::next_frame` now fills `Frame::duration_ms` (end timestamp
   minus the previous frame's) instead of always returning 0; `reset` restarts
   the timeline. The zencodec `WebpAnimationFrameDecoder::render_next_frame`
   goes through `next_frame`, so its `AnimationFrame::duration_ms` was 0 for
-  every frame too. (`tests/animation_timing.rs::next_frame_durations_match_demux`)
+  every frame too. (`tests/animation_timing.rs::next_frame_durations_match_demux`) (6d9749d)
 - `AnimationDecoder::next_frame` now enforces `Limits::max_animation_ms`
   (default 5 min). Only `decode_all` checked it, so frame-by-frame decoding,
   including the zencodec `render_next_frame` path, decoded past the cap.
   The deprecated `compat::webp_animation::DecoderIterator` maps errors to the
   end of iteration, so it now stops at the cap; `Decoder::decode` returns
-  `DecodeFailed`.
+  `DecodeFailed`. (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`) (13208d6)
 - `AnimationDecoder` durations stay exact once libwebp's `int` end timestamp
   wraps (total animation past `i32::MAX` ms, ~24.8 days, reachable only with
   `Limits::none()`): the frame crossing the wrap reported 0 ms from a
   saturating subtraction. Durations are now the wrapping difference, which is
   the 24-bit ANMF duration, and `max_animation_ms` is checked against a `u64`
   running total. `Frame::timestamp_ms` is still libwebp's value.
-  (`tests/animation_timing.rs::durations_survive_timestamp_wrap`)
+  (`tests/animation_timing.rs::durations_survive_timestamp_wrap`) (b23a11b)
 - zencodec `WebpAnimationFrameEncoder` accumulates timestamps with wrapping
   addition. Saturating at `u32::MAX` shortened the frame that crossed it
   (257 frames of 2^24 - 1 ms: last frame stored as 255 ms); libwebp takes
   the wrapping difference of successive timestamps.
-  (`tests/zencodec_integration.rs::animation_durations_exact_past_u32_total`)
+  (`tests/zencodec_integration.rs::animation_durations_exact_past_u32_total`) (be122ff)
 - zencodec decoding puts the file's ICC/EXIF/XMP into `ImageInfo` (`probe`,
   `Decode::decode`, the streaming decoder and the animation decoder). The
   decode capabilities advertised all three but no path attached them. The
   `zencodec` feature now enables `icc` (no new dependencies), which the
   advertised encode/decode metadata support already needed.
-  (`tests/zencodec_integration.rs::decode_extracts_metadata_into_image_info`)
+  (`tests/zencodec_integration.rs::decode_extracts_metadata_into_image_info`) (f3d5913)
 - zencodec `Decode::decode` builds its `ImageInfo` from the file (as `probe`
   and zenwebp do), so `has_alpha` is the file's flag. It used the output
   layout: an opaque image decoded to RGBA reported alpha, a translucent one
   decoded to RGB reported none.
-  (`tests/zencodec_integration.rs::still_decode_alpha_matches_probe`)
-  (`tests/animation_timing.rs::next_frame_enforces_max_animation_ms`)
+  (`tests/zencodec_integration.rs::still_decode_alpha_matches_probe`) (1aebdd9)
 - zencodec `WebpAnimationFrameDecoder::render_next_frame` numbers frames
   0, 1, 2, … in `AnimationFrame::frame_index`; it passed 0 for every frame.
-  (`tests/zencodec_integration.rs::animation_frames_report_index_and_duration`)
+  (`tests/zencodec_integration.rs::animation_frames_report_index_and_duration`) (d508b6a)
 - zencodec `WebpEncodeJob` implements `with_loop_count`. It fell through to
   the trait's no-op default, so every zencodec-encoded animation stored loop
   count 0 (forever) whatever the caller asked for. Counts above 65535 (the
   ANIM chunk's 16-bit field) are rejected by `animation_frame_encoder`.
-  (`tests/zencodec_integration.rs::animation_loop_count_*`)
+  (`tests/zencodec_integration.rs::animation_loop_count_*`) (5f9d055)
 - zencodec encode and decode capabilities report `animation()` when the
   `animation` feature is enabled; both reported false although the animation
-  encoder and decoder work. (`tests/zencodec_integration.rs::capabilities_advertise_animation`)
+  encoder and decoder work. (`tests/zencodec_integration.rs::capabilities_advertise_animation`) (634c217)
 - zencodec `WebpAnimationFrameDecoder::info()` reports the file's VP8X alpha
   flag in `has_alpha`, matching `probe`; it hard-coded `true`, so opaque
   animations disagreed between the two paths.
-  (`tests/zencodec_integration.rs::animation_alpha_matches_probe`)
+  (`tests/zencodec_integration.rs::animation_alpha_matches_probe`) (43c1df9)
 - zencodec animation encoding with a lossless config gives lossless frames.
   The encoder always set libwebp's `allow_mixed`, which encodes each frame
   lossy or lossless, whichever is smaller, so `WebpEncoderConfig::lossless()`
   animations decoded with changed pixels. `allow_mixed` is now set only for
   lossy configs.
-  (`tests/zencodec_conformance.rs::lossless_animation_cross_path_equivalence`)
+  (`tests/zencodec_conformance.rs::lossless_animation_cross_path_equivalence`) (94a2af4)
 - zencodec decode capabilities report `streaming()` when the `streaming`
   feature is enabled; it reported false although `streaming_decoder` works.
-  (`tests/zencodec_conformance.rs::decode_capabilities_advertise_streaming`)
+  (`tests/zencodec_conformance.rs::decode_capabilities_advertise_streaming`) (f0a4950)
 - zencodec operations webpx doesn't support (row-level and pull encode, and
   animation or streaming when those features are off) fail with
   `Error::Unsupported`, which `CodecErrorExt::unsupported_operation()` finds;
   they returned `Error::InvalidConfig(String)`.
-  (`tests/zencodec_conformance.rs::capability_honesty`)
+  (`tests/zencodec_conformance.rs::capability_honesty`) (20dd298)
 - zencodec orientation. Decode (probe, `decode`, streaming, push-sink,
   animation) reports the file's EXIF orientation in `ImageInfo::orientation`
   (it was always `Identity`) and honors `DecodeJob::with_orientation`: under
@@ -90,7 +91,7 @@
   dropped), adding a blob when needed and keeping the caller's other tags.
   zencodec-testkit's orientation round-trip now passes.
   (`tests/zencodec_orientation.rs`,
-  `tests/zencodec_conformance.rs::orientation_roundtrip`)
+  `tests/zencodec_conformance.rs::orientation_roundtrip`) (69e3796)
 - `AnimationEncoder` lossless means lossless. `new` passed libwebp
   `allow_mixed = true` (libwebp's default is off), which lets libwebp encode
   any frame lossy when that is smaller, so `set_lossless(true)` animations
@@ -98,10 +99,10 @@
   `with_options(.., allow_mixed: true, ..)` only applies it when the first
   frame is lossy, and rejects a later lossless frame instead of letting
   libwebp pick. The libwebp encoder is now created at the first frame.
-  (`tests/animation_encoder.rs`)
+  (`tests/animation_encoder.rs`) (c3a18ed)
 - `AnimationEncoder::with_options` rejects a loop count above 65535 up front;
   it failed at `finish` with "failed to assemble animation". `finish` and
-  `add_frame*` errors now carry libwebp's `WebPAnimEncoderGetError` text.
+  `add_frame*` errors now carry libwebp's `WebPAnimEncoderGetError` text. (c3a18ed)
 - zencodec decode geometry matches the decoded buffer.
   `output_info` ignored the native crop/scale options (it reported the file
   size) and reported `RGB8` for opaque files although `decoder(.., &[])`
@@ -109,7 +110,7 @@
   `push_decoder` returned `output_info`'s format instead of the format it
   wrote to the sink. With the native `flip` option, the reported orientation
   and the `Correct` bake now include the vertical flip libwebp applied.
-  `output_info` sets `crop_applied`. (`tests/zencodec_decode_geometry.rs`)
+  `output_info` sets `crop_applied`. (`tests/zencodec_decode_geometry.rs`) (259b1e0)
 - One-frame animations stay animations. libwebp writes an animation that is
   down to one frame (one frame added, or identical frames merged) as a still
   image in `AnimationEncoder::finish`, and `embed_*`/`remove_*` on a
@@ -118,10 +119,11 @@
   one-frame animation (`src/riff.rs`). (`tests/animation_timing.rs::
   {single_frame_animation_stays_animated, single_lossy_frame_stays_animated,
   metadata_edits_keep_one_frame_animations}`,
-  `tests/zencodec_integration.rs::one_frame_animation_with_metadata_stays_animated`)
+  `tests/zencodec_integration.rs::one_frame_animation_with_metadata_stays_animated`) (2127b62)
 
 ### Added
 
+- `SECURITY.md`: supported versions, private reporting, scope. (7bc108b)
 - `ImageInfo::orientation` and `AnimationInfo::orientation`
   (`Option<webpx::Orientation>`): the EXIF Orientation tag of the file's
   `EXIF` chunk, read with the same rules as zencodec's EXIF parser
@@ -129,12 +131,12 @@
   stored-order pixels; the crate docs gained an Orientation section.
   `webpx::Orientation` re-exports `zenpixels::Orientation`, as zenwebp uses,
   so `zenpixels` (no_std, no new transitive dependencies beyond `bytemuck`)
-  is now a regular dependency. (`tests/orientation.rs`)
+  is now a regular dependency. (`tests/orientation.rs`) (4e5e455)
 - `Error::Unsupported(zencodec::UnsupportedOperation)` (with the `zencodec`
   feature) and `impl zencodec::CategorizedError for Error`: every webpx error
   maps to a zencodec `ErrorCategory`, with codec name `"webpx"`.
   `Error::source()` now exposes the `LimitExceeded` / `UnsupportedOperation`
-  cause. (`tests/zencodec_conformance.rs::errors_are_categorized`)
+  cause. (`tests/zencodec_conformance.rs::errors_are_categorized`) (20dd298)
 - `zencodec` integration upgraded to **0.1.25** (from 0.1.13) and now implements
   native `Fidelity`: `WebpEncoderConfig::{with_fidelity, resolved_target_fidelity}`
   honor `Lossless` (VP8L), a codec-specific quality dial (VP8), and map
@@ -142,7 +144,7 @@
   inverse tables** (zenmetrics omni fleet sweep, 2026-06-23 — replacing the
   initial linear `100−12·d` guess) — mirroring `zenwebp`. The
   newer 0.1.25 trait methods (resource estimation, color-emit / metadata policy)
-  use the trait defaults. (`tests/zencodec_integration.rs::fidelity_targets_roundtrip`)
+  use the trait defaults. (`tests/zencodec_integration.rs::fidelity_targets_roundtrip`) (e73d5c3, 5a05279)
 - `examples/heaptrack_decode.rs`: a reusable heaptrack/valgrind harness that
   decodes a WebP from bytes via `webpx::decode_rgba(..)` in a loop, for profiling
   heap-allocation behaviour. Defaults to the committed `tests/fixtures/lossy_rgb.webp`
@@ -154,8 +156,8 @@
   allocs for 100×100 vs 57 for 1024×1024 — libwebp allocates a handful of large
   O(image) buffers in `WebPAllocateDecBuffer` / `VP8InitFrame`, not per-macroblock),
   peak heap 156.7 KiB for the 100×100 fixture (O(image)), and the leaked count is
-  pinned at 1 process static across 2/8/16 iterations (no per-decode leak, no churn).
-- `docs(readme)`: rewrote the README — decode/encode quick-start, server-safety section (`Limits` + cooperative cancellation), key-types and features tables, factual on-its-own-terms framing, `?style=flat-square` badges, and `readme = "README.md"` in `Cargo.toml`. Fixed stale install versions (now `0.4.0`) and MSRV (`1.89`).
+  pinned at 1 process static across 2/8/16 iterations (no per-decode leak, no churn). (b5c1fc5)
+- `docs(readme)`: rewrote the README — decode/encode quick-start, server-safety section (`Limits` + cooperative cancellation), key-types and features tables, factual on-its-own-terms framing, `?style=flat-square` badges, and `readme = "README.md"` in `Cargo.toml`. Fixed stale install versions (now `0.4.0`) and MSRV (`1.89`). (b37818b)
 
 ## [0.4.0] - 2026-06-10
 
